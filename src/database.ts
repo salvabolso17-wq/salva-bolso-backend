@@ -2,6 +2,8 @@ import pool from "./db/client";
 
 export async function createTables() {
   try {
+    console.log("Tentando conectar no banco...");
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -15,6 +17,7 @@ export async function createTables() {
 
     console.log("Tabela users criada/verificada ✅");
   } catch (error) {
-    console.error("Erro ao criar tabelas ❌", error);
+    console.error("ERRO REAL DO BANCO:");
+    console.error(error);
   }
 }
