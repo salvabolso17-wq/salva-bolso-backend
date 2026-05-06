@@ -1,14 +1,11 @@
 import { Pool } from "pg";
-import dotenv from "dotenv";
-
-dotenv.config();
 
 const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
+  host: "salva-bolso_postgres-salvabolso",
+  port: 5432,
+  database: "salvabolso",
+  user: "admin",
+  password: "adminacess@007",
 });
 
 export default pool;
