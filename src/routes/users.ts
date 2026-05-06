@@ -29,4 +29,23 @@ router.post("/", async (req, res) => {
   }
 });
 
+router.get("/", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM users
+      ORDER BY id DESC
+    `);
+
+    res.json({
+      users: result.rows,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: "Erro ao buscar usuários ❌",
+    });
+  }
+});
+
 export default router;
