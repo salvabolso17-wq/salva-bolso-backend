@@ -1,0 +1,67 @@
+# Roadmap do Salva Bolso
+
+## Legenda
+
+- [x] Concluído
+- [ ] Pendente
+
+---
+
+## Fase 1 — Fundação (Backend)
+
+- [x] Configuração do projeto Node.js + TypeScript
+- [x] Configuração do Express
+- [x] Conexão com PostgreSQL via pool
+- [x] Criação automática das tabelas (`users` e `transactions`)
+- [x] Rota `POST /users` — criar usuário
+- [x] Rota `GET /users` — listar usuários
+- [x] Deploy via Docker no EasyPanel
+- [x] Conexão da VPS ao GitHub via SSH
+
+---
+
+## Fase 2 — CRUD Completo
+
+- [ ] `GET /users/:id` — buscar usuário por ID
+- [ ] `PUT /users/:id` — atualizar dados do usuário (nome, renda, renda_extra)
+- [ ] `POST /transactions` — registrar nova transação (entrada ou saída)
+- [ ] `GET /transactions/:userId` — listar transações do usuário
+- [ ] `DELETE /transactions/:id` — remover transação
+- [ ] Validação dos campos obrigatórios nas rotas
+
+---
+
+## Fase 3 — Lógica Financeira
+
+- [ ] `GET /transactions/:userId/resumo` — retornar total de entradas, saídas e saldo
+- [ ] Filtro de transações por período (mês/ano)
+- [ ] Filtro de transações por categoria
+- [ ] Cálculo de saldo disponível (renda + renda_extra - saídas do mês)
+
+---
+
+## Fase 4 — Autenticação
+
+- [ ] Autenticação via telefone (OTP por SMS ou código simples)
+- [ ] Geração e validação de JWT
+- [ ] Middleware de autenticação nas rotas protegidas
+- [ ] Rota `POST /auth/login`
+
+---
+
+## Fase 5 — Relatórios e Melhorias
+
+- [ ] Resumo mensal agrupado por categoria
+- [ ] Endpoint de exportação de dados (CSV ou JSON)
+- [ ] Paginação nas listagens
+- [ ] Logs estruturados de erros
+
+---
+
+## Fase 6 — Frontend / Mobile
+
+- [ ] Definir tecnologia do frontend (React Native / Flutter / etc.)
+- [ ] Tela de cadastro/login
+- [ ] Tela de dashboard (saldo + últimas transações)
+- [ ] Tela de nova transação
+- [ ] Tela de histórico com filtros
