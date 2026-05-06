@@ -1,16 +1,22 @@
 import express from "express";
 import cors from "cors";
-import { db } from "./db/client";
+import dotenv from "dotenv";
+import pool from "./db/client";
+import { createTables } from "./database";
+
+dotenv.config();
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+createTables();
+
 app.get("/", async (req, res) => {
   try {
-    const result = await db.query("SELECT NOW()");
-    
+    const result = await pool.query("SELECT NOW()");
+
     res.json({
       message: "Salva Bolso API online 🚀",
       database: "Conectado com sucesso ✅",
@@ -25,7 +31,7 @@ app.get("/", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 80;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor rodando na porta ${PORT}`);
