@@ -1,6 +1,7 @@
-import { Router } from "express";
+import { Router, Request } from "express";
 import pool from "../db/client";
-import { authMiddleware } from "../middleware/auth";
+import { authMiddleware, AuthRequest } from "../middleware/auth";
+import { parseTransaction } from "../utils/parseTransaction";
 
 const router = Router();
 
@@ -31,6 +32,43 @@ router.post("/", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Erro ao criar transação" });
+  }
+});
+
+router.post("/quick-add", async (req: Request, res) => {
+  try {
+    const { texto } = req.body;
+    const userId = (req as AuthRequest).userId;
+
+    if (!texto || typeof texto !== "string") {
+      res.status(400).json({ error: "Campo obrigatório: texto" });
+      return;
+    }
+
+    const parsed = parseTransaction(texto);
+
+    if (!parsed) {
+      res.status(400).json({ error: "Não foi possível interpretar o texto. Tente: '120 mercado'" });
+      return;
+    }
+
+    const result = await pool.query(
+      `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [userId, parsed.tipo, parsed.valor, parsed.categoria, parsed.descricao]
+    );
+
+    res.status(201).json({
+      message: "Transação registrada",
+      data: {
+        transacao: result.rows[0],
+        interpretado: parsed,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao registrar transação" });
   }
 });
 

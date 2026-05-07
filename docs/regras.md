@@ -48,6 +48,12 @@
 
 ### Rotas Protegidas (requerem Bearer JWT)
 
+| Método | Rota                        | Descrição                                        |
+|--------|-----------------------------|--------------------------------------------------|
+| POST   | /transactions/quick-add     | Cria transação a partir de texto simples (JWT)   |
+
+
+
 | Método | Rota                          | Descrição                                             |
 |--------|-------------------------------|-------------------------------------------------------|
 | GET    | /users/:id                    | Busca usuário por ID                                  |

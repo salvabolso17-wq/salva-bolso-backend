@@ -23,6 +23,8 @@ salva-bolso-backend/
 │   │   └── client.ts          # Configuração do pool PostgreSQL
 │   ├── middleware/
 │   │   └── auth.ts            # Middleware JWT
+│   ├── utils/
+│   │   └── parseTransaction.ts # Parser de texto para transação
 │   └── routes/
 │       ├── auth.ts            # POST /auth/register, POST /auth/login
 │       ├── users.ts           # Rotas de usuários
