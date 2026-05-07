@@ -9,6 +9,7 @@ import authRoutes from "./routes/auth";
 import financialGoalsRoutes from "./routes/financial-goals";
 import reportsRoutes from "./routes/reports";
 import webhooksRoutes from "./routes/webhooks";
+import insightsRoutes from "./routes/insights";
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use("/transactions", transactionsRoutes);
 app.use("/financial-goals", financialGoalsRoutes);
 app.use("/reports", reportsRoutes);
 app.use("/webhooks", webhooksRoutes);
+app.use("/insights", insightsRoutes);
 
 app.get("/", async (req, res) => {
   try {

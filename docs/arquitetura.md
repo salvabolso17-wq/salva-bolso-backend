@@ -28,6 +28,7 @@ salva-bolso-backend/
 │   ├── utils/
 │   │   └── parseTransaction.ts # Parser de texto para transação
 │   ├── services/
+│   │   ├── insightService.ts   # Análise comportamental, score e insights automáticos
 │   │   ├── reportService.ts    # Lógica reutilizável de relatórios
 │   │   ├── whatsappService.ts  # Busca usuário por telefone e processa mensagem
 │   │   └── whatsapp/           # Abstração de envio WhatsApp
@@ -43,6 +44,7 @@ salva-bolso-backend/
 │       ├── users.ts           # Rotas de usuários
 │       ├── transactions.ts    # Rotas de transações (protegidas)
 │       ├── financial-goals.ts # CRUD de metas financeiras (protegido)
+│       ├── insights.ts        # GET /insights/:userId (protegido)
 │       ├── reports.ts         # GET /reports/:userId/monthly|weekly (protegido)
 │       └── webhooks.ts        # GET|POST /webhooks/whatsapp (público)
 ├── dist/                      # Código compilado (gerado pelo tsc)
