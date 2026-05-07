@@ -17,19 +17,21 @@ export class EvolutionProvider implements IWhatsAppProvider {
       return { success: false, provider: this.name, error: "WHATSAPP_EVOLUTION_URL e WHATSAPP_EVOLUTION_KEY não configurados" };
     }
 
-    // Implementação real: descomentar quando configurar as env vars
-    // const response = await fetch(this.baseUrl, {
-    //   method: "POST",
-    //   headers: {
-    //     apikey: process.env.WHATSAPP_EVOLUTION_KEY!,
-    //     "Content-Type": "application/json",
-    //   },
-    //   body: JSON.stringify({ number: to, text }),
-    // });
-    // const data = await response.json() as { key?: { id: string } };
-    // return { success: response.ok, messageId: data.key?.id, provider: this.name };
-
-    return { success: false, provider: this.name, error: "EvolutionProvider não implementado — configure as variáveis e descomente o código" };
+    try {
+      const response = await fetch(this.baseUrl, {
+        method: "POST",
+        headers: {
+          apikey: process.env.WHATSAPP_EVOLUTION_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ number: to, text }),
+      });
+      const data = await response.json() as { key?: { id: string }; error?: string };
+      return { success: response.ok, messageId: data.key?.id, provider: this.name };
+    } catch (error) {
+      console.error("[EvolutionProvider] sendText error:", error);
+      return { success: false, provider: this.name, error: "Falha ao enviar mensagem via Evolution API" };
+    }
   }
 
   async sendTemplate({ to, templateName }: SendTemplateParams): Promise<SendResult> {
