@@ -63,6 +63,9 @@ Se não definida, usa `mock` por padrão.
 3. Descomente o bloco `// Implementação real` dentro dos métodos
 4. Altere `WHATSAPP_PROVIDER` para o provider desejado e faça redeploy
 
+> Para guia completo de instalação da Evolution API no EasyPanel,
+> consulte [docs/evolution-api.md](./evolution-api.md).
+
 ## Fluxo de uma Mensagem
 
 ```

@@ -93,6 +93,15 @@ salva-bolso-backend/
 | descricao  | TEXT           | Descrição livre                        |
 | criado_em  | TIMESTAMP      | Data da transação                      |
 
+## Documentação Relacionada
+
+| Arquivo | Conteúdo |
+|---------|----------|
+| `docs/evolution-api.md` | Instalação da Evolution API no EasyPanel, criação de instância, configuração de webhook |
+| `docs/whatsapp-integration.md` | Arquitetura da abstração de providers, env vars e como ativar um provider |
+
+---
+
 ## Infraestrutura (EasyPanel)
 
 - A aplicação roda em container Docker gerenciado pelo **EasyPanel**

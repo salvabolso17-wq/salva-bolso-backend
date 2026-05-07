@@ -74,6 +74,8 @@
 - [x] Busca de usuário por telefone (normalização de número)
 - [x] Abstração `IWhatsAppProvider` com MockProvider, MetaProvider, EvolutionProvider, Dialog360Provider
 - [x] Envio de confirmação automático após salvar transação via webhook
+- [x] Guia completo de instalação da Evolution API no EasyPanel (docs/evolution-api.md)
+- [ ] Ativar EvolutionProvider (descomente o código + configure as env vars)
 - [ ] Onboarding via WhatsApp (cadastro pelo chat)
 
 ---
