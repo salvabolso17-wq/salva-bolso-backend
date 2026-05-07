@@ -52,6 +52,8 @@
 ## Fase 5 — Relatórios e Melhorias
 
 - [x] `POST /transactions/quick-add` — registro por texto simples com categorização automática
+- [x] CRUD `/financial-goals` — metas mensais por categoria com progresso e alertas
+- [x] `GET /financial-goals/:userId/resumo` — percentual utilizado, status e alertas
 - [ ] Resumo mensal agrupado por categoria
 - [ ] Endpoint de exportação de dados (CSV ou JSON)
 - [ ] Paginação nas listagens

@@ -28,7 +28,8 @@ salva-bolso-backend/
 │   └── routes/
 │       ├── auth.ts            # POST /auth/register, POST /auth/login
 │       ├── users.ts           # Rotas de usuários
-│       └── transactions.ts    # Rotas de transações (protegidas)
+│       ├── transactions.ts    # Rotas de transações (protegidas)
+│       └── financial-goals.ts # CRUD de metas financeiras (protegido)
 ├── dist/                      # Código compilado (gerado pelo tsc)
 ├── docs/                      # Documentação do projeto
 ├── Dockerfile
@@ -49,6 +50,19 @@ salva-bolso-backend/
 | renda       | NUMERIC(10,2)  | Renda mensal principal           |
 | renda_extra | NUMERIC(10,2)  | Renda extra mensal               |
 | criado_em   | TIMESTAMP      | Data de criação                  |
+
+### Tabela: `financial_goals`
+
+| Coluna          | Tipo           | Descrição                                    |
+|-----------------|----------------|----------------------------------------------|
+| id              | SERIAL PK      | Identificador único                          |
+| user_id         | INTEGER FK     | Referência ao usuário (CASCADE DELETE)       |
+| categoria       | VARCHAR(100)   | Categoria da meta (ex: Alimentação)          |
+| valor_meta      | NUMERIC(10,2)  | Valor limite mensal                          |
+| mes_referencia  | DATE           | Primeiro dia do mês (ex: 2026-05-01)         |
+| criado_em       | TIMESTAMP      | Data de criação                              |
+
+> Constraint UNIQUE em (user_id, categoria, mes_referencia)
 
 ### Tabela: `transactions`
 

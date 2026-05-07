@@ -6,6 +6,7 @@ import { createTables } from "./database";
 import usersRoutes from "./routes/users";
 import transactionsRoutes from "./routes/transactions";
 import authRoutes from "./routes/auth";
+import financialGoalsRoutes from "./routes/financial-goals";
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(express.json());
 app.use("/auth", authRoutes);
 app.use("/users", usersRoutes);
 app.use("/transactions", transactionsRoutes);
+app.use("/financial-goals", financialGoalsRoutes);
 
 app.get("/", async (req, res) => {
   try {

@@ -31,6 +31,18 @@ export async function createTables() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS senha VARCHAR(255);
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS financial_goals (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        categoria VARCHAR(100) NOT NULL,
+        valor_meta NUMERIC(10,2) NOT NULL,
+        mes_referencia DATE NOT NULL,
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, categoria, mes_referencia)
+      );
+    `);
+
     console.log("Tabelas criadas/verificadas ✅");
   } catch (error) {
     console.error("ERRO REAL DO BANCO:");

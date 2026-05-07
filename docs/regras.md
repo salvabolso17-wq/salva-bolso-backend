@@ -48,9 +48,14 @@
 
 ### Rotas Protegidas (requerem Bearer JWT)
 
-| Método | Rota                        | Descrição                                        |
-|--------|-----------------------------|--------------------------------------------------|
-| POST   | /transactions/quick-add     | Cria transação a partir de texto simples (JWT)   |
+| Método | Rota                              | Descrição                                        |
+|--------|-----------------------------------|--------------------------------------------------|
+| POST   | /transactions/quick-add           | Cria transação a partir de texto simples         |
+| POST   | /financial-goals                  | Cria meta mensal por categoria                   |
+| GET    | /financial-goals/:userId          | Lista metas do usuário                           |
+| GET    | /financial-goals/:userId/resumo   | Resumo de progresso com status e alertas         |
+| PUT    | /financial-goals/:id              | Atualiza meta                                    |
+| DELETE | /financial-goals/:id              | Remove meta                                      |
 
 
 
