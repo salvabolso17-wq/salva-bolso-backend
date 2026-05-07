@@ -54,6 +54,8 @@
 - [x] `POST /transactions/quick-add` — registro por texto simples com categorização automática
 - [x] CRUD `/financial-goals` — metas mensais por categoria com progresso e alertas
 - [x] `GET /financial-goals/:userId/resumo` — percentual utilizado, status e alertas
+- [x] `GET /reports/:userId/monthly` — relatório mensal com comparativo, categoria top e graph_data
+- [x] `GET /reports/:userId/weekly` — relatório semanal com mesma estrutura
 - [ ] Resumo mensal agrupado por categoria
 - [ ] Endpoint de exportação de dados (CSV ou JSON)
 - [ ] Paginação nas listagens

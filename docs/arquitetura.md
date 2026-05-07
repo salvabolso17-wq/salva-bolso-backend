@@ -25,11 +25,14 @@ salva-bolso-backend/
 │   │   └── auth.ts            # Middleware JWT
 │   ├── utils/
 │   │   └── parseTransaction.ts # Parser de texto para transação
+│   ├── services/
+│   │   └── reportService.ts    # Lógica reutilizável de relatórios
 │   └── routes/
 │       ├── auth.ts            # POST /auth/register, POST /auth/login
 │       ├── users.ts           # Rotas de usuários
 │       ├── transactions.ts    # Rotas de transações (protegidas)
-│       └── financial-goals.ts # CRUD de metas financeiras (protegido)
+│       ├── financial-goals.ts # CRUD de metas financeiras (protegido)
+│       └── reports.ts         # GET /reports/:userId/monthly|weekly (protegido)
 ├── dist/                      # Código compilado (gerado pelo tsc)
 ├── docs/                      # Documentação do projeto
 ├── Dockerfile

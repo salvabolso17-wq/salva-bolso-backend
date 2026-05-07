@@ -56,6 +56,8 @@
 | GET    | /financial-goals/:userId/resumo   | Resumo de progresso com status e alertas         |
 | PUT    | /financial-goals/:id              | Atualiza meta                                    |
 | DELETE | /financial-goals/:id              | Remove meta                                      |
+| GET    | /reports/:userId/monthly          | Relatório mensal com comparativo e gráfico       |
+| GET    | /reports/:userId/weekly           | Relatório semanal com comparativo e gráfico      |
 
 
 
