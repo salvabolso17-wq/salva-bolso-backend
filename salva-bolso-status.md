@@ -167,6 +167,27 @@ curl -X PUT http://localhost:8080/webhook/set/<INSTANCIA> \
 - [x] dnsrr aplicado — webhook estável sem IP fixo
 - [x] Fluxo completo funcionando — resposta instantânea (< 1s) confirmada em 2026-05-07
 - [x] Logs estruturados — commit 9b211b3
+- [x] Anti-duplicidade de mensagens — commit d6c5f25
+
+## Anti-Duplicidade (commit d6c5f25)
+
+**Problema:** Evolution API enviava o mesmo evento múltiplas vezes (ex: "50 Uber" gerou transações id=5, 6, 7).
+
+**Solução:** Tabela `processed_messages` no PostgreSQL com `message_id` como PRIMARY KEY.
+
+```sql
+CREATE TABLE processed_messages (
+  message_id   TEXT        PRIMARY KEY,
+  telefone     TEXT        NOT NULL,
+  processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Mecanismo:** `INSERT ... ON CONFLICT (message_id) DO NOTHING` — atômico, sem race condition.
+- 1ª ocorrência: insere e processa normalmente
+- Ocorrências seguintes: INSERT não afeta linhas → `[DUPLICATE]` logado → descartado
+
+**Comportamento em falha:** Se o check de dedup falhar (ex: banco indisponível), o sistema processa normalmente (fail-open) para não perder transações legítimas.
 
 ## Logs Estruturados (commit 9b211b3)
 

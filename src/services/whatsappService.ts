@@ -53,7 +53,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         [message.messageId, message.telefone]
       );
 
-      if ((dedup.rowCount ?? 0) === 0) {
+      if (dedup.rowCount === 0) {
         log.duplicate("messageId já processado, descartando", { messageId: message.messageId });
         return { success: false, erro: "Mensagem duplicada" };
       }
