@@ -53,16 +53,36 @@ router.get("/:userId/resumo", async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const result = await pool.query(
-      `SELECT
-         COALESCE(SUM(CASE WHEN tipo = 'entrada' THEN valor ELSE 0 END), 0) AS total_entradas,
-         COALESCE(SUM(CASE WHEN tipo = 'saida'   THEN valor ELSE 0 END), 0) AS total_saidas
-       FROM transactions
-       WHERE user_id = $1`,
+    const userResult = await pool.query(
+      "SELECT id FROM users WHERE id = $1",
       [userId]
     );
 
-    const { total_entradas, total_saidas } = result.rows[0];
+    if (userResult.rows.length === 0) {
+      res.status(404).json({ error: "Usuário não encontrado" });
+      return;
+    }
+
+    const [totaisResult, ultimasResult] = await Promise.all([
+      pool.query(
+        `SELECT
+           COALESCE(SUM(CASE WHEN tipo = 'entrada' THEN valor ELSE 0 END), 0) AS total_entradas,
+           COALESCE(SUM(CASE WHEN tipo = 'saida'   THEN valor ELSE 0 END), 0) AS total_saidas,
+           COUNT(*) AS quantidade_transacoes
+         FROM transactions
+         WHERE user_id = $1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT * FROM transactions
+         WHERE user_id = $1
+         ORDER BY criado_em DESC
+         LIMIT 5`,
+        [userId]
+      ),
+    ]);
+
+    const { total_entradas, total_saidas, quantidade_transacoes } = totaisResult.rows[0];
     const saldo = Number(total_entradas) - Number(total_saidas);
 
     res.json({
@@ -71,6 +91,8 @@ router.get("/:userId/resumo", async (req, res) => {
         total_entradas: Number(total_entradas),
         total_saidas: Number(total_saidas),
         saldo,
+        quantidade_transacoes: Number(quantidade_transacoes),
+        ultimas_transacoes: ultimasResult.rows,
       },
     });
   } catch (error) {

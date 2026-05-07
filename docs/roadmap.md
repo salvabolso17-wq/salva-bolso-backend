@@ -33,7 +33,7 @@
 
 ## Fase 3 — Lógica Financeira
 
-- [ ] `GET /transactions/:userId/resumo` — retornar total de entradas, saídas e saldo
+- [x] `GET /transactions/:userId/resumo` — total_entradas, total_saidas, saldo, quantidade_transacoes, ultimas_transacoes
 - [ ] Filtro de transações por período (mês/ano)
 - [ ] Filtro de transações por categoria
 - [ ] Cálculo de saldo disponível (renda + renda_extra - saídas do mês)

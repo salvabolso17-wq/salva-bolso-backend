@@ -53,7 +53,7 @@
 | POST   | /transactions               | Cria nova transação              |
 | GET    | /transactions/:userId       | Lista transações do usuário      |
 | DELETE | /transactions/:id           | Remove uma transação             |
-| GET    | /transactions/:userId/resumo| Resumo financeiro do usuário     |
+| GET    | /transactions/:userId/resumo| Resumo financeiro (entradas, saídas, saldo, qtd, últimas 5) |
 
 ---
 
