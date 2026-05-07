@@ -23,16 +23,20 @@ salva-bolso-backend/
 │   │   └── client.ts          # Configuração do pool PostgreSQL
 │   ├── middleware/
 │   │   └── auth.ts            # Middleware JWT
+│   ├── adapters/
+│   │   └── whatsappAdapters.ts # Normaliza payloads Meta / Evolution / 360dialog
 │   ├── utils/
 │   │   └── parseTransaction.ts # Parser de texto para transação
 │   ├── services/
-│   │   └── reportService.ts    # Lógica reutilizável de relatórios
+│   │   ├── reportService.ts    # Lógica reutilizável de relatórios
+│   │   └── whatsappService.ts  # Busca usuário por telefone e processa mensagem
 │   └── routes/
 │       ├── auth.ts            # POST /auth/register, POST /auth/login
 │       ├── users.ts           # Rotas de usuários
 │       ├── transactions.ts    # Rotas de transações (protegidas)
 │       ├── financial-goals.ts # CRUD de metas financeiras (protegido)
-│       └── reports.ts         # GET /reports/:userId/monthly|weekly (protegido)
+│       ├── reports.ts         # GET /reports/:userId/monthly|weekly (protegido)
+│       └── webhooks.ts        # GET|POST /webhooks/whatsapp (público)
 ├── dist/                      # Código compilado (gerado pelo tsc)
 ├── docs/                      # Documentação do projeto
 ├── Dockerfile

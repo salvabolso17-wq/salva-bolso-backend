@@ -63,6 +63,19 @@
 
 ---
 
+## Fase 5.5 — Integração WhatsApp
+
+- [x] `POST /webhooks/whatsapp` — recebe mensagens e salva transações automaticamente
+- [x] `GET /webhooks/whatsapp` — verificação de webhook (Meta Cloud API)
+- [x] Adapter Meta WhatsApp Cloud API
+- [x] Adapter Evolution API
+- [x] Adapter 360dialog
+- [x] Busca de usuário por telefone (normalização de número)
+- [ ] Envio de resposta de confirmação via WhatsApp
+- [ ] Onboarding via WhatsApp (cadastro pelo chat)
+
+---
+
 ## Fase 6 — Frontend / Mobile
 
 - [ ] Definir tecnologia do frontend (React Native / Flutter / etc.)

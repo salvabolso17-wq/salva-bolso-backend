@@ -36,15 +36,17 @@
 | PATCH  | Atualizar campo específico |
 | DELETE | Remover recurso            |
 
-### Rotas Existentes
+### Rotas Públicas
 
-| Método | Rota              | Auth | Descrição                        |
-|--------|-------------------|------|----------------------------------|
-| GET    | /                 | não  | Health check da API              |
-| POST   | /auth/register    | não  | Registra usuário com senha       |
-| POST   | /auth/login       | não  | Login, retorna JWT               |
-| GET    | /users            | não  | Lista todos os usuários          |
-| POST   | /users            | não  | Cria usuário (sem senha)         |
+| Método | Rota                     | Descrição                                          |
+|--------|--------------------------|----------------------------------------------------|
+| GET    | /                        | Health check da API                                |
+| POST   | /auth/register           | Registra usuário com senha                         |
+| POST   | /auth/login              | Login, retorna JWT                                 |
+| GET    | /users                   | Lista todos os usuários                            |
+| POST   | /users                   | Cria usuário (sem senha)                           |
+| GET    | /webhooks/whatsapp       | Verificação do webhook (Meta hub.challenge)        |
+| POST   | /webhooks/whatsapp       | Recebe mensagem WhatsApp (?provider=meta\|evolution\|360dialog) |
 
 ### Rotas Protegidas (requerem Bearer JWT)
 
