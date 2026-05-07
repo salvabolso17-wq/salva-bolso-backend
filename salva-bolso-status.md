@@ -168,6 +168,30 @@ curl -X PUT http://localhost:8080/webhook/set/<INSTANCIA> \
 - [x] Fluxo completo funcionando — resposta instantânea (< 1s) confirmada em 2026-05-07
 - [x] Logs estruturados — commit 9b211b3
 - [x] Anti-duplicidade de mensagens — commit d6c5f25
+- [x] Diagnóstico de entrega + retry inteligente — commit a25ef25
+
+## Diagnóstico de Entrega WhatsApp (commit a25ef25)
+
+**Problema:** Evolution retornava HTTP 201 + `status=PENDING` mas mensagens não chegavam ou atrasavam.
+
+**O que PENDING significa:** mensagem aceita na fila local do Baileys, aguardando envio ao servidor WhatsApp. É normal — a entrega é assíncrona. O problema estava em conexões instáveis da instância.
+
+**Implementado no EvolutionProvider:**
+
+1. **checkInstanceState()** — verifica `GET /instance/connectionState/{instance}` antes de cada envio
+   - Cache de 20s para não adicionar latência em cada mensagem
+   - Loga `ALERTA: instancia nao conectada` se state ≠ "open"
+   - Não aborta o envio (Evolution pode reconectar sozinha)
+
+2. **Retry automático** — 1 retry após 3s se HTTP error ou `status=ERROR`
+   - Revalida estado da instância antes do retry
+   - Timeout de 10s por tentativa
+
+3. **Log de deliveryStatus com descrição legível:**
+   - `PENDING` → "na fila local (não enviado ao servidor)"
+   - `SERVER_ACK` → "enviado ao servidor WhatsApp"
+   - `DELIVERY_ACK` → "entregue ao dispositivo"
+   - `ERROR` → "ERRO — falha no envio"
 
 ## Anti-Duplicidade (commit d6c5f25)
 
