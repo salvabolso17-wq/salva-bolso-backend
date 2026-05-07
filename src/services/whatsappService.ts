@@ -1,5 +1,6 @@
 import pool from "../db/client";
 import { parseTransaction } from "../utils/parseTransaction";
+import { whatsapp } from "./whatsapp";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
 
 interface UserRow {
@@ -39,10 +40,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   const parsed = parseTransaction(message.texto);
 
   if (!parsed) {
+    await whatsapp.sendText({
+      to: message.telefone,
+      text: "Não entendi. Tente: '120 mercado', '35 gasolina' ou '500 freelance'",
+    });
     return {
       success: false,
       userId: user.id,
-      erro: "Não entendi. Tente: '120 mercado', '35 gasolina' ou '500 freelance'",
+      erro: "Não foi possível interpretar a mensagem",
     };
   }
 
@@ -52,6 +57,17 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
      RETURNING *`,
     [user.id, parsed.tipo, parsed.valor, parsed.categoria, parsed.descricao]
   );
+
+  const emoji  = parsed.tipo === "entrada" ? "+" : "-";
+  const sinal  = parsed.tipo === "entrada" ? "Entrada" : "Saída";
+  const confirmacao = [
+    `Registrado!`,
+    `${emoji} R$ ${parsed.valor.toFixed(2)} | ${sinal}`,
+    `Categoria: ${parsed.categoria}`,
+    `Desc: ${parsed.descricao}`,
+  ].join("\n");
+
+  await whatsapp.sendText({ to: message.telefone, text: confirmacao });
 
   return {
     success: true,

@@ -29,7 +29,15 @@ salva-bolso-backend/
 │   │   └── parseTransaction.ts # Parser de texto para transação
 │   ├── services/
 │   │   ├── reportService.ts    # Lógica reutilizável de relatórios
-│   │   └── whatsappService.ts  # Busca usuário por telefone e processa mensagem
+│   │   ├── whatsappService.ts  # Busca usuário por telefone e processa mensagem
+│   │   └── whatsapp/           # Abstração de envio WhatsApp
+│   │       ├── index.ts        # Factory: seleciona provider via WHATSAPP_PROVIDER
+│   │       ├── types.ts        # IWhatsAppProvider, SendTextParams, SendResult
+│   │       └── providers/
+│   │           ├── MockProvider.ts       # Log local (padrão dev)
+│   │           ├── MetaProvider.ts       # Stub Meta Cloud API
+│   │           ├── EvolutionProvider.ts  # Stub Evolution API
+│   │           └── Dialog360Provider.ts  # Stub 360dialog
 │   └── routes/
 │       ├── auth.ts            # POST /auth/register, POST /auth/login
 │       ├── users.ts           # Rotas de usuários

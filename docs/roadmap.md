@@ -71,7 +71,8 @@
 - [x] Adapter Evolution API
 - [x] Adapter 360dialog
 - [x] Busca de usuário por telefone (normalização de número)
-- [ ] Envio de resposta de confirmação via WhatsApp
+- [x] Abstração `IWhatsAppProvider` com MockProvider, MetaProvider, EvolutionProvider, Dialog360Provider
+- [x] Envio de confirmação automático após salvar transação via webhook
 - [ ] Onboarding via WhatsApp (cadastro pelo chat)
 
 ---
