@@ -4,6 +4,7 @@ import cors from "cors";
 import pool from "./db/client";
 import { createTables } from "./database";
 import usersRoutes from "./routes/users";
+import transactionsRoutes from "./routes/transactions";
 
 const app = express();
 
@@ -11,6 +12,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/users", usersRoutes);
+app.use("/transactions", transactionsRoutes);
 
 app.get("/", async (req, res) => {
   try {
