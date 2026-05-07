@@ -21,41 +21,33 @@ router.get("/whatsapp", (req, res) => {
 // POST /webhooks/whatsapp?provider=meta|evolution|360dialog
 // Sempre retorna 200 para evitar reenvios automáticos do provider
 router.post("/whatsapp", async (req, res) => {
+  const ts = new Date().toISOString();
   try {
     const provider = (req.query.provider as string) ?? "meta";
     const body     = req.body as Record<string, unknown>;
+    const data     = body.data as Record<string, unknown> | undefined;
+    const key      = data?.key as Record<string, unknown> | undefined;
+    const msgObj   = data?.message as Record<string, unknown> | undefined;
 
-    // Debug: log raw payload to diagnose LID/phone issues
-    console.log("[webhook] provider=%s event=%s remoteJid=%s remoteJidAlt=%s fromMe=%s text=%s",
-      provider,
-      body.event,
-      (body.data as Record<string, unknown>)?.key
-        ? ((body.data as Record<string, unknown>).key as Record<string, unknown>)?.remoteJid
-        : "?",
-      (body.data as Record<string, unknown>)?.key
-        ? ((body.data as Record<string, unknown>).key as Record<string, unknown>)?.remoteJidAlt
-        : "?",
-      (body.data as Record<string, unknown>)?.key
-        ? ((body.data as Record<string, unknown>).key as Record<string, unknown>)?.fromMe
-        : "?",
-      (body.data as Record<string, unknown>)?.message
-        ? (((body.data as Record<string, unknown>).message as Record<string, unknown>)?.conversation
-          ?? ((body.data as Record<string, unknown>).message as Record<string, unknown>)?.extendedTextMessage)
-        : "?"
-    );
+    console.log(`[webhook ${ts}] RAW provider=${provider} event=${body.event} remoteJid=${key?.remoteJid} remoteJidAlt=${key?.remoteJidAlt} fromMe=${key?.fromMe} text=${msgObj?.conversation ?? (msgObj?.extendedTextMessage as Record<string,unknown>)?.text ?? "(sem texto)"}`);
 
     const message = normalizePayload(body, provider);
 
     if (!message) {
-      res.status(200).json({
-        received: true,
-        processed: false,
-        error: "Payload não reconhecido ou mensagem não é texto",
-      });
+      console.log(`[webhook ${ts}] normalizePayload retornou null — payload descartado (grupo, fromMe, ou formato desconhecido)`);
+      res.status(200).json({ received: true, processed: false, error: "Payload não reconhecido ou mensagem não é texto" });
       return;
     }
 
+    console.log(`[webhook ${ts}] normalizado OK — telefone=${message.telefone} texto="${message.texto}" messageId=${message.messageId}`);
+
     const result = await processWhatsAppMessage(message);
+
+    if (result.success) {
+      console.log(`[webhook ${ts}] processado OK — userId=${result.userId} transacaoId=${(result.transacao as Record<string,unknown>)?.id}`);
+    } else {
+      console.log(`[webhook ${ts}] processado com erro — userId=${result.userId ?? "N/A"} erro="${result.erro}"`);
+    }
 
     res.status(200).json({
       received: true,
@@ -63,17 +55,11 @@ router.post("/whatsapp", async (req, res) => {
       provider,
       messageId: message.messageId,
       ...(result.success
-        ? {
-            data: {
-              usuario_id: result.userId,
-              transacao:  result.transacao,
-              interpretado: result.interpretado,
-            },
-          }
+        ? { data: { usuario_id: result.userId, transacao: result.transacao, interpretado: result.interpretado } }
         : { error: result.erro }),
     });
   } catch (error) {
-    console.error(error);
+    console.error(`[webhook ${ts}] ERRO INTERNO:`, error);
     res.status(200).json({ received: true, processed: false, error: "Erro interno" });
   }
 });
