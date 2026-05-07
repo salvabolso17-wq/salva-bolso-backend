@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import pool from "./db/client";
@@ -8,8 +9,6 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
-
-createTables();
 
 app.use("/users", usersRoutes);
 
@@ -33,6 +32,9 @@ app.get("/", async (req, res) => {
 
 const PORT = 80;
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-});
+(async () => {
+  await createTables();
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+  });
+})();

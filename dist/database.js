@@ -18,7 +18,18 @@ async function createTables() {
         criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-        console.log("Tabela users criada/verificada ✅");
+        await client_1.default.query(`
+      CREATE TABLE IF NOT EXISTS transactions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        tipo VARCHAR(20) NOT NULL,
+        valor NUMERIC(10,2) NOT NULL,
+        categoria VARCHAR(100),
+        descricao TEXT,
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+        console.log("Tabelas criadas/verificadas ✅");
     }
     catch (error) {
         console.error("ERRO REAL DO BANCO:");

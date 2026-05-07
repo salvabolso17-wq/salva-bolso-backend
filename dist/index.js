@@ -3,16 +3,16 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
-const dotenv_1 = __importDefault(require("dotenv"));
 const client_1 = __importDefault(require("./db/client"));
 const database_1 = require("./database");
-dotenv_1.default.config();
+const users_1 = __importDefault(require("./routes/users"));
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
-(0, database_1.createTables)();
+app.use("/users", users_1.default);
 app.get("/", async (req, res) => {
     try {
         const result = await client_1.default.query("SELECT NOW()");
@@ -29,7 +29,10 @@ app.get("/", async (req, res) => {
         });
     }
 });
-const PORT = Number(process.env.PORT) || 80;
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-});
+const PORT = 80;
+(async () => {
+    await (0, database_1.createTables)();
+    app.listen(PORT, "0.0.0.0", () => {
+        console.log(`Servidor rodando na porta ${PORT}`);
+    });
+})();
