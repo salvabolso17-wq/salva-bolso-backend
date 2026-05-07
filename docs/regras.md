@@ -38,22 +38,24 @@
 
 ### Rotas Existentes
 
-| Método | Rota         | Descrição              |
-|--------|--------------|------------------------|
-| GET    | /            | Health check da API    |
-| GET    | /users       | Lista todos os usuários|
-| POST   | /users       | Cria um novo usuário   |
+| Método | Rota              | Auth | Descrição                        |
+|--------|-------------------|------|----------------------------------|
+| GET    | /                 | não  | Health check da API              |
+| POST   | /auth/register    | não  | Registra usuário com senha       |
+| POST   | /auth/login       | não  | Login, retorna JWT               |
+| GET    | /users            | não  | Lista todos os usuários          |
+| POST   | /users            | não  | Cria usuário (sem senha)         |
 
-### Rotas Planejadas
+### Rotas Protegidas (requerem Bearer JWT)
 
-| Método | Rota                        | Descrição                        |
-|--------|-----------------------------|----------------------------------|
-| GET    | /users/:id                  | Busca usuário por ID             |
-| PUT    | /users/:id                  | Atualiza dados do usuário        |
-| POST   | /transactions               | Cria nova transação              |
-| GET    | /transactions/:userId       | Lista transações do usuário      |
-| DELETE | /transactions/:id           | Remove uma transação             |
-| GET    | /transactions/:userId/resumo| Resumo financeiro (entradas, saídas, saldo, qtd, últimas 5) |
+| Método | Rota                          | Descrição                                             |
+|--------|-------------------------------|-------------------------------------------------------|
+| GET    | /users/:id                    | Busca usuário por ID                                  |
+| PUT    | /users/:id                    | Atualiza dados do usuário                             |
+| POST   | /transactions                 | Cria nova transação                                   |
+| GET    | /transactions/:userId         | Lista transações do usuário                           |
+| DELETE | /transactions/:id             | Remove uma transação                                  |
+| GET    | /transactions/:userId/resumo  | Resumo financeiro (entradas, saídas, saldo, qtd, últimas 5) |
 
 ---
 

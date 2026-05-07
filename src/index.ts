@@ -5,12 +5,14 @@ import pool from "./db/client";
 import { createTables } from "./database";
 import usersRoutes from "./routes/users";
 import transactionsRoutes from "./routes/transactions";
+import authRoutes from "./routes/auth";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+app.use("/auth", authRoutes);
 app.use("/users", usersRoutes);
 app.use("/transactions", transactionsRoutes);
 

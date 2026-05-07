@@ -42,10 +42,10 @@
 
 ## Fase 4 — Autenticação
 
-- [ ] Autenticação via telefone (OTP por SMS ou código simples)
-- [ ] Geração e validação de JWT
-- [ ] Middleware de autenticação nas rotas protegidas
-- [ ] Rota `POST /auth/login`
+- [x] `POST /auth/register` — cadastro com senha (bcrypt)
+- [x] `POST /auth/login` — login retorna JWT (7 dias)
+- [x] Middleware JWT nas rotas de transactions
+- [ ] Autenticação via telefone (OTP por SMS)
 
 ---
 

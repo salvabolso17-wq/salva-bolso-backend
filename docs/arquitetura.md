@@ -17,14 +17,18 @@
 ```
 salva-bolso-backend/
 ├── src/
-│   ├── index.ts          # Entry point, setup do Express
-│   ├── database.ts       # Criação das tabelas
+│   ├── index.ts               # Entry point, setup do Express
+│   ├── database.ts            # Criação/migração das tabelas
 │   ├── db/
-│   │   └── client.ts     # Configuração do pool PostgreSQL
+│   │   └── client.ts          # Configuração do pool PostgreSQL
+│   ├── middleware/
+│   │   └── auth.ts            # Middleware JWT
 │   └── routes/
-│       └── users.ts      # Rotas de usuários
-├── dist/                 # Código compilado (gerado pelo tsc)
-├── docs/                 # Documentação do projeto
+│       ├── auth.ts            # POST /auth/register, POST /auth/login
+│       ├── users.ts           # Rotas de usuários
+│       └── transactions.ts    # Rotas de transações (protegidas)
+├── dist/                      # Código compilado (gerado pelo tsc)
+├── docs/                      # Documentação do projeto
 ├── Dockerfile
 ├── package.json
 └── tsconfig.json
@@ -39,6 +43,7 @@ salva-bolso-backend/
 | id          | SERIAL PK      | Identificador único              |
 | telefone    | VARCHAR(20)    | Telefone único do usuário        |
 | nome        | VARCHAR(100)   | Nome do usuário                  |
+| senha       | VARCHAR(255)   | Hash bcrypt da senha             |
 | renda       | NUMERIC(10,2)  | Renda mensal principal           |
 | renda_extra | NUMERIC(10,2)  | Renda extra mensal               |
 | criado_em   | TIMESTAMP      | Data de criação                  |

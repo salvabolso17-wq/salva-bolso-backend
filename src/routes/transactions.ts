@@ -1,7 +1,10 @@
 import { Router } from "express";
 import pool from "../db/client";
+import { authMiddleware } from "../middleware/auth";
 
 const router = Router();
+
+router.use(authMiddleware);
 
 router.post("/", async (req, res) => {
   try {

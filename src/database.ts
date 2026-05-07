@@ -27,6 +27,10 @@ export async function createTables() {
       );
     `);
 
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS senha VARCHAR(255);
+    `);
+
     console.log("Tabelas criadas/verificadas ✅");
   } catch (error) {
     console.error("ERRO REAL DO BANCO:");
