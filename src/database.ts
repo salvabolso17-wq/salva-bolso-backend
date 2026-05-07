@@ -43,6 +43,14 @@ export async function createTables() {
       );
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS processed_messages (
+        message_id  TEXT        PRIMARY KEY,
+        telefone    TEXT        NOT NULL,
+        processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
     console.log("Tabelas criadas/verificadas ✅");
   } catch (error) {
     console.error("ERRO REAL DO BANCO:");

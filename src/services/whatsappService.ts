@@ -43,6 +43,25 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   const provider = process.env.WHATSAPP_PROVIDER ?? "mock";
   log.webhook("iniciando processamento", { provider_envio: provider });
 
+  // ── Anti-duplicidade — insere messageId atomicamente ─────────────────────
+  if (message.messageId) {
+    try {
+      const dedup = await pool.query(
+        `INSERT INTO processed_messages (message_id, telefone)
+         VALUES ($1, $2)
+         ON CONFLICT (message_id) DO NOTHING`,
+        [message.messageId, message.telefone]
+      );
+
+      if ((dedup.rowCount ?? 0) === 0) {
+        log.duplicate("messageId já processado, descartando", { messageId: message.messageId });
+        return { success: false, erro: "Mensagem duplicada" };
+      }
+    } catch (err) {
+      log.error("falha na verificacao de duplicidade, prosseguindo sem dedup", err, { messageId: message.messageId });
+    }
+  }
+
   // ── Busca usuário ─────────────────────────────────────────────────────────
   let user: UserRow | null;
   try {

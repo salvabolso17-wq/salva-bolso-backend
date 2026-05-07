@@ -1,4 +1,4 @@
-type Tag = "WEBHOOK" | "USER" | "PARSER" | "DB" | "WHATSAPP" | "ERROR";
+type Tag = "WEBHOOK" | "USER" | "PARSER" | "DB" | "WHATSAPP" | "ERROR" | "DUPLICATE";
 
 function fields(obj?: Record<string, unknown>): string {
   if (!obj) return "";
@@ -18,6 +18,7 @@ export const log = {
   parser:   (msg: string, extra?: Record<string, unknown>) => console.log(line("PARSER", msg, extra)),
   db:       (msg: string, extra?: Record<string, unknown>) => console.log(line("DB", msg, extra)),
   whatsapp: (msg: string, extra?: Record<string, unknown>) => console.log(line("WHATSAPP", msg, extra)),
+  duplicate: (msg: string, extra?: Record<string, unknown>) => console.log(line("DUPLICATE", msg, extra)),
   error:    (msg: string, err?: unknown, extra?: Record<string, unknown>) => {
     const message = err instanceof Error ? err.message : String(err ?? "");
     const stack   = err instanceof Error ? err.stack   : undefined;
