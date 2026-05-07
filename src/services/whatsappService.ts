@@ -20,6 +20,7 @@ async function findUserByTelefone(telefone: string): Promise<UserRow | null> {
     `SELECT id, telefone, nome FROM users
      WHERE REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = $1
         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 11) = RIGHT($1, 11)
+        OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 8) = RIGHT($1, 8)
      LIMIT 1`,
     [normalized]
   );

@@ -25,6 +25,25 @@ router.post("/whatsapp", async (req, res) => {
     const provider = (req.query.provider as string) ?? "meta";
     const body     = req.body as Record<string, unknown>;
 
+    // Debug: log raw payload to diagnose LID/phone issues
+    console.log("[webhook] provider=%s event=%s remoteJid=%s remoteJidAlt=%s fromMe=%s text=%s",
+      provider,
+      body.event,
+      (body.data as Record<string, unknown>)?.key
+        ? ((body.data as Record<string, unknown>).key as Record<string, unknown>)?.remoteJid
+        : "?",
+      (body.data as Record<string, unknown>)?.key
+        ? ((body.data as Record<string, unknown>).key as Record<string, unknown>)?.remoteJidAlt
+        : "?",
+      (body.data as Record<string, unknown>)?.key
+        ? ((body.data as Record<string, unknown>).key as Record<string, unknown>)?.fromMe
+        : "?",
+      (body.data as Record<string, unknown>)?.message
+        ? (((body.data as Record<string, unknown>).message as Record<string, unknown>)?.conversation
+          ?? ((body.data as Record<string, unknown>).message as Record<string, unknown>)?.extendedTextMessage)
+        : "?"
+    );
+
     const message = normalizePayload(body, provider);
 
     if (!message) {
