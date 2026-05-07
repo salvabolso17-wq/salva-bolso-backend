@@ -1,5 +1,7 @@
 # Salva Bolso — Status da Infraestrutura
 **Última atualização:** 2026-05-07
+**Versão estável:** v1.0-stable (commit c30408e)
+**Baseline congelado:** 2026-05-07
 
 ---
 
@@ -162,12 +164,34 @@ curl -X PUT http://localhost:8080/webhook/set/<INSTANCIA> \
 
 ---
 
+## Versão Estável — v1.0-stable
+
+**Commit:** `c30408e`
+**Tag:** `v1.0-stable`
+**Backup do estado anterior:** tag `backup/2026-05-07`
+
+### O que está incluído nesta versão
+- Fluxo WhatsApp completo e funcionando (resposta < 1s confirmada)
+- Fix Docker Swarm dnsrr (endpoint_mode=dnsrr)
+- Fix LID addressing mode Evolution API v2.3.7
+- Fix telefone brasileiro 12 vs 13 dígitos (RIGHT(8))
+- Logs estruturados (`[WEBHOOK][USER][PARSER][DB][WHATSAPP][ERROR]`)
+- Anti-duplicidade via `processed_messages` no PostgreSQL
+- **Nenhum retry, nenhum health check no path de envio** — envio direto e simples
+
+### Regras para próximas melhorias
+1. Toda melhoria deve ser incremental e isolada
+2. Não alterar o fluxo de envio WhatsApp que já funciona
+3. Testar em separado antes de mergear em main
+4. Manter compatibilidade total com esta versão estável
+
 ## Etapas Concluídas
 
 - [x] dnsrr aplicado — webhook estável sem IP fixo
 - [x] Fluxo completo funcionando — resposta instantânea (< 1s) confirmada em 2026-05-07
 - [x] Logs estruturados — commit 9b211b3
 - [x] Anti-duplicidade de mensagens — commit d6c5f25
+- [x] Baseline estável congelado — tag v1.0-stable
 
 ## Anti-Duplicidade (commit d6c5f25)
 
