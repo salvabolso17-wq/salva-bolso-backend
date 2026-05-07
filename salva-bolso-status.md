@@ -185,6 +185,43 @@ curl -X PUT http://localhost:8080/webhook/set/<INSTANCIA> \
 3. Testar em separado antes de mergear em main
 4. Manter compatibilidade total com esta versão estável
 
+---
+
+## Recuperação de Sessão Evolution/Baileys
+
+### Sintomas de sessão corrompida
+- `sendText` retorna `Error: Connection Closed`
+- `connectionState` retorna `state=open` (falso positivo)
+- `logout` também retorna `Connection Closed`
+- Mensagens ficam em PENDING indefinidamente
+- Envio direto pela Evolution API não chega no WhatsApp
+
+### Causa
+Redeploys rápidos ou reconexões forçadas corrompem o socket Baileys internamente. O estado reportado diverge do estado real da conexão TCP com os servidores WhatsApp.
+
+### Solução: script automatizado
+
+```bash
+# Na VPS, baixar e executar:
+cd /etc/easypanel/projects/salva-bolso/backend-salvabolso/code
+bash recover-evolution.sh
+```
+
+O script executa automaticamente:
+1. Delete forçado da instância via API
+2. Para o container Evolution
+3. Remove arquivos de sessão do volume Docker
+4. Reinicia o container
+5. Recria a instância `salva-bolso`
+6. Reconfigura o webhook para o backend
+7. Gera QR code (terminal ou URL navegável)
+8. Aguarda escaneamento e valida envio
+
+### Prevenção
+- Evitar múltiplos redeploys rápidos da Evolution
+- Se precisar reiniciar, aguardar 30s entre operações
+- Monitorar `state=open` + teste de envio após cada deploy
+
 ## Etapas Concluídas
 
 - [x] dnsrr aplicado — webhook estável sem IP fixo
