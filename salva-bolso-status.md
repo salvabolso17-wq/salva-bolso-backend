@@ -162,10 +162,41 @@ curl -X PUT http://localhost:8080/webhook/set/<INSTANCIA> \
 
 ---
 
-## Próximos Passos
+## Etapas Concluídas
 
-1. [ ] Aplicar Opção A (dnsrr) na VPS
-2. [ ] Atualizar webhook para usar service name novamente
-3. [ ] Fazer `git pull` na VPS + restart do backend
-4. [ ] Enviar mensagem real pelo WhatsApp e confirmar resposta < 3s
-5. [ ] Remover log de debug do webhook após confirmação
+- [x] dnsrr aplicado — webhook estável sem IP fixo
+- [x] Fluxo completo funcionando — resposta instantânea (< 1s) confirmada em 2026-05-07
+- [x] Logs estruturados — commit 9b211b3
+
+## Logs Estruturados (commit 9b211b3)
+
+Formato padrão de todos os logs do fluxo WhatsApp:
+```
+[TAG     ] ISO-timestamp | mensagem | campo=valor | campo=valor
+```
+
+Tags disponíveis:
+- `[WEBHOOK ]` — entrada do webhook, normalização, descarte, conclusão com elapsed
+- `[USER    ]` — busca, encontrado, não encontrado
+- `[PARSER  ]` — texto recebido, resultado do parse (valor, categoria, tipo)
+- `[DB      ]` — insert de transação, id retornado
+- `[WHATSAPP]` — envio de mensagem, status HTTP, messageId
+- `[ERROR   ]` — erros com stack trace completo
+
+Arquivo central: `src/utils/logger.ts`
+
+### Exemplo de log de fluxo completo
+```
+[WEBHOOK ] 2026-05-07T22:17:30Z | recebido | provider=evolution | remoteJid=556892383325@s.whatsapp.net | text=50 uber
+[WEBHOOK ] 2026-05-07T22:17:30Z | normalizado | telefone=556892383325 | texto=50 uber
+[WEBHOOK ] 2026-05-07T22:17:30Z | iniciando processamento | provider_envio=evolution
+[USER    ] 2026-05-07T22:17:30Z | buscando | telefone=556892383325
+[USER    ] 2026-05-07T22:17:30Z | encontrado | id=3 | nome=Ana Castro
+[PARSER  ] 2026-05-07T22:17:30Z | analisando | texto=50 uber
+[PARSER  ] 2026-05-07T22:17:30Z | ok | valor=50 | categoria=Transporte | tipo=saida
+[DB      ] 2026-05-07T22:17:30Z | inserindo transacao | user_id=3 | tipo=saida | valor=50
+[DB      ] 2026-05-07T22:17:30Z | transacao salva | id=42
+[WHATSAPP] 2026-05-07T22:17:30Z | enviando confirmacao | to=556892383325
+[WHATSAPP] 2026-05-07T22:17:30Z | Evolution API: sucesso | status=200 | messageId=3A...
+[WEBHOOK ] 2026-05-07T22:17:30Z | concluido | elapsed=149ms | userId=3
+```
