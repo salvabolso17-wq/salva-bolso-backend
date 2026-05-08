@@ -127,6 +127,35 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
+  // ── Onboarding: boas-vindas para usuário novo ────────────────────────────
+  const ehSaudacaoOuAjuda = /^(oi|ol[aá]|ola|começar|comecar|menu|ajuda|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i
+    .test(message.texto.trim());
+
+  if (ehSaudacaoOuAjuda) {
+    const countRow = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
+      [user.id]
+    );
+    if (Number(countRow.rows[0].count) === 0) {
+      const boas_vindas = [
+        "👋 Bem-vindo ao Salva Bolso",
+        "",
+        "Controle seus gastos direto no WhatsApp 💸",
+        "",
+        "Comece enviando sua renda mensal:",
+        "Ex:",
+        "3000 salário",
+      ].join("\n");
+      try {
+        await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
+        log.whatsapp("onboarding welcome enviado", { to: message.telefone, userId: user.id });
+      } catch (err) {
+        log.error("falha ao enviar welcome", err, { to: message.telefone });
+      }
+      return { success: false, userId: user.id, erro: "Onboarding iniciado" };
+    }
+  }
+
   // ── Comandos de consulta ──────────────────────────────────────────────────
   if (/^saldo$/i.test(message.texto.trim())) {
     return await handleSaldoCommand(user, message.telefone);
@@ -200,42 +229,6 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (!parsed) {
     log.parser("nao reconhecido", { texto: message.texto });
 
-    const ehSaudacao = /^(oi|ol[aá]|ola|começar|comecar|menu|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i
-      .test(message.texto.trim());
-
-    if (ehSaudacao) {
-      const countRow = await pool.query<{ count: string }>(
-        `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
-        [user.id]
-      );
-      const isNovo = Number(countRow.rows[0].count) === 0;
-
-      if (isNovo) {
-        const boas_vindas = [
-          "👋 Bem-vindo ao Salva Bolso!",
-          "",
-          "Vou te ajudar a controlar seus gastos direto no WhatsApp 😄",
-          "",
-          "Para começar, registre seu salário:",
-          "Ex: 3000 salário",
-          "",
-          "Ou um gasto:",
-          "Ex: 35 gasolina, 120 mercado",
-          "",
-          `Envie "ajuda" para ver todos os comandos.`,
-        ].join("\n");
-
-        try {
-          await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
-          log.whatsapp("onboarding welcome enviado", { to: message.telefone, userId: user.id });
-        } catch (err) {
-          log.error("falha ao enviar welcome", err, { to: message.telefone });
-        }
-
-        return { success: false, userId: user.id, erro: "Onboarding iniciado" };
-      }
-    }
-
     try {
       const sendResult = await whatsapp.sendText({
         to: message.telefone,
@@ -275,6 +268,36 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   // ── Enviar confirmação WhatsApp ───────────────────────────────────────────
+
+  // Onboarding step 2: primeira transação é uma entrada → direcionar para o primeiro gasto
+  if (parsed.tipo === "entrada") {
+    const countRow = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
+      [user.id]
+    );
+    if (Number(countRow.rows[0].count) === 1) {
+      const msg = [
+        `💰 Renda registrada: ${fmtValor(parsed.valor)}`,
+        "",
+        "Agora envie um gasto:",
+        "Ex:",
+        "120 mercado",
+      ].join("\n");
+      try {
+        await whatsapp.sendText({ to: message.telefone, text: msg });
+        log.whatsapp("onboarding step2 enviado", { to: message.telefone, userId: user.id });
+      } catch (err) {
+        log.error("falha ao enviar onboarding step2", err, { to: message.telefone });
+      }
+      return {
+        success:      true,
+        userId:       user.id,
+        transacao:    transacaoRow,
+        interpretado: { valor: parsed.valor, descricao: parsed.descricao, categoria: parsed.categoria, tipo: parsed.tipo },
+      };
+    }
+  }
+
   const linhasConfirmacao = parsed.tipo === "entrada"
     ? [`💰 Entrada registrada: ${fmtValor(parsed.valor)}`, parsed.descricao]
     : [`✅ ${fmtValor(parsed.valor)} • ${parsed.categoria}`, parsed.descricao];
@@ -1060,12 +1083,12 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
 }
 
 const ONBOARDING_TIPS: Record<number, string> = {
-  1:  `💡 Dica:\nEnvie "saldo" para acompanhar quanto ainda resta no mês.`,
-  2:  `💡 Dica:\nEnvie "resumo" para ver onde você mais gastou.`,
-  3:  `💡 Dica:\nExperimente "top gastos" para ver seus maiores gastos do mês.`,
-  4:  `💡 Dica:\nEnvie "desafio" para receber uma sugestão de economia personalizada.`,
-  10: `💡 Dica:\nUse "guardar 200 <nome da meta>" para registrar seu progresso.`,
-  11: `💡 Dica:\nEnvie "ranking" para descobrir suas categorias com maior impacto.`,
+  1:  `💡 Envie "saldo" para acompanhar quanto ainda resta no mês.`,
+  2:  `💡 Envie "resumo" para ver onde você mais gastou.`,
+  3:  `💡 Experimente "top gastos" para ver seus maiores gastos do mês.`,
+  4:  `💡 Envie "desafio" para receber uma sugestão de economia personalizada.`,
+  10: `💡 Use "guardar 200 <nome da meta>" para registrar seu progresso.`,
+  11: `💡 Envie "ranking" para descobrir suas categorias com maior impacto.`,
 };
 
 async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<void> {
