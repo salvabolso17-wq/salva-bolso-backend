@@ -103,6 +103,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^ajuda$/i.test(message.texto.trim())) {
     return await handleAjudaCommand(user, message.telefone);
   }
+  if (/^meta\s+.+\s+[\d,.]+$/i.test(message.texto.trim())) {
+    return await handleMetaCommand(user, message.telefone, message.texto.trim());
+  }
+  if (/^metas$/i.test(message.texto.trim())) {
+    return await handleMetasCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -436,6 +442,86 @@ async function handleSemanaCommand(user: UserRow, telefone: string): Promise<Pro
   };
 }
 
+async function handleMetaCommand(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  log.webhook("comando meta", { userId: user.id, texto });
+
+  const match = texto.match(/^meta\s+(.+?)\s+([\d,.]+)$/i);
+  if (!match) {
+    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: meta viagem 5000" });
+    return { success: false, userId: user.id, erro: "Formato inválido" };
+  }
+
+  const nome      = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+  const valorMeta = parseFloat(match[2].replace(",", "."));
+
+  await pool.query(
+    `INSERT INTO user_goals (user_id, nome, valor_meta)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, nome)
+     DO UPDATE SET valor_meta = $3`,
+    [user.id, nome, valorMeta]
+  );
+
+  await whatsapp.sendText({
+    to:   telefone,
+    text: `🎯 Meta criada: ${nome}\nObjetivo: ${fmtValor(valorMeta)}`,
+  });
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "meta", nome, valorMeta },
+  };
+}
+
+async function handleMetasCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando metas", { userId: user.id });
+
+  const result = await pool.query<{ nome: string; valor_meta: string; valor_atual: string }>(
+    `SELECT nome, valor_meta, valor_atual
+     FROM user_goals
+     WHERE user_id = $1
+     ORDER BY criado_em ASC`,
+    [user.id]
+  );
+
+  if (result.rows.length === 0) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: "Você ainda não tem metas.\nUse: meta viagem 5000",
+    });
+    return {
+      success:      true,
+      userId:       user.id,
+      transacao:    {},
+      interpretado: { comando: "metas", count: 0 },
+    };
+  }
+
+  const linhas = ["🎯 Suas metas", ""];
+  for (const row of result.rows) {
+    const meta    = Number(row.valor_meta);
+    const atual   = Number(row.valor_atual);
+    const percent = meta > 0 ? Math.round((atual / meta) * 100) : 0;
+    linhas.push(`${row.nome} — ${fmtValor(atual)} / ${fmtValor(meta)} (${percent}%)`);
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("metas enviado", { to: telefone, count: result.rows.length });
+  } catch (err) {
+    log.error("falha ao enviar metas", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "metas", count: result.rows.length },
+  };
+}
+
 async function handleAjudaCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando ajuda", { userId: user.id });
 
@@ -448,8 +534,10 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
     "📈 semana",
     "🏆 top gastos",
     "📂 categorias",
+    "🎯 metas",
     "",
     "⚙️ limite alimentação 800",
+    "🎯 meta viagem 5000",
     "",
     "Para registrar um gasto:",
     "Ex: 35 gasolina, 120 mercado",

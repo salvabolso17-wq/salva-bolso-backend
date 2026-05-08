@@ -64,6 +64,18 @@ export async function createTables() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_goals (
+        id           SERIAL PRIMARY KEY,
+        user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        nome         VARCHAR(100) NOT NULL,
+        valor_meta   NUMERIC(10,2) NOT NULL,
+        valor_atual  NUMERIC(10,2) NOT NULL DEFAULT 0,
+        criado_em    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, nome)
+      );
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS category_limits (
         id           SERIAL PRIMARY KEY,
         user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
