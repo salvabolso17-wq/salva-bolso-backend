@@ -82,12 +82,12 @@ done
 
 docker service create \
   --name "$SVC" \
-  --image "$IMAGE" \
   --endpoint-mode dnsrr \
   --network "name=easypanel,alias=salva-bolso-evolution-api" \
   --network "name=easypanel-salva-bolso,alias=salva-bolso-evolution-api" \
   --mount "type=volume,source=${VOLUME},target=/evolution/instances" \
-  "${ENV_ARGS[@]}"
+  "${ENV_ARGS[@]}" \
+  "$IMAGE"
 
 ok "Servico criado"
 info "Aguardando Evolution inicializar (30s)..."
