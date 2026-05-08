@@ -176,6 +176,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^recorrentes$/i.test(message.texto.trim())) {
     return await handleRecorrentesCommand(user, message.telefone);
   }
+  if (/^pr[oó]ximas$/i.test(message.texto.trim())) {
+    return await handleProximasCommand(user, message.telefone);
+  }
   if (/^recorrente\s+[\d,.]+\s+.+$/i.test(message.texto.trim())) {
     return await handleRecorrenteCommand(user, message.telefone, message.texto.trim());
   }
@@ -950,6 +953,7 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
     "🎯 metas",
     "📈 previsão",
     "🔁 recorrentes",
+    "📅 próximas",
     "❌ apagar",
     "✏️ corrigir",
     "",
@@ -1256,6 +1260,56 @@ async function handleRecorrenteCommand(user: UserRow, telefone: string, texto: s
   };
 }
 
+async function handleProximasCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando proximas", { userId: user.id });
+
+  const result = await pool.query<{ nome: string; valor: string }>(
+    `SELECT nome, valor
+     FROM recurring_expenses
+     WHERE user_id = $1 AND ativo = TRUE
+     ORDER BY criado_em ASC`,
+    [user.id]
+  );
+
+  if (result.rows.length === 0) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: "Nenhuma conta recorrente cadastrada.\nUse: recorrente 39 netflix mensal",
+    });
+    return {
+      success:      true,
+      userId:       user.id,
+      transacao:    {},
+      interpretado: { comando: "proximas", count: 0 },
+    };
+  }
+
+  const linhas = ["📅 Próximas contas", ""];
+  let total = 0;
+
+  for (const row of result.rows) {
+    const valor = Number(row.valor);
+    total += valor;
+    linhas.push(`${row.nome} — ${fmtValor(valor)}`);
+  }
+
+  linhas.push("", `Total previsto: ${fmtValor(total)}`);
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("proximas enviado", { to: telefone, count: result.rows.length, total });
+  } catch (err) {
+    log.error("falha ao enviar proximas", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "proximas", count: result.rows.length, total },
+  };
+}
+
 async function handleRecorrentesCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando recorrentes", { userId: user.id });
 
@@ -1307,7 +1361,7 @@ async function handleRecorrentesCommand(user: UserRow, telefone: string): Promis
 }
 
 function isKnownCommand(texto: string): boolean {
-  return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|recorrentes|apagar|corrigir|top\s*gastos)$/i.test(texto)
+  return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|recorrentes|pr[oó]ximas|apagar|corrigir|top\s*gastos)$/i.test(texto)
       || /^(limite|meta|guardar|recorrente)\s+/i.test(texto);
 }
 
