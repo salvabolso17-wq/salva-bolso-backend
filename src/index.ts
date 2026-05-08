@@ -52,12 +52,13 @@ app.get("/", async (req, res) => {
   }
 });
 
-const PORT = 80;
+const PORT = Number(process.env.PORT ?? 80);
 
 (async () => {
   await createTables();
+  console.log(`[STARTUP] tentando ouvir em 0.0.0.0:${PORT}`);
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
+    console.log(`[STARTUP] Servidor ouvindo em 0.0.0.0:${PORT}`);
     // Auto-registra webhook na Evolution após a rede overlay estabilizar
     setTimeout(() => selfRegisterWebhook(), 5000);
     // Notificações de retenção — diariamente às 9h horário de Brasília
