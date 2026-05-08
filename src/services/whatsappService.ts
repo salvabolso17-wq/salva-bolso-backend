@@ -118,6 +118,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^comparar$/i.test(message.texto.trim())) {
     return await handleCompararCommand(user, message.telefone);
   }
+  if (/^desafio$/i.test(message.texto.trim())) {
+    return await handleDesafioCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -462,6 +465,89 @@ const CATEGORIA_EMOJI: Record<string, string> = {
   "Receita Extra":"💵",
   "Outros":       "📦",
 };
+
+const DESAFIOS: Record<string, string[]> = {
+  "Alimentação":  [
+    "Cozinhe em casa pelo menos 3 vezes esta semana.",
+    "Evite delivery por 5 dias seguidos.",
+    "Planeje as refeições antes de ir ao mercado.",
+  ],
+  "Transporte":   [
+    "Use transporte público 2 dias esta semana.",
+    "Combine caronas com alguém no trabalho.",
+    "Evite Uber em distâncias curtas por 5 dias.",
+  ],
+  "Lazer":        [
+    "Escolha uma opção gratuita de lazer este fim de semana.",
+    "Cancele uma assinatura que você usa pouco.",
+    "Reduza saídas pagas pela metade esta semana.",
+  ],
+  "Saúde":        [
+    "Pesquise genéricos antes da próxima compra na farmácia.",
+    "Use o plano de saúde para evitar consultas avulsas.",
+  ],
+  "Educação":     [
+    "Aproveite o conteúdo gratuito antes de comprar novos cursos.",
+    "Finalize um curso que já começou antes de comprar outro.",
+  ],
+  "Moradia":      [
+    "Reduza o consumo de energia desligando aparelhos em standby.",
+    "Revise assinaturas de streaming e cancele as menos usadas.",
+  ],
+};
+
+async function handleDesafioCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando desafio", { userId: user.id });
+
+  const now       = new Date();
+  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const metrics = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
+
+  if (metrics.gastos_por_categoria.length === 0) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: "🎯 Desafio do dia\n\nRegistre todos os seus gastos de hoje.\nConhecimento é o primeiro passo!",
+    });
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "desafio" } };
+  }
+
+  // Categoria com maior gasto no mês
+  const top      = metrics.gastos_por_categoria[0];
+  const economia = Math.round(top.total * 0.10);
+  const emoji    = CATEGORIA_EMOJI[top.categoria] ?? "📦";
+
+  const templates = DESAFIOS[top.categoria] ?? [
+    `Reduza 10% dos gastos em ${top.categoria} este mês.`,
+  ];
+  // Escolhe baseado no dia do mês para variar sem ser aleatório
+  const dica = templates[now.getUTCDate() % templates.length];
+
+  const linhas = [
+    "🎯 Desafio da semana",
+    "",
+    `${emoji} ${dica}`,
+    "",
+    `Categoria em foco: ${top.categoria}`,
+    `Gasto atual: ${fmtValor(top.total)}`,
+    `Economia possível: ${fmtValor(economia)}`,
+  ];
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("desafio enviado", { to: telefone, categoria: top.categoria, economia });
+  } catch (err) {
+    log.error("falha ao enviar desafio", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "desafio", categoria: top.categoria, economia },
+  };
+}
 
 async function handleCompararCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando comparar", { userId: user.id });
