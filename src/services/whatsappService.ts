@@ -130,6 +130,42 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (!parsed) {
     log.parser("nao reconhecido", { texto: message.texto });
 
+    const ehSaudacao = /^(oi|ol[aá]|ola|começar|comecar|menu|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i
+      .test(message.texto.trim());
+
+    if (ehSaudacao) {
+      const countRow = await pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
+        [user.id]
+      );
+      const isNovo = Number(countRow.rows[0].count) === 0;
+
+      if (isNovo) {
+        const boas_vindas = [
+          "👋 Bem-vindo ao Salva Bolso!",
+          "",
+          "Vou te ajudar a controlar seus gastos direto no WhatsApp 😄",
+          "",
+          "Para começar, registre seu salário:",
+          "Ex: 3000 salário",
+          "",
+          "Ou um gasto:",
+          "Ex: 35 gasolina, 120 mercado",
+          "",
+          `Envie "ajuda" para ver todos os comandos.`,
+        ].join("\n");
+
+        try {
+          await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
+          log.whatsapp("onboarding welcome enviado", { to: message.telefone, userId: user.id });
+        } catch (err) {
+          log.error("falha ao enviar welcome", err, { to: message.telefone });
+        }
+
+        return { success: false, userId: user.id, erro: "Onboarding iniciado" };
+      }
+    }
+
     try {
       const sendResult = await whatsapp.sendText({
         to: message.telefone,
