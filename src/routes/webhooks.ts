@@ -1,6 +1,8 @@
 import { Router } from "express";
+import pool from "../db/client";
 import { normalizePayload } from "../adapters/whatsappAdapters";
 import { processWhatsAppMessage } from "../services/whatsappService";
+import { whatsapp } from "../services/whatsapp";
 import { log } from "../utils/logger";
 
 const router = Router();
@@ -87,6 +89,82 @@ router.post("/whatsapp", async (req, res) => {
     const elapsed = Date.now() - start;
     log.error("erro interno no webhook", err, { provider, elapsed: `${elapsed}ms` });
     res.status(200).json({ received: true, processed: false, error: "Erro interno" });
+  }
+});
+
+// POST /webhooks/asaas — ativa usuário quando pagamento é confirmado
+router.post("/asaas", async (req, res) => {
+  // Valida token do Asaas (configurar ASAAS_WEBHOOK_TOKEN no .env / EasyPanel)
+  const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
+  if (webhookToken) {
+    const received = req.headers["asaas-access-token"];
+    if (received !== webhookToken) {
+      log.error("asaas webhook: token invalido", undefined, { received: received ?? "(ausente)" });
+      res.status(401).json({ error: "Token inválido" });
+      return;
+    }
+  }
+
+  const body    = req.body as Record<string, unknown>;
+  const event   = body.event as string | undefined;
+  const payment = body.payment as Record<string, unknown> | undefined;
+
+  log.webhook("asaas evento recebido", { event, paymentId: payment?.id });
+
+  // Apenas processa confirmações de pagamento
+  if (event !== "PAYMENT_CONFIRMED" && event !== "PAYMENT_RECEIVED") {
+    res.status(200).json({ received: true, ignored: true, event });
+    return;
+  }
+
+  const telefoneRaw = payment?.externalReference as string | undefined;
+  if (!telefoneRaw) {
+    log.error("asaas: externalReference ausente", undefined, { paymentId: payment?.id });
+    res.status(200).json({ received: true, error: "externalReference ausente" });
+    return;
+  }
+
+  const telefone = telefoneRaw.replace(/\D/g, "");
+
+  try {
+    // Ativa usuário — idempotente (só atualiza se ainda não for 'active')
+    const result = await pool.query<{ id: number; telefone: string }>(
+      `UPDATE users
+       SET subscription_status = 'active'
+       WHERE (
+         REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = $1
+         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 11) = RIGHT($1, 11)
+       )
+       AND subscription_status != 'active'
+       RETURNING id, telefone`,
+      [telefone]
+    );
+
+    if (result.rowCount === 0) {
+      log.webhook("asaas: usuario ja ativo ou nao encontrado", { telefone });
+      res.status(200).json({ received: true, alreadyActive: true });
+      return;
+    }
+
+    const user = result.rows[0];
+    log.webhook("asaas: usuario ativado", {
+      userId: user.id, telefone: user.telefone, paymentId: payment?.id,
+    });
+
+    // Notifica o usuário no WhatsApp
+    try {
+      await whatsapp.sendText({
+        to:   user.telefone,
+        text: "✅ Assinatura ativada!\n\nBem-vindo ao Salva Bolso 🚀",
+      });
+    } catch (err) {
+      log.error("asaas: falha ao notificar usuario", err, { userId: user.id });
+    }
+
+    res.status(200).json({ received: true, activated: true, userId: user.id });
+  } catch (err) {
+    log.error("asaas: erro ao processar webhook", err, { event, telefone });
+    res.status(200).json({ received: true, error: "Erro interno" });
   }
 });
 
