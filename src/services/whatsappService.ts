@@ -97,6 +97,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^semana$/i.test(message.texto.trim())) {
     return await handleSemanaCommand(user, message.telefone);
   }
+  if (/^categorias$/i.test(message.texto.trim())) {
+    return await handleCategoriasCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -429,6 +432,42 @@ async function handleSemanaCommand(user: UserRow, telefone: string): Promise<Pro
     userId:       user.id,
     transacao:    {},
     interpretado: { comando: "semana", categorias: result.rows.length },
+  };
+}
+
+async function handleCategoriasCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando categorias", { userId: user.id });
+
+  const emojiMap: Record<string, string> = {
+    "Alimentação":  "🍔",
+    "Transporte":   "🚗",
+    "Moradia":      "🏠",
+    "Lazer":        "🎮",
+    "Saúde":        "💊",
+    "Educação":     "📚",
+    "Investimentos":"💰",
+    "Receita Extra":"💵",
+    "Outros":       "📦",
+  };
+
+  const linhas = [
+    "Categorias disponíveis",
+    "",
+    ...CATEGORIAS_CONHECIDAS.map(c => `${emojiMap[c] ?? "•"} ${c}`),
+  ];
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("categorias enviado", { to: telefone });
+  } catch (err) {
+    log.error("falha ao enviar categorias", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "categorias" },
   };
 }
 
