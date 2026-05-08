@@ -132,11 +132,38 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     .test(message.texto.trim());
 
   if (ehSaudacaoOuAjuda) {
+    // ── DEBUG TEMP: remover após validar onboarding ───────────────────────
+    const _dbgRaw    = process.env.ONBOARDING_WHITELIST ?? "";
+    const _dbgNorm   = message.telefone.replace(/\D/g, "");
+    const _dbgEntries = _dbgRaw
+      ? _dbgRaw.split(",").map(n => n.trim().replace(/\D/g, "")).filter(Boolean)
+      : [];
+    const _dbgMatch = _dbgEntries.some(n => _dbgNorm.endsWith(n) || n.endsWith(_dbgNorm));
+    log.webhook("DEBUG whitelist", {
+      telefone_recebido: message.telefone,
+      telefone_normalizado: _dbgNorm,
+      whitelist_env: _dbgRaw || "(nao definida)",
+      whitelist_entries: _dbgEntries.join(" | ") || "(vazia)",
+      whitelist_match: _dbgMatch,
+    });
+    // ─────────────────────────────────────────────────────────────────────
+
     const countRow = await pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
       [user.id]
     );
-    if (Number(countRow.rows[0].count) === 0 && isOnboardingEnabled(message.telefone)) {
+    const _dbgCount = Number(countRow.rows[0].count);
+
+    // ── DEBUG TEMP ────────────────────────────────────────────────────────
+    log.webhook("DEBUG onboarding gate", {
+      count_transacoes: _dbgCount,
+      whitelist_match: _dbgMatch,
+      vai_disparar: _dbgCount === 0 && _dbgMatch,
+      motivo_bloqueio: _dbgCount > 0 ? "usuario ja tem transacoes" : !_dbgMatch ? "numero fora da whitelist" : "nenhum",
+    });
+    // ─────────────────────────────────────────────────────────────────────
+
+    if (_dbgCount === 0 && isOnboardingEnabled(message.telefone)) {
       const boas_vindas = [
         "👋 Bem-vindo ao Salva Bolso",
         "",
