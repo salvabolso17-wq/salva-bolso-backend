@@ -170,6 +170,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^desafio$/i.test(message.texto.trim())) {
     return await handleDesafioCommand(user, message.telefone);
   }
+  if (/^previs[aã]o$/i.test(message.texto.trim())) {
+    return await handlePrevisaoCommand(user, message.telefone);
+  }
   if (/^apagar$/i.test(message.texto.trim())) {
     return await handleApagarCommand(user, message.telefone);
   }
@@ -939,6 +942,7 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
     "🏆 top gastos",
     "📂 categorias",
     "🎯 metas",
+    "📈 previsão",
     "❌ apagar",
     "✏️ corrigir",
     "",
@@ -1125,8 +1129,74 @@ async function checkAndSendInsights(userId: number, telefone: string, categoria:
   log.whatsapp("insight enviado", { to: telefone, categoria, percentual, marco });
 }
 
+async function handlePrevisaoCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando previsao", { userId: user.id });
+
+  const now   = new Date();
+  const year  = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const dia   = now.getUTCDate();
+
+  const inicioMes  = new Date(Date.UTC(year, month, 1));
+  const fimMes     = new Date(Date.UTC(year, month + 1, 1));
+  const diasNoMes  = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const diasRestantes = diasNoMes - dia;
+
+  const metrics    = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
+  const totalGasto = metrics.total_saidas;
+
+  const meses = ["janeiro","fevereiro","março","abril","maio","junho",
+                 "julho","agosto","setembro","outubro","novembro","dezembro"];
+
+  if (totalGasto === 0) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `📈 Previsão de ${meses[month]}\n\nNenhum gasto registrado ainda.`,
+    });
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "previsao" } };
+  }
+
+  const mediaDiaria  = totalGasto / dia;
+  const gastosPrevisto = Math.round(totalGasto + mediaDiaria * diasRestantes);
+
+  const rendaFixa  = Number(user.renda      ?? 0);
+  const rendaExtra = Number(user.renda_extra ?? 0);
+  const totalRenda = rendaFixa + rendaExtra + metrics.total_entradas;
+
+  const linhas = [
+    `📈 Previsão de ${meses[month]}`,
+    "",
+    `Gastos: ${fmtValor(Math.round(totalGasto))}`,
+    `Previsto: ${fmtValor(gastosPrevisto)}`,
+  ];
+
+  if (totalRenda > 0) {
+    const saldo = totalRenda - gastosPrevisto;
+    linhas.push("");
+    linhas.push(
+      saldo >= 0
+        ? `💰 Devem sobrar ${fmtValor(saldo)}`
+        : `💸 Podem faltar ${fmtValor(Math.abs(saldo))}`
+    );
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("previsao enviada", { to: telefone, gastosPrevisto, totalRenda });
+  } catch (err) {
+    log.error("falha ao enviar previsao", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "previsao", gastosPrevisto, totalRenda },
+  };
+}
+
 function isKnownCommand(texto: string): boolean {
-  return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|categorias|ajuda|metas|apagar|corrigir|top\s*gastos)$/i.test(texto)
+  return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|apagar|corrigir|top\s*gastos)$/i.test(texto)
       || /^(limite|meta|guardar)\s+/i.test(texto);
 }
 
