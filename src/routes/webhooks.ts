@@ -92,6 +92,36 @@ router.post("/whatsapp", async (req, res) => {
   }
 });
 
+// Busca o telefone do customer no Asaas (fallback quando externalReference está ausente)
+async function fetchAsaasCustomerPhone(customerId: string): Promise<string | null> {
+  const apiKey  = process.env.ASAAS_API_KEY;
+  const baseUrl = (process.env.ASAAS_API_URL ?? "https://api.asaas.com/v3").replace(/\/$/, "");
+
+  if (!apiKey) {
+    log.error("asaas: ASAAS_API_KEY nao configurado", undefined, { customerId });
+    return null;
+  }
+
+  try {
+    const res = await fetch(`${baseUrl}/customers/${customerId}`, {
+      headers: { "access_token": apiKey },
+    });
+
+    if (!res.ok) {
+      log.error("asaas: falha ao buscar customer", undefined, { customerId, status: res.status });
+      return null;
+    }
+
+    const data = await res.json() as Record<string, unknown>;
+    const phone = (data.mobilePhone ?? data.phone) as string | undefined;
+    log.webhook("asaas: telefone obtido do customer", { customerId, phone: phone ?? "(nenhum)" });
+    return phone ?? null;
+  } catch (err) {
+    log.error("asaas: erro na chamada de customer", err, { customerId });
+    return null;
+  }
+}
+
 // POST /webhooks/asaas — ativa usuário quando pagamento é confirmado
 router.post("/asaas", async (req, res) => {
   // Valida token do Asaas (configurar ASAAS_WEBHOOK_TOKEN no .env / EasyPanel)
@@ -117,11 +147,23 @@ router.post("/asaas", async (req, res) => {
     return;
   }
 
-  const telefoneRaw = payment?.externalReference as string | undefined;
+  // Resolve telefone: externalReference → fallback via customer API
+  let telefoneRaw = payment?.externalReference as string | undefined;
+
   if (!telefoneRaw) {
-    log.error("asaas: externalReference ausente", undefined, { paymentId: payment?.id });
-    res.status(200).json({ received: true, error: "externalReference ausente" });
-    return;
+    const customerId = payment?.customer as string | undefined;
+    if (!customerId) {
+      log.error("asaas: sem externalReference e sem customer", undefined, { paymentId: payment?.id });
+      res.status(200).json({ received: true, error: "Sem identificador de usuário" });
+      return;
+    }
+    log.webhook("asaas: buscando telefone via customer API", { customerId, paymentId: payment?.id });
+    const phone = await fetchAsaasCustomerPhone(customerId);
+    if (!phone) {
+      res.status(200).json({ received: true, error: "Telefone do customer não encontrado" });
+      return;
+    }
+    telefoneRaw = phone;
   }
 
   const telefone = telefoneRaw.replace(/\D/g, "");
