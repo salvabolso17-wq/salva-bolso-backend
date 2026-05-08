@@ -66,23 +66,35 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
 };
 
 export function parseTransaction(texto: string): ParsedTransaction | null {
+  const textoNorm  = texto.trim();
+  const isEntrada  = textoNorm.startsWith("+");
+  const textoParse = isEntrada ? textoNorm.slice(1).trim() : textoNorm;
+
   // Extrai valor: suporta 120, 120.50, 120,50, R$120, R$ 120
-  const valorMatch = texto.match(/R?\$?\s*(\d+(?:[.,]\d{1,2})?)/i);
+  const valorMatch = textoParse.match(/R?\$?\s*(\d+(?:[.,]\d{1,2})?)/i);
   if (!valorMatch) return null;
 
   const valor = parseFloat(valorMatch[1].replace(",", "."));
   if (isNaN(valor) || valor <= 0) return null;
 
-  const descricao = texto.replace(valorMatch[0], "").trim() || "Sem descrição";
-  const textoLower = texto.toLowerCase();
+  const descricao  = textoParse.replace(valorMatch[0], "").trim() || "Sem descrição";
+  const textoLower = textoParse.toLowerCase();
 
   for (const [categoria, config] of Object.entries(CATEGORIAS)) {
     for (const keyword of config.keywords) {
       if (textoLower.includes(keyword)) {
+        // + prefix força entrada independente da categoria detectada
+        if (isEntrada) {
+          return { valor, descricao, categoria: "Receita Extra", tipo: "entrada" };
+        }
         return { valor, descricao, categoria, tipo: config.tipo };
       }
     }
   }
 
+  // Sem keyword: + prefix força entrada; caso contrário default saida
+  if (isEntrada) {
+    return { valor, descricao, categoria: "Receita Extra", tipo: "entrada" };
+  }
   return { valor, descricao, categoria: "Outros", tipo: "saida" };
 }

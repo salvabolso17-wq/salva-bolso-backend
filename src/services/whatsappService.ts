@@ -151,11 +151,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   // ── Enviar confirmação WhatsApp ───────────────────────────────────────────
-  const icone = parsed.tipo === "entrada" ? "💰" : "✅";
-  const linhasConfirmacao = [
-    `${icone} ${fmtValor(parsed.valor)} • ${parsed.categoria}`,
-    parsed.descricao,
-  ];
+  const linhasConfirmacao = parsed.tipo === "entrada"
+    ? [`💰 Entrada registrada: ${fmtValor(parsed.valor)}`, parsed.descricao]
+    : [`✅ ${fmtValor(parsed.valor)} • ${parsed.categoria}`, parsed.descricao];
 
   if (parsed.tipo === "saida") {
     const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
