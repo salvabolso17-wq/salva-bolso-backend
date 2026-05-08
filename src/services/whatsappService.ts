@@ -88,6 +88,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^top\s*gastos$/i.test(message.texto.trim())) {
     return await handleTopGastosCommand(user, message.telefone);
   }
+  if (/^limite\s+.+\s+[\d,.]+$/i.test(message.texto.trim())) {
+    return await handleLimiteCommand(user, message.telefone, message.texto.trim());
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -138,12 +141,19 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // ── Enviar confirmação WhatsApp ───────────────────────────────────────────
   const emoji  = parsed.tipo === "entrada" ? "+" : "-";
   const sinal  = parsed.tipo === "entrada" ? "Entrada" : "Saída";
-  const confirmacao = [
+  const linhasConfirmacao = [
     `Registrado!`,
     `${emoji} R$ ${parsed.valor.toFixed(2)} | ${sinal}`,
     `Categoria: ${parsed.categoria}`,
     `Desc: ${parsed.descricao}`,
-  ].join("\n");
+  ];
+
+  if (parsed.tipo === "saida") {
+    const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
+    if (aviso) linhasConfirmacao.push("", aviso);
+  }
+
+  const confirmacao = linhasConfirmacao.join("\n");
 
   log.whatsapp("enviando confirmacao", { to: message.telefone });
 
@@ -256,6 +266,82 @@ async function handleResumoCommand(user: UserRow, telefone: string): Promise<Pro
     userId:       user.id,
     transacao:    {},
     interpretado: { comando: "resumo", totalGasto: metrics.total_saidas, categorias: metrics.gastos_por_categoria.length },
+  };
+}
+
+const CATEGORIAS_CONHECIDAS = [
+  "Alimentação", "Transporte", "Moradia", "Lazer", "Saúde",
+  "Educação", "Investimentos", "Receita Extra", "Outros",
+];
+
+function normalizarCategoria(input: string): string {
+  const lower = input.toLowerCase().trim();
+  return CATEGORIAS_CONHECIDAS.find(c => c.toLowerCase() === lower)
+    ?? (input.charAt(0).toUpperCase() + input.slice(1).toLowerCase());
+}
+
+async function checkLimiteCategoria(userId: number, categoria: string): Promise<string | null> {
+  const limitRow = await pool.query<{ valor_limite: string }>(
+    `SELECT valor_limite FROM category_limits
+     WHERE user_id = $1 AND LOWER(categoria) = LOWER($2)`,
+    [userId, categoria]
+  );
+  if (limitRow.rows.length === 0) return null;
+
+  const valorLimite = Number(limitRow.rows[0].valor_limite);
+  const now         = new Date();
+  const inicioMes   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimMes      = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const gastoRow = await pool.query<{ total: string }>(
+    `SELECT COALESCE(SUM(valor), 0) AS total
+     FROM transactions
+     WHERE user_id = $1 AND LOWER(categoria) = LOWER($2)
+       AND tipo = 'saida' AND criado_em >= $3 AND criado_em < $4`,
+    [userId, categoria, inicioMes, fimMes]
+  );
+  const totalGasto  = Number(gastoRow.rows[0].total);
+  const percentual  = Math.round((totalGasto / valorLimite) * 100);
+
+  if (percentual >= 100) {
+    return `Você ultrapassou o limite de ${categoria} (R$ ${valorLimite.toFixed(2)}).`;
+  }
+  if (percentual >= 80) {
+    return `Atenção: você já utilizou ${percentual}% do limite de ${categoria}.`;
+  }
+  return null;
+}
+
+async function handleLimiteCommand(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  log.webhook("comando limite", { userId: user.id, texto });
+
+  const match = texto.match(/^limite\s+(.+?)\s+([\d,.]+)$/i);
+  if (!match) {
+    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: limite alimentação 800" });
+    return { success: false, userId: user.id, erro: "Formato inválido" };
+  }
+
+  const categoria   = normalizarCategoria(match[1]);
+  const valorLimite = parseFloat(match[2].replace(",", "."));
+
+  await pool.query(
+    `INSERT INTO category_limits (user_id, categoria, valor_limite)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, categoria)
+     DO UPDATE SET valor_limite = $3`,
+    [user.id, categoria, valorLimite]
+  );
+
+  await whatsapp.sendText({
+    to:   telefone,
+    text: `Limite da categoria ${categoria} definido em R$ ${valorLimite.toFixed(2)}`,
+  });
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "limite", categoria, valorLimite },
   };
 }
 
