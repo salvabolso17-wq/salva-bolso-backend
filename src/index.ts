@@ -33,10 +33,14 @@ app.use((err: Error, req: express.Request, res: express.Response, _next: express
   res.status(200).json({ received: true });
 });
 
+// Health check sem dependência de banco — para validar que o proxy alcança o container
+app.get("/healthz", (_req, res) => {
+  res.status(200).send("ok");
+});
+
 app.get("/", async (req, res) => {
   try {
     const result = await pool.query("SELECT NOW()");
-
     res.json({
       message: "Salva Bolso API online 🚀",
       database: "Conectado com sucesso ✅",
@@ -44,10 +48,7 @@ app.get("/", async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-
-    res.status(500).json({
-      error: "Erro ao conectar no banco ❌",
-    });
+    res.status(500).json({ error: "Erro ao conectar no banco ❌" });
   }
 });
 
