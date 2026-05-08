@@ -86,6 +86,17 @@ export async function createTables() {
       );
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pending_actions (
+        user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        action         VARCHAR(20)  NOT NULL,
+        step           VARCHAR(30)  NOT NULL,
+        tx_ids         JSONB        NOT NULL DEFAULT '[]',
+        selected_tx_id INTEGER,
+        expires_at     TIMESTAMPTZ  NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes')
+      );
+    `);
+
     console.log("Tabelas criadas/verificadas ✅");
   } catch (error) {
     console.error("ERRO REAL DO BANCO:");

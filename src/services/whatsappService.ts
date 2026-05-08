@@ -78,6 +78,55 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return { success: false, erro: `Nenhum usuário com telefone ${message.telefone}` };
   }
 
+  // ── Pending action check ──────────────────────────────────────────────────
+  const pendingRow = await pool.query<{
+    action: "apagar" | "corrigir";
+    step: "waiting_selection" | "waiting_new_value";
+    tx_ids: number[];
+    selected_tx_id: number | null;
+  }>(
+    `SELECT action, step, tx_ids, selected_tx_id
+     FROM pending_actions
+     WHERE user_id = $1 AND expires_at > NOW()`,
+    [user.id]
+  );
+
+  if (pendingRow.rows.length > 0) {
+    const pending   = pendingRow.rows[0];
+    const textoTrim = message.texto.trim();
+
+    if (/^cancelar$/i.test(textoTrim)) {
+      await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+      await whatsapp.sendText({ to: message.telefone, text: "Ação cancelada." });
+      return { success: false, userId: user.id, erro: "Ação cancelada" };
+    }
+
+    if (pending.step === "waiting_selection") {
+      const num = parseInt(textoTrim, 10);
+      if (!isNaN(num) && num >= 1 && num <= pending.tx_ids.length) {
+        const txId = pending.tx_ids[num - 1];
+        return pending.action === "apagar"
+          ? await handleApagarSelecao(user, message.telefone, txId)
+          : await handleCorrigirSelecao(user, message.telefone, txId);
+      }
+      if (!isKnownCommand(textoTrim)) {
+        await whatsapp.sendText({
+          to:   message.telefone,
+          text: `Envie um número de 1 a ${pending.tx_ids.length}, ou "cancelar".`,
+        });
+        return { success: false, userId: user.id, erro: "Aguardando seleção" };
+      }
+      // Comando reconhecido → cancela pending e continua abaixo
+      await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    } else if (pending.step === "waiting_new_value") {
+      if (!isKnownCommand(textoTrim)) {
+        return await handleCorrigirNovoValor(user, message.telefone, message.texto, pending.selected_tx_id!);
+      }
+      // Comando reconhecido → cancela pending e continua abaixo
+      await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    }
+  }
+
   // ── Comandos de consulta ──────────────────────────────────────────────────
   if (/^saldo$/i.test(message.texto.trim())) {
     return await handleSaldoCommand(user, message.telefone);
@@ -121,8 +170,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^desafio$/i.test(message.texto.trim())) {
     return await handleDesafioCommand(user, message.telefone);
   }
-  if (/^(apagar|corrigir)$/i.test(message.texto.trim())) {
+  if (/^apagar$/i.test(message.texto.trim())) {
     return await handleApagarCommand(user, message.telefone);
+  }
+  if (/^corrigir$/i.test(message.texto.trim())) {
+    return await handleCorrigirCommand(user, message.telefone);
   }
 
   // ── Parser ────────────────────────────────────────────────────────────────
@@ -888,6 +940,7 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
     "📂 categorias",
     "🎯 metas",
     "❌ apagar",
+    "✏️ corrigir",
     "",
     "⚙️ limite alimentação 800",
     "🎯 meta viagem 5000",
@@ -1072,6 +1125,11 @@ async function checkAndSendInsights(userId: number, telefone: string, categoria:
   log.whatsapp("insight enviado", { to: telefone, categoria, percentual, marco });
 }
 
+function isKnownCommand(texto: string): boolean {
+  return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|categorias|ajuda|metas|apagar|corrigir|top\s*gastos)$/i.test(texto)
+      || /^(limite|meta|guardar)\s+/i.test(texto);
+}
+
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando apagar", { userId: user.id });
 
@@ -1080,40 +1138,206 @@ async function handleApagarCommand(user: UserRow, telefone: string): Promise<Pro
      FROM transactions
      WHERE user_id = $1
      ORDER BY criado_em DESC
-     LIMIT 1`,
+     LIMIT 5`,
     [user.id]
   );
 
   if (result.rows.length === 0) {
-    await whatsapp.sendText({ to: telefone, text: "Nenhum lançamento encontrado para apagar." });
+    await whatsapp.sendText({ to: telefone, text: "Nenhum lançamento encontrado para remover." });
     return { success: false, userId: user.id, erro: "Sem transações" };
   }
 
-  const tx      = result.rows[0];
-  const valor   = Number(tx.valor);
-  const tipoIcon = tx.tipo === "entrada" ? "💰" : "💸";
+  const txIds = result.rows.map(r => r.id);
 
-  await pool.query(`DELETE FROM transactions WHERE id = $1`, [tx.id]);
+  await pool.query(
+    `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+     VALUES ($1, 'apagar', 'waiting_selection', $2::jsonb)
+     ON CONFLICT (user_id) DO UPDATE
+       SET action = 'apagar', step = 'waiting_selection', tx_ids = $2::jsonb,
+           selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+    [user.id, JSON.stringify(txIds)]
+  );
 
+  const linhas = ["Qual lançamento deseja remover?", ""];
+  result.rows.forEach((row, i) => {
+    const desc = row.descricao ?? row.categoria;
+    const icon = row.tipo === "entrada" ? "💰" : "💸";
+    linhas.push(`${i + 1}. ${icon} ${desc} — ${fmtValor(Number(row.valor))}`);
+  });
+  linhas.push(``, `Envie o número ou "cancelar".`);
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("apagar step1 enviado", { to: telefone, count: result.rows.length });
+  } catch (err) {
+    log.error("falha ao enviar apagar step1", err, { to: telefone });
+  }
+
+  return { success: false, userId: user.id, erro: "Aguardando seleção" };
+}
+
+async function handleApagarSelecao(user: UserRow, telefone: string, txId: number): Promise<ProcessResult> {
+  log.webhook("apagar selecao", { userId: user.id, txId });
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+  const txResult = await pool.query<{ tipo: string; valor: string; categoria: string; descricao: string }>(
+    `DELETE FROM transactions WHERE id = $1 AND user_id = $2 RETURNING tipo, valor, categoria, descricao`,
+    [txId, user.id]
+  );
+
+  if (txResult.rows.length === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Lançamento não encontrado." });
+    return { success: false, userId: user.id, erro: "Transação não encontrada" };
+  }
+
+  const tx = txResult.rows[0];
   const linhas = [
-    "❌ Último lançamento apagado:",
+    "✅ Lançamento removido:",
     "",
-    `${tipoIcon} ${tx.descricao ?? tx.categoria} — ${fmtValor(valor)}`,
-    tx.tipo === "saida" ? `Categoria: ${tx.categoria}` : "Entrada",
+    `${tx.descricao ?? tx.categoria} — ${fmtValor(Number(tx.valor))}`,
   ];
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-    log.whatsapp("apagar enviado", { to: telefone, txId: tx.id, valor, categoria: tx.categoria });
+    log.whatsapp("apagar confirmado", { to: telefone, txId });
   } catch (err) {
-    log.error("falha ao enviar apagar", err, { to: telefone });
+    log.error("falha ao enviar apagar confirmacao", err, { to: telefone });
   }
 
   return {
     success:      true,
     userId:       user.id,
     transacao:    {},
-    interpretado: { comando: "apagar", txId: tx.id, valor, categoria: tx.categoria, tipo: tx.tipo },
+    interpretado: { comando: "apagar", txId, valor: Number(tx.valor), categoria: tx.categoria },
+  };
+}
+
+async function handleCorrigirCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando corrigir", { userId: user.id });
+
+  const result = await pool.query<{ id: number; tipo: string; valor: string; categoria: string; descricao: string }>(
+    `SELECT id, tipo, valor, categoria, descricao
+     FROM transactions
+     WHERE user_id = $1
+     ORDER BY criado_em DESC
+     LIMIT 5`,
+    [user.id]
+  );
+
+  if (result.rows.length === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Nenhum lançamento encontrado para corrigir." });
+    return { success: false, userId: user.id, erro: "Sem transações" };
+  }
+
+  const txIds = result.rows.map(r => r.id);
+
+  await pool.query(
+    `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+     VALUES ($1, 'corrigir', 'waiting_selection', $2::jsonb)
+     ON CONFLICT (user_id) DO UPDATE
+       SET action = 'corrigir', step = 'waiting_selection', tx_ids = $2::jsonb,
+           selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+    [user.id, JSON.stringify(txIds)]
+  );
+
+  const linhas = ["Qual lançamento deseja corrigir?", ""];
+  result.rows.forEach((row, i) => {
+    const desc = row.descricao ?? row.categoria;
+    const icon = row.tipo === "entrada" ? "💰" : "💸";
+    linhas.push(`${i + 1}. ${icon} ${desc} — ${fmtValor(Number(row.valor))}`);
+  });
+  linhas.push(``, `Envie o número ou "cancelar".`);
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("corrigir step1 enviado", { to: telefone, count: result.rows.length });
+  } catch (err) {
+    log.error("falha ao enviar corrigir step1", err, { to: telefone });
+  }
+
+  return { success: false, userId: user.id, erro: "Aguardando seleção" };
+}
+
+async function handleCorrigirSelecao(user: UserRow, telefone: string, txId: number): Promise<ProcessResult> {
+  log.webhook("corrigir selecao", { userId: user.id, txId });
+
+  const txResult = await pool.query<{ valor: string; categoria: string; descricao: string }>(
+    `SELECT valor, categoria, descricao FROM transactions WHERE id = $1 AND user_id = $2`,
+    [txId, user.id]
+  );
+
+  if (txResult.rows.length === 0) {
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    await whatsapp.sendText({ to: telefone, text: "Lançamento não encontrado." });
+    return { success: false, userId: user.id, erro: "Transação não encontrada" };
+  }
+
+  const tx = txResult.rows[0];
+
+  await pool.query(
+    `UPDATE pending_actions
+     SET step = 'waiting_new_value', selected_tx_id = $2, expires_at = NOW() + INTERVAL '10 minutes'
+     WHERE user_id = $1`,
+    [user.id, txId]
+  );
+
+  const linhas = [
+    "Envie o novo valor e descrição.",
+    `Ex: ${fmtValor(Number(tx.valor))} ${tx.descricao ?? tx.categoria}`,
+    "",
+    `Ou "cancelar" para desistir.`,
+  ];
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("corrigir step2 enviado", { to: telefone, txId });
+  } catch (err) {
+    log.error("falha ao enviar corrigir step2", err, { to: telefone });
+  }
+
+  return { success: false, userId: user.id, erro: "Aguardando novo valor" };
+}
+
+async function handleCorrigirNovoValor(user: UserRow, telefone: string, texto: string, txId: number): Promise<ProcessResult> {
+  log.webhook("corrigir novo valor", { userId: user.id, txId, texto });
+
+  const parsed = parseTransaction(texto);
+
+  if (!parsed) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `Não entendi. Envie valor e descrição.\nEx: 50 mercado\nOu "cancelar" para desistir.`,
+    });
+    return { success: false, userId: user.id, erro: "Input inválido para correção" };
+  }
+
+  await pool.query(
+    `UPDATE transactions SET valor = $1, categoria = $2, descricao = $3, tipo = $4
+     WHERE id = $5 AND user_id = $6`,
+    [parsed.valor, parsed.categoria, parsed.descricao, parsed.tipo, txId, user.id]
+  );
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+  const linhas = [
+    "✅ Lançamento atualizado:",
+    "",
+    `${parsed.descricao ?? parsed.categoria} — ${fmtValor(parsed.valor)}`,
+  ];
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("corrigir confirmado", { to: telefone, txId, valor: parsed.valor });
+  } catch (err) {
+    log.error("falha ao enviar corrigir confirmacao", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "corrigir", txId, valor: parsed.valor, categoria: parsed.categoria },
   };
 }
 
