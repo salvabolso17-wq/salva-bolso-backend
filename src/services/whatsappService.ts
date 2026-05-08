@@ -112,6 +112,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^guardar\s+[\d,.]+\s+.+$/i.test(message.texto.trim())) {
     return await handleGuardarCommand(user, message.telefone, message.texto.trim());
   }
+  if (/^ranking$/i.test(message.texto.trim())) {
+    return await handleRankingCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -445,6 +448,65 @@ async function handleSemanaCommand(user: UserRow, telefone: string): Promise<Pro
   };
 }
 
+const CATEGORIA_EMOJI: Record<string, string> = {
+  "Alimentação":  "🍔",
+  "Transporte":   "🚗",
+  "Moradia":      "🏠",
+  "Lazer":        "🎮",
+  "Saúde":        "💊",
+  "Educação":     "📚",
+  "Investimentos":"💰",
+  "Receita Extra":"💵",
+  "Outros":       "📦",
+};
+
+async function handleRankingCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando ranking", { userId: user.id });
+
+  const now       = new Date();
+  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const meses = ["janeiro","fevereiro","março","abril","maio","junho",
+                 "julho","agosto","setembro","outubro","novembro","dezembro"];
+
+  const metrics = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
+
+  if (metrics.gastos_por_categoria.length === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Nenhum gasto registrado este mês." });
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "ranking", count: 0 } };
+  }
+
+  const linhas = [`📊 Ranking de gastos de ${meses[now.getMonth()]}/${now.getFullYear()}`, ""];
+
+  metrics.gastos_por_categoria.forEach((cat, i) => {
+    const emoji = CATEGORIA_EMOJI[cat.categoria] ?? "•";
+    linhas.push(`${i + 1}. ${emoji} ${cat.categoria} — ${fmtValor(cat.total)}`);
+  });
+
+  const top       = metrics.gastos_por_categoria[0];
+  const percentTop = metrics.total_saidas > 0
+    ? Math.round((top.total / metrics.total_saidas) * 100)
+    : 0;
+
+  linhas.push("", "Maior impacto:");
+  linhas.push(`${top.categoria} representa ${percentTop}% dos gastos.`);
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("ranking enviado", { to: telefone, categorias: metrics.gastos_por_categoria.length });
+  } catch (err) {
+    log.error("falha ao enviar ranking", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "ranking", categorias: metrics.gastos_por_categoria.length },
+  };
+}
+
 async function handleGuardarCommand(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
   log.webhook("comando guardar", { userId: user.id, texto });
 
@@ -626,22 +688,10 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
 async function handleCategoriasCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando categorias", { userId: user.id });
 
-  const emojiMap: Record<string, string> = {
-    "Alimentação":  "🍔",
-    "Transporte":   "🚗",
-    "Moradia":      "🏠",
-    "Lazer":        "🎮",
-    "Saúde":        "💊",
-    "Educação":     "📚",
-    "Investimentos":"💰",
-    "Receita Extra":"💵",
-    "Outros":       "📦",
-  };
-
   const linhas = [
     "Categorias disponíveis",
     "",
-    ...CATEGORIAS_CONHECIDAS.map(c => `${emojiMap[c] ?? "•"} ${c}`),
+    ...CATEGORIAS_CONHECIDAS.map(c => `${CATEGORIA_EMOJI[c] ?? "•"} ${c}`),
   ];
 
   try {
