@@ -109,6 +109,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^metas$/i.test(message.texto.trim())) {
     return await handleMetasCommand(user, message.telefone);
   }
+  if (/^guardar\s+[\d,.]+\s+.+$/i.test(message.texto.trim())) {
+    return await handleGuardarCommand(user, message.telefone, message.texto.trim());
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -439,6 +442,65 @@ async function handleSemanaCommand(user: UserRow, telefone: string): Promise<Pro
     userId:       user.id,
     transacao:    {},
     interpretado: { comando: "semana", categorias: result.rows.length },
+  };
+}
+
+async function handleGuardarCommand(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  log.webhook("comando guardar", { userId: user.id, texto });
+
+  const match = texto.match(/^guardar\s+([\d,.]+)\s+(.+)$/i);
+  if (!match) {
+    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: guardar 200 viagem" });
+    return { success: false, userId: user.id, erro: "Formato inválido" };
+  }
+
+  const valor = parseFloat(match[1].replace(",", "."));
+  const nome  = match[2].charAt(0).toUpperCase() + match[2].slice(1).toLowerCase();
+
+  const result = await pool.query<{ nome: string; valor_meta: string; valor_atual: string }>(
+    `UPDATE user_goals
+     SET valor_atual = valor_atual + $1
+     WHERE user_id = $2 AND LOWER(nome) = LOWER($3)
+     RETURNING nome, valor_meta, valor_atual`,
+    [valor, user.id, nome]
+  );
+
+  if (result.rows.length === 0) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `Meta "${nome}" não encontrada.\nCrie com: meta ${nome.toLowerCase()} <valor>`,
+    });
+    return { success: false, userId: user.id, erro: "Meta não encontrada" };
+  }
+
+  const row     = result.rows[0];
+  const meta    = Number(row.valor_meta);
+  const atual   = Number(row.valor_atual);
+  const percent = meta > 0 ? Math.round((atual / meta) * 100) : 0;
+
+  const linhas = [
+    `🎯 ${fmtValor(valor)} adicionados à meta ${row.nome}`,
+    "",
+    "Progresso:",
+    `${fmtValor(atual)} / ${fmtValor(meta)} (${percent}%)`,
+  ];
+
+  if (atual >= meta) {
+    linhas.push("", "🏆 Meta concluída!");
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("guardar enviado", { to: telefone, nome: row.nome, atual, meta });
+  } catch (err) {
+    log.error("falha ao enviar guardar", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "guardar", nome: row.nome, valor, atual, meta },
   };
 }
 
