@@ -78,9 +78,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return { success: false, erro: `Nenhum usuário com telefone ${message.telefone}` };
   }
 
-  // ── Comando: saldo ────────────────────────────────────────────────────────
+  // ── Comandos de consulta ──────────────────────────────────────────────────
   if (/^saldo$/i.test(message.texto.trim())) {
     return await handleSaldoCommand(user, message.telefone);
+  }
+  if (/^resumo$/i.test(message.texto.trim())) {
+    return await handleResumoCommand(user, message.telefone);
   }
 
   // ── Parser ────────────────────────────────────────────────────────────────
@@ -208,5 +211,47 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
     userId:       user.id,
     transacao:    {},
     interpretado: { comando: "saldo", totalRenda, gastos: metrics.total_saidas, sobrou },
+  };
+}
+
+async function handleResumoCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando resumo", { userId: user.id });
+
+  const now       = new Date();
+  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const metrics = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
+
+  const meses = ["janeiro","fevereiro","março","abril","maio","junho",
+                 "julho","agosto","setembro","outubro","novembro","dezembro"];
+
+  const linhas = [`Resumo de ${meses[now.getMonth()]}/${now.getFullYear()}`, ""];
+
+  if (metrics.gastos_por_categoria.length === 0) {
+    linhas.push("Nenhum gasto registrado este mês.");
+  } else {
+    for (const cat of metrics.gastos_por_categoria) {
+      linhas.push(`${cat.categoria}: R$ ${cat.total.toFixed(2)}`);
+    }
+    linhas.push("");
+    linhas.push(`Total gasto: R$ ${metrics.total_saidas.toFixed(2)}`);
+    if (metrics.categoria_top) {
+      linhas.push(`Maior categoria: ${metrics.categoria_top}`);
+    }
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("resumo enviado", { to: telefone, categorias: metrics.gastos_por_categoria.length });
+  } catch (err) {
+    log.error("falha ao enviar resumo", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "resumo", totalGasto: metrics.total_saidas, categorias: metrics.gastos_por_categoria.length },
   };
 }
