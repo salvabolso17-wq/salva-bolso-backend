@@ -258,6 +258,15 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handleCorrigirCommand(user, message.telefone);
   }
 
+  // ── Proteção contra mensagens ambíguas ───────────────────────────────────
+  if (isAmbiguousIntent(message.texto)) {
+    await whatsapp.sendText({
+      to:   message.telefone,
+      text: "💡 Não consegui entender essa movimentação.\n\nExemplos válidos:\n120 mercado\n+500 freelance\nguardar 200 viagem",
+    });
+    return { success: false, userId: user.id, erro: "Mensagem ambígua" };
+  }
+
   // ── Parser ────────────────────────────────────────────────────────────────
 
   // Onboarding step 1: número puro sem palavra-chave → interpretar como renda
@@ -1163,9 +1172,18 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
       [userId]
     );
     const n = Number(countRow.rows[0].count);
-    if      (n === 1) tipId = 1;   // 1º gasto → saldo
-    else if (n === 4) tipId = 3;   // 4º gasto → ranking
-    else if (n === 8) tipId = 4;   // 8º gasto → criar meta
+    if (n === 1) {
+      tipId = 1;   // 1º gasto → saldo
+    } else if (n === 8) {
+      tipId = 4;   // 8º gasto → criar meta
+    } else {
+      // ranking: 5+ gastos OU 3+ categorias distintas (o que vier primeiro)
+      const catRow = await pool.query<{ count: string }>(
+        `SELECT COUNT(DISTINCT categoria) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+        [userId]
+      );
+      if (n >= 5 || Number(catRow.rows[0].count) >= 3) tipId = 3;
+    }
   } else if (evento === "saldo_usado") {
     tipId = 2;                     // usou saldo → resumo
   } else if (evento === "recorrente_criado") {
@@ -1195,12 +1213,13 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
 }
 
 async function checkAndSendInsights(userId: number, telefone: string, categoria: string): Promise<void> {
-  // Aguarda pelo menos 3 gastos antes de comentar percentuais — evita "X representa 100%" no 1º lançamento
   const countRow = await pool.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
     [userId]
   );
-  if (Number(countRow.rows[0].count) < 3) return;
+  // Durante onboarding aguarda 10 gastos para não sobrepor as dicas progressivas; fora do onboarding: 3
+  const insightThreshold = isOnboardingEnabled(telefone) ? 10 : 3;
+  if (Number(countRow.rows[0].count) < insightThreshold) return;
 
   const now       = new Date();
   const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -1532,6 +1551,13 @@ function isOnboardingEnabled(telefone: string): boolean {
 function isKnownCommand(texto: string): boolean {
   return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|recorrentes|pr[oó]ximas|apagar|corrigir|top\s*gastos)$/i.test(texto)
       || /^(limite|meta|guardar|recorrente|buscar)\s+/i.test(texto);
+}
+
+// Detecta frases conversacionais/de intenção que NÃO devem virar lançamento automático
+const AMBIGUOUS_INTENT_RE = /\bacho\b|\btalvez\b|\bquero\b|\blembr[ae]\b|\blembrar\b|\beconomiz|\bguardar\b|\bjuntar\b|\bplanejo\b|\bpreciso\b|\bobjetivo\b|\bpara\s+(minha|meu)\s/i;
+
+function isAmbiguousIntent(texto: string): boolean {
+  return AMBIGUOUS_INTENT_RE.test(texto.trim());
 }
 
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
