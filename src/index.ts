@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import pool from "./db/client";
 import { createTables } from "./database";
+import { selfRegisterWebhook } from "./services/webhookSelfRegister";
 import usersRoutes from "./routes/users";
 import transactionsRoutes from "./routes/transactions";
 import authRoutes from "./routes/auth";
@@ -48,5 +49,7 @@ const PORT = 80;
   await createTables();
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Servidor rodando na porta ${PORT}`);
+    // Auto-registra webhook na Evolution após a rede overlay estabilizar
+    setTimeout(() => selfRegisterWebhook(), 5000);
   });
 })();
