@@ -115,6 +115,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^ranking$/i.test(message.texto.trim())) {
     return await handleRankingCommand(user, message.telefone);
   }
+  if (/^comparar$/i.test(message.texto.trim())) {
+    return await handleCompararCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -459,6 +462,89 @@ const CATEGORIA_EMOJI: Record<string, string> = {
   "Receita Extra":"💵",
   "Outros":       "📦",
 };
+
+async function handleCompararCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando comparar", { userId: user.id });
+
+  const now = new Date();
+
+  const inicioAtual    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimAtual       = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const inicioAnterior = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const fimAnterior    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+  const meses = ["janeiro","fevereiro","março","abril","maio","junho",
+                 "julho","agosto","setembro","outubro","novembro","dezembro"];
+
+  const [atual, anterior] = await Promise.all([
+    fetchPeriodMetrics(user.id, inicioAtual, fimAtual),
+    fetchPeriodMetrics(user.id, inicioAnterior, fimAnterior),
+  ]);
+
+  const nomeMesAtual    = meses[now.getUTCMonth()];
+  const nomeMesAnterior = meses[(now.getUTCMonth() + 11) % 12];
+
+  if (anterior.total_saidas === 0 && atual.total_saidas === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Sem dados suficientes para comparar." });
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "comparar" } };
+  }
+
+  const diff       = atual.total_saidas - anterior.total_saidas;
+  const diffSinal  = diff >= 0 ? "+" : "-";
+  const diffAbs    = Math.abs(diff);
+  const diffPct    = anterior.total_saidas > 0
+    ? Math.round((diff / anterior.total_saidas) * 100)
+    : 100;
+
+  const linhas = [
+    "📈 Comparação mensal",
+    "",
+    `${nomeMesAtual.charAt(0).toUpperCase() + nomeMesAtual.slice(1)}:`,
+    `${fmtValor(atual.total_saidas)} gastos`,
+    "",
+    `${nomeMesAnterior.charAt(0).toUpperCase() + nomeMesAnterior.slice(1)}:`,
+    `${fmtValor(anterior.total_saidas)} gastos`,
+    "",
+    "Diferença:",
+    `${diffSinal}${fmtValor(diffAbs)} (${diffSinal}${Math.abs(diffPct)}%)`,
+  ];
+
+  // Categoria que mais aumentou
+  if (atual.gastos_por_categoria.length > 0 && anterior.gastos_por_categoria.length > 0) {
+    const anteriorMap = new Map(anterior.gastos_por_categoria.map(c => [c.categoria, c.total]));
+    let maiorAumento     = -Infinity;
+    let categoriaMaior   = "";
+
+    for (const cat of atual.gastos_por_categoria) {
+      const totalAntes = anteriorMap.get(cat.categoria) ?? 0;
+      const aumento    = cat.total - totalAntes;
+      if (aumento > maiorAumento) {
+        maiorAumento   = aumento;
+        categoriaMaior = cat.categoria;
+      }
+    }
+
+    if (categoriaMaior && maiorAumento > 0) {
+      const emoji = CATEGORIA_EMOJI[categoriaMaior] ?? "•";
+      linhas.push("", "Categoria que mais aumentou:");
+      linhas.push(`${emoji} ${categoriaMaior}`);
+    }
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("comparar enviado", { to: telefone, diff, diffPct });
+  } catch (err) {
+    log.error("falha ao enviar comparar", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "comparar", diff, diffPct },
+  };
+}
 
 async function handleRankingCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando ranking", { userId: user.id });
