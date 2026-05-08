@@ -100,6 +100,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^categorias$/i.test(message.texto.trim())) {
     return await handleCategoriasCommand(user, message.telefone);
   }
+  if (/^ajuda$/i.test(message.texto.trim())) {
+    return await handleAjudaCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -432,6 +435,43 @@ async function handleSemanaCommand(user: UserRow, telefone: string): Promise<Pro
     userId:       user.id,
     transacao:    {},
     interpretado: { comando: "semana", categorias: result.rows.length },
+  };
+}
+
+async function handleAjudaCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando ajuda", { userId: user.id });
+
+  const texto = [
+    "Comandos disponíveis",
+    "",
+    "💰 saldo",
+    "📊 resumo",
+    "📅 hoje",
+    "📈 semana",
+    "🏆 top gastos",
+    "📂 categorias",
+    "",
+    "⚙️ limite alimentação 800",
+    "",
+    "Para registrar um gasto:",
+    "Ex: 35 gasolina, 120 mercado",
+    "",
+    "Para registrar uma entrada:",
+    "Ex: 1500 salário, 200 freelance",
+  ].join("\n");
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: texto });
+    log.whatsapp("ajuda enviado", { to: telefone });
+  } catch (err) {
+    log.error("falha ao enviar ajuda", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "ajuda" },
   };
 }
 
