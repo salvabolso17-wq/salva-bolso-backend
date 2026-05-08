@@ -198,6 +198,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     checkAndSendInsights(user.id, message.telefone, parsed.categoria).catch(err =>
       log.error("falha ao verificar insights", err, { userId: user.id })
     );
+    setTimeout(() => {
+      checkAndSendOnboardingTip(user.id, message.telefone, "saida").catch(err =>
+        log.error("falha ao verificar onboarding tip", err, { userId: user.id })
+      );
+    }, 800);
   }
 
   return {
@@ -396,6 +401,12 @@ async function handleLimiteCommand(user: UserRow, telefone: string, texto: strin
     to:   telefone,
     text: `Limite da categoria ${categoria} definido em R$ ${valorLimite.toFixed(2)}`,
   });
+
+  setTimeout(() => {
+    checkAndSendOnboardingTip(user.id, telefone, "limite_criado").catch(err =>
+      log.error("falha ao verificar onboarding tip", err, { userId: user.id })
+    );
+  }, 800);
 
   return {
     success:      true,
@@ -763,6 +774,12 @@ async function handleMetaCommand(user: UserRow, telefone: string, texto: string)
     text: `🎯 Meta criada: ${nome}\nObjetivo: ${fmtValor(valorMeta)}`,
   });
 
+  setTimeout(() => {
+    checkAndSendOnboardingTip(user.id, telefone, "meta_criada").catch(err =>
+      log.error("falha ao verificar onboarding tip", err, { userId: user.id })
+    );
+  }, 800);
+
   return {
     success:      true,
     userId:       user.id,
@@ -928,6 +945,55 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
     transacao:    {},
     interpretado: { comando: "hoje", count: result.rows.length },
   };
+}
+
+const ONBOARDING_TIPS: Record<number, string> = {
+  1:  `💡 Dica:\nEnvie "saldo" para acompanhar quanto ainda resta no mês.`,
+  2:  `💡 Dica:\nEnvie "resumo" para ver onde você mais gastou.`,
+  3:  `💡 Dica:\nExperimente "top gastos" para ver seus maiores gastos do mês.`,
+  4:  `💡 Dica:\nEnvie "desafio" para receber uma sugestão de economia personalizada.`,
+  10: `💡 Dica:\nUse "guardar 200 <nome da meta>" para registrar seu progresso.`,
+  11: `💡 Dica:\nEnvie "ranking" para descobrir suas categorias com maior impacto.`,
+};
+
+async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<void> {
+  // mes_referencia fixo como sentinel de lifetime (não se repete mensalmente)
+  const LIFETIME = new Date("2000-01-01");
+
+  let tipId: number | null = null;
+
+  if (evento === "saida") {
+    const countRow = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+      [userId]
+    );
+    const n = Number(countRow.rows[0].count);
+    if      (n === 1)  tipId = 1;
+    else if (n === 5)  tipId = 2;
+    else if (n === 10) tipId = 3;
+    else if (n === 20) tipId = 4;
+  } else if (evento === "meta_criada") {
+    tipId = 10;
+  } else if (evento === "limite_criado") {
+    tipId = 11;
+  }
+
+  if (tipId === null) return;
+
+  const tipText = ONBOARDING_TIPS[tipId];
+  if (!tipText) return;
+
+  const inserted = await pool.query(
+    `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+     VALUES ($1, 'onboarding', $2, $3)
+     ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+    [userId, tipId, LIFETIME]
+  );
+
+  if ((inserted.rowCount ?? 0) === 0) return;
+
+  await whatsapp.sendText({ to: telefone, text: tipText });
+  log.whatsapp("onboarding tip enviado", { to: telefone, tipId });
 }
 
 async function checkAndSendInsights(userId: number, telefone: string, categoria: string): Promise<void> {
