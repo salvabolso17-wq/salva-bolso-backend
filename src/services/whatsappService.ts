@@ -75,6 +75,41 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   if (!user) {
+    const ehSaudacao = /^(oi|ol[aá]|ola|começar|comecar|menu|ajuda|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i
+      .test(message.texto.trim());
+
+    if (ehSaudacao && isOnboardingEnabled(message.telefone)) {
+      log.user("criando usuario via onboarding", { telefone: message.telefone });
+      try {
+        await pool.query(
+          `INSERT INTO users (telefone) VALUES ($1) ON CONFLICT (telefone) DO NOTHING`,
+          [message.telefone]
+        );
+      } catch (err) {
+        log.error("falha ao criar usuario no onboarding", err, { telefone: message.telefone });
+        return { success: false, erro: "Erro ao criar usuário" };
+      }
+
+      const boas_vindas = [
+        "👋 Bem-vindo ao Salva Bolso",
+        "",
+        "Controle seus gastos direto no WhatsApp 💸",
+        "",
+        "Comece enviando sua renda mensal:",
+        "Ex:",
+        "3000 salário",
+      ].join("\n");
+
+      try {
+        await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
+        log.whatsapp("onboarding welcome (novo usuario) enviado", { to: message.telefone });
+      } catch (err) {
+        log.error("falha ao enviar welcome novo usuario", err, { to: message.telefone });
+      }
+
+      return { success: false, userId: undefined, erro: "Onboarding novo usuario iniciado" };
+    }
+
     return { success: false, erro: `Nenhum usuário com telefone ${message.telefone}` };
   }
 
