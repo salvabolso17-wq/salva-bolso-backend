@@ -129,27 +129,18 @@ fi
 # ── 7. Criar instancia e configurar webhook ───────────────────────────────────
 sep; info "7/8 Criando instancia WhatsApp e configurando webhook..."
 
-# Deletar instancia antiga (ignora erro)
-docker exec "$EVOL_CID" curl -s -X DELETE \
-  -H "apikey: $EVOL_KEY" \
-  "http://localhost:8080/instance/delete/$INSTANCE" 2>/dev/null | head -c100 || true
+# Deletar instancia antiga — usa node pois BusyBox wget nao suporta DELETE
+docker exec "$EVOL_CID" node -e \
+  "var h=require('http');var r=h.request({hostname:'localhost',port:8080,path:'/instance/delete/$INSTANCE',method:'DELETE',headers:{apikey:'$EVOL_KEY'}},function(res){var d='';res.on('data',function(c){d+=c});res.on('end',function(){process.stdout.write(d.slice(0,100)+'\n')})});r.on('error',function(){});r.end();" \
+  2>/dev/null || true
 sleep 3
 
 # Criar instancia com webhook ja configurado
-CREATE_RESP=$(docker exec "$EVOL_CID" curl -s -X POST \
-  -H "apikey: $EVOL_KEY" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"instanceName\": \"$INSTANCE\",
-    \"qrcode\": true,
-    \"integration\": \"WHATSAPP-BAILEYS\",
-    \"webhook\": {
-      \"url\": \"$WEBHOOK_URL\",
-      \"enabled\": true,
-      \"events\": [\"MESSAGES_UPSERT\"]
-    }
-  }" \
-  "http://localhost:8080/instance/create" 2>/dev/null || true)
+CREATE_RESP=$(docker exec "$EVOL_CID" wget -qO- -T10 \
+  --post-data="{\"instanceName\":\"$INSTANCE\",\"qrcode\":true,\"integration\":\"WHATSAPP-BAILEYS\",\"webhook\":{\"url\":\"$WEBHOOK_URL\",\"enabled\":true,\"events\":[\"MESSAGES_UPSERT\"]}}" \
+  --header="apikey: $EVOL_KEY" \
+  --header="Content-Type: application/json" \
+  http://localhost:8080/instance/create 2>/dev/null || true)
 echo "  Instancia: $(echo "$CREATE_RESP" | head -c200)"
 ok "Instancia '$INSTANCE' criada com webhook: $WEBHOOK_URL"
 sleep 5
@@ -157,9 +148,9 @@ sleep 5
 # ── 8. QR Code + aguardar escaneamento + validar envio ────────────────────────
 sep; info "8/8 Obtendo QR code para escaneamento..."
 
-QR_RESP=$(docker exec "$EVOL_CID" curl -s \
-  -H "apikey: $EVOL_KEY" \
-  "http://localhost:8080/instance/connect/$INSTANCE" 2>/dev/null || true)
+QR_RESP=$(docker exec "$EVOL_CID" wget -qO- -T10 \
+  --header="apikey: $EVOL_KEY" \
+  http://localhost:8080/instance/connect/$INSTANCE 2>/dev/null || true)
 
 QR_CODE=$(echo "$QR_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('code',''))" 2>/dev/null || true)
 QR_B64=$(echo "$QR_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base64',''))" 2>/dev/null || true)
@@ -181,7 +172,7 @@ print('PNG salvo em /tmp/qr-evolution.png')
 " 2>/dev/null
   python3 -m http.server $QR_PORT --directory /tmp >/dev/null 2>&1 &
   HTTP_PID=$!
-  SERVER_IP=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+  SERVER_IP=$(wget -qO- --timeout=3 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
   sep
   warn "Abra no navegador e escaneie com o WhatsApp:"
   warn "  http://$SERVER_IP:$QR_PORT/qr-evolution.png"
@@ -189,9 +180,9 @@ print('PNG salvo em /tmp/qr-evolution.png')
 else
   warn "QR nao disponivel imediatamente — aguardando 15s..."
   sleep 15
-  QR_RESP2=$(docker exec "$EVOL_CID" curl -s \
-    -H "apikey: $EVOL_KEY" \
-    "http://localhost:8080/instance/connect/$INSTANCE" 2>/dev/null || true)
+  QR_RESP2=$(docker exec "$EVOL_CID" wget -qO- -T10 \
+    --header="apikey: $EVOL_KEY" \
+    http://localhost:8080/instance/connect/$INSTANCE 2>/dev/null || true)
   QR_B64_2=$(echo "$QR_RESP2" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base64',''))" 2>/dev/null || true)
   if [ -n "$QR_B64_2" ]; then
     echo "$QR_B64_2" | python3 -c "
@@ -201,7 +192,7 @@ open('/tmp/qr-evolution.png','wb').write(base64.b64decode(b64))
 " 2>/dev/null
     python3 -m http.server $QR_PORT --directory /tmp >/dev/null 2>&1 &
     HTTP_PID=$!
-    SERVER_IP=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+    SERVER_IP=$(wget -qO- --timeout=3 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
     warn "  http://$SERVER_IP:$QR_PORT/qr-evolution.png"
   else
     warn "QR nao obtido. Acesse manualmente: https://salva-bolso-evolution-api.h5prml.easypanel.host/manager"
@@ -214,9 +205,9 @@ warn "Escaneie o QR com o WhatsApp. Aguardando conexao (maximo 90s)..."
 CONNECTED=false
 for i in $(seq 1 18); do
   sleep 5
-  STATE=$(docker exec "$EVOL_CID" curl -s \
-    -H "apikey: $EVOL_KEY" \
-    "http://localhost:8080/instance/connectionState/$INSTANCE" 2>/dev/null \
+  STATE=$(docker exec "$EVOL_CID" wget -qO- -T5 \
+    --header="apikey: $EVOL_KEY" \
+    http://localhost:8080/instance/connectionState/$INSTANCE 2>/dev/null \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('instance',{}).get('state','?'))" 2>/dev/null || echo "?")
   [ "$STATE" = "open" ] && CONNECTED=true && ok "WhatsApp conectado! state=open" && break
   info "Estado: $STATE ($i/18)"
@@ -227,11 +218,11 @@ done
 sep
 if $CONNECTED; then
   sleep 3
-  SEND=$(docker exec "$EVOL_CID" curl -s -X POST \
-    -H "apikey: $EVOL_KEY" \
-    -H "Content-Type: application/json" \
-    -d "{\"number\":\"$TEST_NUMBER\",\"text\":\"Bot online! Sessao restaurada. Envie 50 uber para testar.\"}" \
-    "http://localhost:8080/message/sendText/$INSTANCE" 2>/dev/null || true)
+  SEND=$(docker exec "$EVOL_CID" wget -qO- -T10 \
+    --post-data="{\"number\":\"$TEST_NUMBER\",\"text\":\"Bot online! Sessao restaurada. Envie 50 uber para testar.\"}" \
+    --header="apikey: $EVOL_KEY" \
+    --header="Content-Type: application/json" \
+    http://localhost:8080/message/sendText/$INSTANCE 2>/dev/null || true)
   STATUS=$(echo "$SEND" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','?'))" 2>/dev/null || echo "?")
   sep
   ok "SISTEMA RESTAURADO"
