@@ -52,7 +52,7 @@ app.get("/", async (req, res) => {
   }
 });
 
-const PORT = Number(process.env.PORT ?? 80);
+const PORT = Number(process.env.PORT ?? 3000);
 
 (async () => {
   await createTables();
