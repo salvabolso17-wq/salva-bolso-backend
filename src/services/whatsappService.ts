@@ -172,6 +172,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     log.error("excecao ao enviar confirmacao", err, { to: message.telefone });
   }
 
+  if (parsed.tipo === "saida") {
+    checkAndSendInsights(user.id, message.telefone, parsed.categoria).catch(err =>
+      log.error("falha ao verificar insights", err, { userId: user.id })
+    );
+  }
+
   return {
     success: true,
     userId: user.id,
@@ -445,6 +451,42 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
     transacao:    {},
     interpretado: { comando: "hoje", count: result.rows.length },
   };
+}
+
+async function checkAndSendInsights(userId: number, telefone: string, categoria: string): Promise<void> {
+  const now       = new Date();
+  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const metrics = await fetchPeriodMetrics(userId, inicioMes, fimMes);
+  if (metrics.total_saidas === 0) return;
+
+  const catRow = metrics.gastos_por_categoria.find(
+    c => c.categoria.toLowerCase() === categoria.toLowerCase()
+  );
+  if (!catRow) return;
+
+  const percentual = Math.round((catRow.total / metrics.total_saidas) * 100);
+  if (percentual < 50) return;
+
+  const marco  = 50;
+  const mesRef = inicioMes;
+
+  const inserted = await pool.query(
+    `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+    [userId, categoria, marco, mesRef]
+  );
+
+  if ((inserted.rowCount ?? 0) === 0) return;
+
+  await whatsapp.sendText({
+    to:   telefone,
+    text: `📊 ${categoria} representa ${percentual}% dos seus gastos do mês.`,
+  });
+
+  log.whatsapp("insight enviado", { to: telefone, categoria, percentual, marco });
 }
 
 async function handleTopGastosCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
