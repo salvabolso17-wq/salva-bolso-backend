@@ -169,38 +169,44 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 async function handleSaldoCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando saldo", { userId: user.id });
 
-  const now     = new Date();
+  const now       = new Date();
   const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
   const metrics = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
 
-  const renda      = Number(user.renda ?? 0);
+  // Renda total = renda fixa cadastrada + renda extra cadastrada + entradas do mês
+  const rendaFixa  = Number(user.renda      ?? 0);
   const rendaExtra = Number(user.renda_extra ?? 0);
-  const totalRenda = renda + rendaExtra;
-  const sobrou     = totalRenda + metrics.total_entradas - metrics.total_saidas;
+  const totalRenda = rendaFixa + rendaExtra + metrics.total_entradas;
+  const sobrou     = totalRenda - metrics.total_saidas;
 
   const meses = ["janeiro","fevereiro","março","abril","maio","junho",
                  "julho","agosto","setembro","outubro","novembro","dezembro"];
-  const cabecalho = `Saldo de ${meses[now.getMonth()]}/${now.getFullYear()}`;
 
-  const linhas = [cabecalho, ""];
-  if (totalRenda > 0)               linhas.push(`Renda: R$ ${totalRenda.toFixed(2)}`);
-  if (metrics.total_entradas > 0)   linhas.push(`Entradas: R$ ${metrics.total_entradas.toFixed(2)}`);
-  linhas.push(`Gastos: R$ ${metrics.total_saidas.toFixed(2)}`);
-  linhas.push(`Sobrou: R$ ${sobrou.toFixed(2)}`);
+  const linhas = [
+    `Saldo de ${meses[now.getMonth()]}/${now.getFullYear()}`,
+    "",
+    totalRenda > 0
+      ? `Renda: R$ ${totalRenda.toFixed(2)}`
+      : `Renda: não cadastrada`,
+    `Gastos: R$ ${metrics.total_saidas.toFixed(2)}`,
+    sobrou >= 0
+      ? `Sobrou: R$ ${sobrou.toFixed(2)}`
+      : `Deficit: R$ ${Math.abs(sobrou).toFixed(2)}`,
+  ];
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-    log.whatsapp("saldo enviado", { to: telefone });
+    log.whatsapp("saldo enviado", { to: telefone, totalRenda, gastos: metrics.total_saidas, sobrou });
   } catch (err) {
     log.error("falha ao enviar saldo", err, { to: telefone });
   }
 
   return {
-    success:     true,
-    userId:      user.id,
-    transacao:   {},
-    interpretado: { comando: "saldo" },
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "saldo", totalRenda, gastos: metrics.total_saidas, sobrou },
   };
 }
