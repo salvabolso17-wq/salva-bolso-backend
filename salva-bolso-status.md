@@ -1,7 +1,7 @@
 # Salva Bolso — Status Completo da Infraestrutura
 **Última atualização:** 2026-05-08
-**Sessão encerrada em:** 01:15 (horário de Brasília)
-**Próxima sessão:** retomar a partir dos próximos passos listados no final
+**Sessão encerrada em:** 03:05 (horário de Brasília)
+**Status:** FUNCIONANDO — fluxo completo validado em 2026-05-08T03:02
 
 ---
 
@@ -13,10 +13,10 @@
 | PostgreSQL | ✅ OK | Rodando, dados preservados |
 | Redis | ✅ OK | Rodando |
 | Evolution API (container) | ✅ Rodando | Imagem ok, API responde internamente |
-| Evolution API (instância WhatsApp) | ❌ NÃO CRIADA | Precisa criar instância `salva-bolso` |
-| Evolution API (manager público) | ⚠️ INSTÁVEL | Bad Gateway intermitente por ghost DNS |
-| WhatsApp QR | ❌ NÃO ESCANEADO | Depende da instância ser criada |
-| Webhook backend ← Evolution | ❌ INATIVO | Depende do QR escaneado |
+| Evolution API (instância WhatsApp) | ✅ CONECTADA | Instância `salva-bolso` criada e QR escaneado |
+| Evolution API (manager público) | ✅ OK | Acessível via manager |
+| WhatsApp QR | ✅ ESCANEADO | Bot conectado |
+| Webhook backend ← Evolution | ✅ ATIVO | URL: `http://10.0.1.x/webhooks/whatsapp?provider=evolution` (IP direto) |
 | Docker Swarm IPVS/VIP | ❌ QUEBRADO | Corrigido com dnsrr nos dois serviços |
 
 ---
@@ -420,8 +420,17 @@ cat /etc/easypanel/traefik/config/main.yaml | grep -A5 evolution
 6. Instância WhatsApp NÃO criada (bug no script — curl não existe no container)
 7. API key confirmada: `salvabolsoevolution123456`
 
-**O que falta:**
-1. Criar instância `salva-bolso` na Evolution (usar wget, não curl)
-2. Obter e escanear QR code
-3. Validar envio/recebimento end-to-end
-4. (Opcional) Atualizar `fix-evolution.sh` para usar wget em vez de curl
+**O que foi resolvido nesta sessão:**
+1. fix-evolution.sh corrigido — substituído curl por wget/node dentro do container
+2. Instância `salva-bolso` criada via manager Evolution
+3. QR escaneado — WhatsApp conectado
+4. DNS ghost IP `10.11.0.88` diagnosticado — backend acessível via IP direto `10.0.1.x`
+5. Webhook da Evolution atualizado via `update-webhook-url.sh` (usa node + formato v2 correto)
+6. Fluxo completo validado: mensagem real → processada → resposta enviada
+7. Repositório clonado na VPS em `/root/sb` — scripts rodam sem copiar URL longa
+
+**Atenção pós-deploy:**
+Se o backend for redeploy pelo EasyPanel, o IP `10.0.1.x` muda. Rode:
+```bash
+cd /root/sb && git pull && bash update-webhook-url.sh
+```
