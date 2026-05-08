@@ -262,7 +262,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (isAmbiguousIntent(message.texto)) {
     await whatsapp.sendText({
       to:   message.telefone,
-      text: buildAmbiguityHint(message.texto),
+      text: buildContextualHint(message.texto),
     });
     return { success: false, userId: user.id, erro: "Mensagem ambígua" };
   }
@@ -292,7 +292,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     try {
       const sendResult = await whatsapp.sendText({
         to: message.telefone,
-        text: "Não entendi. Tente: '120 mercado', '35 gasolina' ou '500 freelance'",
+        text: buildContextualHint(message.texto),
       });
       log.whatsapp("erro enviado", { to: message.telefone, success: sendResult.success });
     } catch (err) {
@@ -577,7 +577,7 @@ async function handleLimiteCommand(user: UserRow, telefone: string, texto: strin
 
   const match = texto.match(/^limite\s+(.+?)\s+([\d,.]+)$/i);
   if (!match) {
-    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: limite alimentação 800" });
+    await whatsapp.sendText({ to: telefone, text: "💡 Ex:\nlimite alimentação 800" });
     return { success: false, userId: user.id, erro: "Formato inválido" };
   }
 
@@ -890,7 +890,7 @@ async function handleGuardarCommand(user: UserRow, telefone: string, texto: stri
 
   const match = texto.match(/^guardar\s+([\d,.]+)\s+(.+)$/i);
   if (!match) {
-    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: guardar 200 viagem" });
+    await whatsapp.sendText({ to: telefone, text: "💡 Ex:\nguardar 200 viagem" });
     return { success: false, userId: user.id, erro: "Formato inválido" };
   }
 
@@ -949,7 +949,7 @@ async function handleMetaCommand(user: UserRow, telefone: string, texto: string)
 
   const match = texto.match(/^meta\s+(.+?)\s+([\d,.]+)$/i);
   if (!match) {
-    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: meta viagem 5000" });
+    await whatsapp.sendText({ to: telefone, text: "💡 Ex:\nmeta viagem 5000" });
     return { success: false, userId: user.id, erro: "Formato inválido" };
   }
 
@@ -997,7 +997,7 @@ async function handleMetasCommand(user: UserRow, telefone: string): Promise<Proc
   if (result.rows.length === 0) {
     await whatsapp.sendText({
       to:   telefone,
-      text: "Você ainda não tem metas.\nUse: meta viagem 5000",
+      text: "Você ainda não tem metas.\n\n💡 Ex:\nmeta viagem 5000",
     });
     return {
       success:      true,
@@ -1327,7 +1327,7 @@ async function handleRecorrenteCommand(user: UserRow, telefone: string, texto: s
 
   const match = texto.match(/^recorrente\s+([\d,.]+)\s+(.+)$/i);
   if (!match) {
-    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: recorrente 39 netflix mensal" });
+    await whatsapp.sendText({ to: telefone, text: "💡 Ex:\nrecorrente 39 netflix mensal" });
     return { success: false, userId: user.id, erro: "Formato inválido" };
   }
 
@@ -1345,7 +1345,7 @@ async function handleRecorrenteCommand(user: UserRow, telefone: string, texto: s
   }
 
   if (nomePartes.length === 0) {
-    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: recorrente 39 netflix mensal" });
+    await whatsapp.sendText({ to: telefone, text: "💡 Ex:\nrecorrente 39 netflix mensal" });
     return { success: false, userId: user.id, erro: "Nome ausente" };
   }
 
@@ -1453,7 +1453,7 @@ async function handleProximasCommand(user: UserRow, telefone: string): Promise<P
   if (result.rows.length === 0) {
     await whatsapp.sendText({
       to:   telefone,
-      text: "Nenhuma conta recorrente cadastrada.\nUse: recorrente 39 netflix mensal",
+      text: "Nenhuma conta recorrente cadastrada.\n\n💡 Ex:\nrecorrente 39 netflix mensal",
     });
     return {
       success:      true,
@@ -1503,7 +1503,7 @@ async function handleRecorrentesCommand(user: UserRow, telefone: string): Promis
   if (result.rows.length === 0) {
     await whatsapp.sendText({
       to:   telefone,
-      text: "Nenhum recorrente cadastrado.\nUse: recorrente 39 netflix mensal",
+      text: "Nenhum recorrente cadastrado.\n\n💡 Ex:\nrecorrente 39 netflix mensal",
     });
     return {
       success:      true,
@@ -1560,11 +1560,17 @@ function isAmbiguousIntent(texto: string): boolean {
   return AMBIGUOUS_INTENT_RE.test(texto.trim());
 }
 
-function buildAmbiguityHint(texto: string): string {
+function buildContextualHint(texto: string): string {
   const t = texto.toLowerCase();
-  if (/guardar|juntar|economiz|meta\b|objetivo|poupan/.test(t)) return "💡 Tente:\nguardar 200 viagem";
-  if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei/.test(t))  return "💡 Tente:\n+500 freelance";
-  return "💡 Tente:\n120 mercado";
+  // Contexto de consulta → sugere comando
+  if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))      return "💡 Use:\nsaldo";
+  if (/onde\s+gasto|mais\s+caro|\branking\b/.test(t))               return "💡 Use:\nranking";
+  if (/meus?\s+gastos?|\bresumo\b/.test(t))                         return "💡 Use:\nresumo";
+  if (/\bcontas?\b|recorrente|vencimento|pr[oó]ximas?/.test(t))     return "💡 Use:\npróximas";
+  // Contexto de movimentação
+  if (/guardar|juntar|economiz|\bmeta\b|objetivo|poupan/.test(t))   return "💡 Ex:\nguardar 200 viagem";
+  if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return "💡 Ex:\n+250 salário";
+  return "💡 Ex:\n120 mercado";
 }
 
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
@@ -1744,7 +1750,7 @@ async function handleCorrigirNovoValor(user: UserRow, telefone: string, texto: s
   if (!parsed) {
     await whatsapp.sendText({
       to:   telefone,
-      text: `Não entendi. Envie valor e descrição.\nEx: 50 mercado\nOu "cancelar" para desistir.`,
+      text: `💡 Ex:\n50 mercado\n\nou "cancelar"`,
     });
     return { success: false, userId: user.id, erro: "Input inválido para correção" };
   }
