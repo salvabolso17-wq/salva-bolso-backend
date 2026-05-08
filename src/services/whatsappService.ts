@@ -284,9 +284,23 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   // ── Parser ────────────────────────────────────────────────────────────────
-  log.parser("analisando", { texto: message.texto });
 
-  const parsed = parseTransaction(message.texto);
+  // Onboarding step 1: número puro sem palavra-chave → interpretar como renda
+  let textoParsear = message.texto;
+  if (isOnboardingEnabled(message.telefone) && /^\d[\d,.]*$/.test(message.texto.trim())) {
+    const cRow = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
+      [user.id]
+    );
+    if (Number(cRow.rows[0].count) === 0) {
+      textoParsear = message.texto.trim() + " salário";
+      log.parser("onboarding: numero puro → renda", { original: message.texto, ajustado: textoParsear });
+    }
+  }
+
+  log.parser("analisando", { texto: textoParsear });
+
+  const parsed = parseTransaction(textoParsear);
 
   if (!parsed) {
     log.parser("nao reconhecido", { texto: message.texto });
@@ -1196,6 +1210,13 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
 }
 
 async function checkAndSendInsights(userId: number, telefone: string, categoria: string): Promise<void> {
+  // Aguarda pelo menos 3 gastos antes de comentar percentuais — evita "X representa 100%" no 1º lançamento
+  const countRow = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+    [userId]
+  );
+  if (Number(countRow.rows[0].count) < 3) return;
+
   const now       = new Date();
   const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
