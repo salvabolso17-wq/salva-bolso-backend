@@ -185,11 +185,61 @@ async function sendMonthlyClosingNotifications(): Promise<void> {
   }
 }
 
+// Dia 1 do mês: inicia fluxo interativo para renda + carryover de saldo (máx 1x/mês por usuário)
+async function sendNewMonthFlowNotifications(): Promise<void> {
+  if (new Date().getUTCDate() !== 1) return;
+
+  const now       = new Date();
+  const prevStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const prevEnd   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const sentinel  = prevStart;
+  const mesAtual  = MESES[now.getUTCMonth()];
+
+  const { rows } = await pool.query<{ id: number; telefone: string }>(`
+    SELECT u.id, u.telefone
+    FROM users u
+    WHERE (
+      SELECT COUNT(*) FROM transactions
+      WHERE user_id = u.id AND criado_em >= $1 AND criado_em < $2
+    ) >= 1
+    AND NOT EXISTS (
+      SELECT 1 FROM sent_insights
+      WHERE user_id = u.id AND categoria = 'notif_novo_mes' AND mes_referencia = $1
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM pending_actions WHERE user_id = u.id
+    )
+  `, [prevStart, prevEnd]);
+
+  for (const user of rows) {
+    if (!(await tryMarkSent(user.id, "notif_novo_mes", sentinel))) continue;
+
+    const inserted = await pool.query(
+      `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+       VALUES ($1, 'novo_mes', 'waiting_renda', '[]', NOW() + INTERVAL '24 hours')
+       ON CONFLICT (user_id) DO NOTHING`,
+      [user.id]
+    );
+    if ((inserted.rowCount ?? 0) === 0) continue;
+
+    try {
+      await whatsapp.sendText({
+        to:   user.telefone,
+        text: `🌅 Novo mês iniciado!\n\nQual sua renda para ${mesAtual}?`,
+      });
+      log.whatsapp("notif novo mes enviada", { to: user.telefone, userId: user.id, mes: mesAtual });
+    } catch (err) {
+      log.error("falha ao enviar notif novo mes", err, { userId: user.id });
+    }
+  }
+}
+
 export async function runDailyNotifications(): Promise<void> {
   log.webhook("iniciando notificações diárias");
   try { await sendInactivityNotifications(); }         catch (err) { log.error("falha notif inatividade", err); }
   try { await sendMonthEndNotifications(); }            catch (err) { log.error("falha notif fim mes", err); }
   try { await sendGoalStagnationNotifications(); }      catch (err) { log.error("falha notif meta parada", err); }
   try { await sendMonthlyClosingNotifications(); }      catch (err) { log.error("falha notif fechamento", err); }
+  try { await sendNewMonthFlowNotifications(); }        catch (err) { log.error("falha notif novo mes", err); }
   log.webhook("notificações diárias concluídas");
 }

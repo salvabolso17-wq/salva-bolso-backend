@@ -115,9 +115,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir";
-    step: "waiting_selection" | "waiting_new_value";
-    tx_ids: number[];
+    action: "apagar" | "corrigir" | "novo_mes";
+    step: "waiting_selection" | "waiting_new_value" | "waiting_renda" | "waiting_carryover";
+    tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
     `SELECT action, step, tx_ids, selected_tx_id
@@ -137,9 +137,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
 
     if (pending.step === "waiting_selection") {
-      const num = parseInt(textoTrim, 10);
-      if (!isNaN(num) && num >= 1 && num <= pending.tx_ids.length) {
-        const txId = pending.tx_ids[num - 1];
+      const txIds = pending.tx_ids as number[];
+      const num   = parseInt(textoTrim, 10);
+      if (!isNaN(num) && num >= 1 && num <= txIds.length) {
+        const txId = txIds[num - 1];
         return pending.action === "apagar"
           ? await handleApagarSelecao(user, message.telefone, txId)
           : await handleCorrigirSelecao(user, message.telefone, txId);
@@ -147,7 +148,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       if (!isKnownCommand(textoTrim)) {
         await whatsapp.sendText({
           to:   message.telefone,
-          text: `Envie um número de 1 a ${pending.tx_ids.length}, ou "cancelar".`,
+          text: `Envie um número de 1 a ${txIds.length}, ou "cancelar".`,
         });
         return { success: false, userId: user.id, erro: "Aguardando seleção" };
       }
@@ -158,6 +159,20 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         return await handleCorrigirNovoValor(user, message.telefone, message.texto, pending.selected_tx_id!);
       }
       // Comando reconhecido → cancela pending e continua abaixo
+      await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    } else if (pending.step === "waiting_renda") {
+      if (!isKnownCommand(textoTrim)) {
+        return await handleNovoMesRenda(user, message.telefone, textoTrim);
+      }
+      await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    } else if (pending.step === "waiting_carryover") {
+      if (textoTrim === "1" || textoTrim === "2") {
+        return await handleNovoMesCarryover(user, message.telefone, textoTrim, pending.tx_ids);
+      }
+      if (!isKnownCommand(textoTrim)) {
+        await whatsapp.sendText({ to: message.telefone, text: "Responda:\n1️⃣ Sim\n2️⃣ Não" });
+        return { success: false, userId: user.id, erro: "Aguardando escolha carryover" };
+      }
       await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     }
   }
@@ -1764,6 +1779,92 @@ async function handleCorrigirNovoValor(user: UserRow, telefone: string, texto: s
     transacao:    {},
     interpretado: { comando: "corrigir", txId, valor: parsed.valor, categoria: parsed.categoria },
   };
+}
+
+async function handleNovoMesRenda(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  log.webhook("novo_mes renda recebida", { userId: user.id, texto });
+
+  const valor = parseFloat(
+    texto.replace(/R\$\s*/i, "").replace(/\./g, "").replace(",", ".").trim()
+  );
+
+  if (isNaN(valor) || valor <= 0) {
+    await whatsapp.sendText({ to: telefone, text: "💡 Ex:\n3500" });
+    return { success: false, userId: user.id, erro: "Valor inválido para renda" };
+  }
+
+  const now       = new Date();
+  const prevStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const prevEnd   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const meses     = ["janeiro","fevereiro","março","abril","maio","junho",
+                     "julho","agosto","setembro","outubro","novembro","dezembro"];
+  const mesPrev   = meses[prevStart.getUTCMonth()];
+  const mesAtual  = meses[now.getUTCMonth()];
+
+  // Calcula saldo do mês anterior ANTES de atualizar users.renda
+  const metrics       = await fetchPeriodMetrics(user.id, prevStart, prevEnd);
+  const rendaAnterior = Number(user.renda ?? 0) + Number(user.renda_extra ?? 0);
+  const saldoPrev     = rendaAnterior + metrics.total_entradas - metrics.total_saidas;
+
+  // Atualiza renda para o novo mês
+  await pool.query(`UPDATE users SET renda = $1 WHERE id = $2`, [valor, user.id]);
+
+  let resposta: string;
+
+  if (saldoPrev > 0.01) {
+    // Guarda saldo em centavos no pending para a próxima etapa
+    await pool.query(
+      `UPDATE pending_actions
+       SET step = 'waiting_carryover',
+           tx_ids = $1::jsonb,
+           expires_at = NOW() + INTERVAL '24 hours'
+       WHERE user_id = $2`,
+      [JSON.stringify({ saldo_centavos: Math.round(saldoPrev * 100) }), user.id]
+    );
+    resposta = [
+      "💰 Renda registrada.",
+      "",
+      `Você terminou ${mesPrev} com:`,
+      `+${fmtValor(saldoPrev)}`,
+      "",
+      `Deseja levar esse saldo para ${mesAtual}?`,
+      "",
+      "1️⃣ Sim",
+      "2️⃣ Não",
+    ].join("\n");
+  } else {
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    resposta = saldoPrev < -0.01
+      ? `💰 Renda registrada.\n\n${mesPrev.charAt(0).toUpperCase() + mesPrev.slice(1)} encerrou no vermelho. Bora virar o jogo! 💪`
+      : `💰 Renda registrada. Bom ${mesAtual}! 🚀`;
+  }
+
+  await whatsapp.sendText({ to: telefone, text: resposta });
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "novo_mes_renda", valor } };
+}
+
+async function handleNovoMesCarryover(
+  user: UserRow, telefone: string, escolha: string, txIdsRaw: unknown
+): Promise<ProcessResult> {
+  log.webhook("novo_mes carryover", { userId: user.id, escolha });
+
+  const saldo = ((txIdsRaw as { saldo_centavos?: number })?.saldo_centavos ?? 0) / 100;
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+  let msg: string;
+  if (escolha === "1" && saldo > 0) {
+    await pool.query(
+      `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+       VALUES ($1, 'entrada', $2, 'Outros', 'saldo anterior')`,
+      [user.id, saldo]
+    );
+    msg = `✅ ${fmtValor(saldo)} do mês passado adicionados ao saldo. 💰`;
+  } else {
+    msg = "✅ Ok! Começando o mês do zero. 🚀";
+  }
+
+  await whatsapp.sendText({ to: telefone, text: msg });
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "novo_mes_carryover", escolha } };
 }
 
 async function handleTopGastosCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
