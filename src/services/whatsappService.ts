@@ -136,7 +136,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
       [user.id]
     );
-    if (Number(countRow.rows[0].count) === 0) {
+    if (Number(countRow.rows[0].count) === 0 && isOnboardingEnabled(message.telefone)) {
       const boas_vindas = [
         "👋 Bem-vindo ao Salva Bolso",
         "",
@@ -270,7 +270,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // ── Enviar confirmação WhatsApp ───────────────────────────────────────────
 
   // Onboarding step 2: primeira transação é uma entrada → direcionar para o primeiro gasto
-  if (parsed.tipo === "entrada") {
+  if (parsed.tipo === "entrada" && isOnboardingEnabled(message.telefone)) {
     const countRow = await pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
       [user.id]
@@ -1092,6 +1092,8 @@ const ONBOARDING_TIPS: Record<number, string> = {
 };
 
 async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<void> {
+  if (!isOnboardingEnabled(telefone)) return;
+
   // mes_referencia fixo como sentinel de lifetime (não se repete mensalmente)
   const LIFETIME = new Date("2000-01-01");
 
@@ -1442,6 +1444,15 @@ async function handleRecorrentesCommand(user: UserRow, telefone: string): Promis
     transacao:    {},
     interpretado: { comando: "recorrentes", count: result.rows.length, totalMensal },
   };
+}
+
+function isOnboardingEnabled(telefone: string): boolean {
+  const raw = process.env.ONBOARDING_WHITELIST ?? "";
+  if (!raw.trim()) return false;
+  const normalized = telefone.replace(/\D/g, "");
+  return raw.split(",")
+    .map(n => n.trim().replace(/\D/g, ""))
+    .some(n => n && (normalized.endsWith(n) || n.endsWith(normalized)));
 }
 
 function isKnownCommand(texto: string): boolean {
