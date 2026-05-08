@@ -460,6 +460,12 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
     log.error("falha ao enviar saldo", err, { to: telefone });
   }
 
+  setTimeout(() => {
+    checkAndSendOnboardingTip(user.id, telefone, "saldo_usado").catch(err =>
+      log.error("falha ao verificar onboarding tip saldo_usado", err, { userId: user.id })
+    );
+  }, 800);
+
   return {
     success:      true,
     userId:       user.id,
@@ -1160,11 +1166,12 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
 
 const ONBOARDING_TIPS: Record<number, string> = {
   1:  `💡 Envie "saldo" para acompanhar quanto ainda resta no mês.`,
-  2:  `💡 Envie "resumo" para ver onde você mais gastou.`,
-  3:  `💡 Experimente "top gastos" para ver seus maiores gastos do mês.`,
-  4:  `💡 Envie "desafio" para receber uma sugestão de economia personalizada.`,
+  2:  `📊 Envie "resumo" para ver onde você mais gastou.`,
+  3:  `🏆 Envie "ranking" para descobrir suas categorias mais caras.`,
+  4:  `🎯 Crie sua primeira meta:\nEx: meta viagem 5000`,
   10: `💡 Use "guardar 200 <nome da meta>" para registrar seu progresso.`,
-  11: `💡 Envie "ranking" para descobrir suas categorias com maior impacto.`,
+  11: `📈 Use "comparar" para ver como seus gastos evoluíram mês a mês.`,
+  12: `📅 Use "próximas" para ver suas contas recorrentes.`,
 };
 
 async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<void> {
@@ -1181,10 +1188,13 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
       [userId]
     );
     const n = Number(countRow.rows[0].count);
-    if      (n === 1)  tipId = 1;
-    else if (n === 5)  tipId = 2;
-    else if (n === 10) tipId = 3;
-    else if (n === 20) tipId = 4;
+    if      (n === 1) tipId = 1;   // 1º gasto → saldo
+    else if (n === 4) tipId = 3;   // 4º gasto → ranking
+    else if (n === 8) tipId = 4;   // 8º gasto → criar meta
+  } else if (evento === "saldo_usado") {
+    tipId = 2;                     // usou saldo → resumo
+  } else if (evento === "recorrente_criado") {
+    tipId = 12;                    // criou recorrente → próximas
   } else if (evento === "meta_criada") {
     tipId = 10;
   } else if (evento === "limite_criado") {
@@ -1363,6 +1373,12 @@ async function handleRecorrenteCommand(user: UserRow, telefone: string, texto: s
   });
 
   log.whatsapp("recorrente criado", { to: telefone, nome, valor, frequencia });
+
+  setTimeout(() => {
+    checkAndSendOnboardingTip(user.id, telefone, "recorrente_criado").catch(err =>
+      log.error("falha ao verificar onboarding tip recorrente_criado", err, { userId: user.id })
+    );
+  }, 800);
 
   return {
     success:      true,
