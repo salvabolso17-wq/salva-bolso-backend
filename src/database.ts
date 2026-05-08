@@ -11,6 +11,8 @@ export async function createTables() {
         nome VARCHAR(100),
         renda NUMERIC(10,2) DEFAULT 0,
         renda_extra NUMERIC(10,2) DEFAULT 0,
+        subscription_status VARCHAR(20) NOT NULL DEFAULT 'trial',
+        trial_ends_at TIMESTAMPTZ,
         criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -29,6 +31,21 @@ export async function createTables() {
 
     await pool.query(`
       ALTER TABLE users ADD COLUMN IF NOT EXISTS senha VARCHAR(255);
+    `);
+
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(20) NOT NULL DEFAULT 'trial';
+    `);
+
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
+    `);
+
+    // Usuários existentes antes da migração: 90 dias de graça a partir do cadastro
+    await pool.query(`
+      UPDATE users
+      SET trial_ends_at = criado_em + INTERVAL '90 days'
+      WHERE trial_ends_at IS NULL;
     `);
 
     await pool.query(`

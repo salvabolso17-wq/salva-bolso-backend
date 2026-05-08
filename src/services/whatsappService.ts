@@ -11,6 +11,8 @@ interface UserRow {
   nome: string | null;
   renda: string;
   renda_extra: string;
+  subscription_status: string;
+  trial_ends_at: Date | null;
 }
 
 type ProcessResult =
@@ -23,7 +25,7 @@ async function findUserByTelefone(telefone: string): Promise<UserRow | null> {
   log.user("buscando", { telefone: normalized });
 
   const result = await pool.query<UserRow>(
-    `SELECT id, telefone, nome, renda, renda_extra FROM users
+    `SELECT id, telefone, nome, renda, renda_extra, subscription_status, trial_ends_at FROM users
      WHERE REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = $1
         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 11) = RIGHT($1, 11)
         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 8)  = RIGHT($1, 8)
@@ -82,7 +84,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       log.user("criando usuario via onboarding", { telefone: message.telefone });
       try {
         await pool.query(
-          `INSERT INTO users (telefone) VALUES ($1) ON CONFLICT (telefone) DO NOTHING`,
+          `INSERT INTO users (telefone, trial_ends_at)
+           VALUES ($1, NOW() + INTERVAL '7 days')
+           ON CONFLICT (telefone) DO NOTHING`,
           [message.telefone]
         );
       } catch (err) {
@@ -111,6 +115,15 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
 
     return { success: false, erro: `Nenhum usuário com telefone ${message.telefone}` };
+  }
+
+  // ── Controle de acesso (trial / active / expired) ────────────────────────
+  if (!isSubscriptionActive(user)) {
+    await whatsapp.sendText({
+      to:   message.telefone,
+      text: "🔒 Seu acesso expirou.\n\nAssine para continuar usando o Salva Bolso 😄",
+    });
+    return { success: false, userId: user.id, erro: "Assinatura expirada" };
   }
 
   // ── Pending action check ──────────────────────────────────────────────────
@@ -1534,6 +1547,14 @@ async function handleRecorrentesCommand(user: UserRow, telefone: string): Promis
     transacao:    {},
     interpretado: { comando: "recorrentes", count: result.rows.length, totalMensal },
   };
+}
+
+function isSubscriptionActive(user: UserRow): boolean {
+  if (user.subscription_status === "active") return true;
+  if (user.subscription_status === "trial") {
+    return !user.trial_ends_at || new Date(user.trial_ends_at) > new Date();
+  }
+  return false;
 }
 
 function isOnboardingEnabled(telefone: string): boolean {
