@@ -72,19 +72,25 @@ LOGS=$(docker service logs --since 20s salva-bolso_backend-salvabolso 2>&1 | gre
 echo "$LOGS"
 
 echo ""
-if echo "$LOGS" | grep -q "\[WEBHOOK\]"; then
+if echo "$LOGS" | grep -q "\[WEBHOOK"; then
   ok "WEBHOOK PROCESSADO COM SUCESSO"
-  echo "$LOGS" | grep -E "\[WEBHOOK\]|\[USER\]|\[PARSER\]|\[DB\]|\[WHATSAPP\]|\[ERROR\]"
+  echo "$LOGS" | grep -E "WEBHOOK|USER|PARSER|DB |WHATSAPP|ERROR"
   echo ""
-  if echo "$BACKEND_IP" != "salva-bolso_backend-salvabolso"; then
-    warn "ATENCAO: backend so esta acessivel via IP $BACKEND_IP"
-    warn "Atualizando webhook da Evolution para usar IP direto..."
-    docker exec "$CID" wget -qO- -T10 \
+  # Atualizar webhook da Evolution para usar IP direto (fix ghost DNS)
+  CURRENT_WEBHOOK=$(docker exec "$CID" wget -qO- -T5 \
+    --header="apikey: salvabolsoevolution123456" \
+    http://localhost:8080/webhook/find/salva-bolso 2>/dev/null | grep -o '"url":"[^"]*"' | head -1)
+  if echo "$CURRENT_WEBHOOK" | grep -q "$BACKEND_IP"; then
+    ok "Webhook ja aponta para IP correto: $BACKEND_IP"
+  else
+    warn "Atualizando webhook da Evolution: service name → IP direto $BACKEND_IP"
+    UPDATE=$(docker exec "$CID" wget -qO- -T10 \
       --post-data="{\"url\":\"http://$BACKEND_IP/webhooks/whatsapp?provider=evolution\",\"enabled\":true,\"events\":[\"MESSAGES_UPSERT\"]}" \
       --header="apikey: salvabolsoevolution123456" \
       --header="Content-Type: application/json" \
-      http://localhost:8080/webhook/set/salva-bolso 2>&1
-    ok "Webhook da Evolution atualizado para IP direto"
+      http://localhost:8080/webhook/set/salva-bolso 2>&1)
+    echo "  $UPDATE"
+    ok "Webhook atualizado — Evolution agora envia direto para $BACKEND_IP"
   fi
 else
   warn "Webhook nao apareceu nos logs"
