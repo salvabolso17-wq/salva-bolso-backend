@@ -193,7 +193,7 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
     `Gastos: R$ ${metrics.total_saidas.toFixed(2)}`,
     sobrou >= 0
       ? `Sobrou: R$ ${sobrou.toFixed(2)}`
-      : `Deficit: R$ ${Math.abs(sobrou).toFixed(2)}`,
+      : `Sobrou: -R$ ${Math.abs(sobrou).toFixed(2)}`,
   ];
 
   try {
