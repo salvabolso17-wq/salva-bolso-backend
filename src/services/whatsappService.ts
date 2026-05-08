@@ -262,7 +262,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (isAmbiguousIntent(message.texto)) {
     await whatsapp.sendText({
       to:   message.telefone,
-      text: "💡 Não consegui entender essa movimentação.\n\nExemplos válidos:\n120 mercado\n+500 freelance\nguardar 200 viagem",
+      text: buildAmbiguityHint(message.texto),
     });
     return { success: false, userId: user.id, erro: "Mensagem ambígua" };
   }
@@ -1558,6 +1558,13 @@ const AMBIGUOUS_INTENT_RE = /\bacho\b|\btalvez\b|\bquero\b|\blembr[ae]\b|\blembr
 
 function isAmbiguousIntent(texto: string): boolean {
   return AMBIGUOUS_INTENT_RE.test(texto.trim());
+}
+
+function buildAmbiguityHint(texto: string): string {
+  const t = texto.toLowerCase();
+  if (/guardar|juntar|economiz|meta\b|objetivo|poupan/.test(t)) return "💡 Tente:\nguardar 200 viagem";
+  if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei/.test(t))  return "💡 Tente:\n+500 freelance";
+  return "💡 Tente:\n120 mercado";
 }
 
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
