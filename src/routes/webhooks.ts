@@ -124,52 +124,63 @@ async function fetchAsaasCustomerPhone(customerId: string): Promise<string | nul
 
 // POST /webhooks/asaas — ativa usuário quando pagamento é confirmado
 router.post("/asaas", async (req, res) => {
-  // Valida token do Asaas (configurar ASAAS_WEBHOOK_TOKEN no .env / EasyPanel)
-  const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
-  if (webhookToken) {
-    const received = req.headers["asaas-access-token"];
-    if (received !== webhookToken) {
-      log.error("asaas webhook: token invalido", undefined, { received: received ?? "(ausente)" });
-      res.status(401).json({ error: "Token inválido" });
-      return;
-    }
-  }
-
-  const body    = req.body as Record<string, unknown>;
-  const event   = body.event as string | undefined;
-  const payment = body.payment as Record<string, unknown> | undefined;
-
-  log.webhook("asaas evento recebido", { event, paymentId: payment?.id });
-
-  // Apenas processa confirmações de pagamento
-  if (event !== "PAYMENT_CONFIRMED" && event !== "PAYMENT_RECEIVED") {
-    res.status(200).json({ received: true, ignored: true, event });
-    return;
-  }
-
-  // Resolve telefone: externalReference → fallback via customer API
-  let telefoneRaw = payment?.externalReference as string | undefined;
-
-  if (!telefoneRaw) {
-    const customerId = payment?.customer as string | undefined;
-    if (!customerId) {
-      log.error("asaas: sem externalReference e sem customer", undefined, { paymentId: payment?.id });
-      res.status(200).json({ received: true, error: "Sem identificador de usuário" });
-      return;
-    }
-    log.webhook("asaas: buscando telefone via customer API", { customerId, paymentId: payment?.id });
-    const phone = await fetchAsaasCustomerPhone(customerId);
-    if (!phone) {
-      res.status(200).json({ received: true, error: "Telefone do customer não encontrado" });
-      return;
-    }
-    telefoneRaw = phone;
-  }
-
-  const telefone = telefoneRaw.replace(/\D/g, "");
-
   try {
+    console.error("[ASAAS] webhook recebido — body:", JSON.stringify(req.body).slice(0, 500));
+
+    // Valida token do Asaas (configurar ASAAS_WEBHOOK_TOKEN no .env / EasyPanel)
+    const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
+    if (webhookToken) {
+      const received = req.headers["asaas-access-token"];
+      if (received !== webhookToken) {
+        console.error("[ASAAS] token invalido, recebido:", received ?? "(ausente)");
+        res.status(200).json({ received: true, error: "Token inválido" });
+        return;
+      }
+    }
+
+    const body    = req.body as Record<string, unknown>;
+    const event   = body.event as string | undefined;
+    const payment = body.payment as Record<string, unknown> | undefined;
+
+    console.error("[ASAAS] event:", event, "paymentId:", payment?.id);
+
+    // Apenas processa confirmações de pagamento
+    if (event !== "PAYMENT_CONFIRMED" && event !== "PAYMENT_RECEIVED") {
+      console.error("[ASAAS] evento ignorado:", event);
+      res.status(200).json({ received: true, ignored: true, event });
+      return;
+    }
+
+    // Resolve telefone: externalReference → fallback via customer API
+    let telefoneRaw = payment?.externalReference as string | undefined;
+    console.error("[ASAAS] externalReference:", telefoneRaw ?? "(ausente)");
+
+    if (!telefoneRaw) {
+      const customerId = payment?.customer as string | undefined;
+      console.error("[ASAAS] customer id:", customerId ?? "(ausente)");
+
+      if (!customerId) {
+        console.error("[ASAAS] sem externalReference e sem customer — abortando");
+        res.status(200).json({ received: true, error: "Sem identificador de usuário" });
+        return;
+      }
+
+      console.error("[ASAAS] buscando telefone via GET /customers/" + customerId);
+      const phone = await fetchAsaasCustomerPhone(customerId);
+      console.error("[ASAAS] telefone retornado:", phone ?? "(nulo)");
+
+      if (!phone) {
+        res.status(200).json({ received: true, error: "Telefone do customer não encontrado" });
+        return;
+      }
+      telefoneRaw = phone;
+    }
+
+    const telefone = telefoneRaw.replace(/\D/g, "");
+    console.error("[ASAAS] telefone normalizado:", telefone);
+
     // Ativa usuário — idempotente (só atualiza se ainda não for 'active')
+    console.error("[ASAAS] executando UPDATE no banco...");
     const result = await pool.query<{ id: number; telefone: string }>(
       `UPDATE users
        SET subscription_status = 'active'
@@ -182,13 +193,16 @@ router.post("/asaas", async (req, res) => {
       [telefone]
     );
 
+    console.error("[ASAAS] rowCount do UPDATE:", result.rowCount);
+
     if (result.rowCount === 0) {
-      log.webhook("asaas: usuario ja ativo ou nao encontrado", { telefone });
+      console.error("[ASAAS] usuario ja ativo ou nao encontrado para telefone:", telefone);
       res.status(200).json({ received: true, alreadyActive: true });
       return;
     }
 
     const user = result.rows[0];
+    console.error("[ASAAS] usuario ativado:", user.id, user.telefone);
     log.webhook("asaas: usuario ativado", {
       userId: user.id, telefone: user.telefone, paymentId: payment?.id,
     });
@@ -199,14 +213,17 @@ router.post("/asaas", async (req, res) => {
         to:   user.telefone,
         text: "✅ Assinatura ativada!\n\nBem-vindo ao Salva Bolso 🚀",
       });
+      console.error("[ASAAS] notificacao WhatsApp enviada para:", user.telefone);
     } catch (err) {
+      console.error("[ASAAS] falha ao notificar WhatsApp:", err);
       log.error("asaas: falha ao notificar usuario", err, { userId: user.id });
     }
 
     res.status(200).json({ received: true, activated: true, userId: user.id });
   } catch (err) {
-    log.error("asaas: erro ao processar webhook", err, { event, telefone });
-    res.status(200).json({ received: true, error: "Erro interno" });
+    console.error("[ASAAS] ERRO INTERNO NO WEBHOOK:", err);
+    log.error("asaas: erro interno no webhook", err);
+    res.status(200).json({ received: true });
   }
 });
 
