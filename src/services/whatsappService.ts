@@ -121,6 +121,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^desafio$/i.test(message.texto.trim())) {
     return await handleDesafioCommand(user, message.telefone);
   }
+  if (/^(apagar|corrigir)$/i.test(message.texto.trim())) {
+    return await handleApagarCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -884,6 +887,7 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
     "🏆 top gastos",
     "📂 categorias",
     "🎯 metas",
+    "❌ apagar",
     "",
     "⚙️ limite alimentação 800",
     "🎯 meta viagem 5000",
@@ -1066,6 +1070,51 @@ async function checkAndSendInsights(userId: number, telefone: string, categoria:
   });
 
   log.whatsapp("insight enviado", { to: telefone, categoria, percentual, marco });
+}
+
+async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando apagar", { userId: user.id });
+
+  const result = await pool.query<{ id: number; tipo: string; valor: string; categoria: string; descricao: string }>(
+    `SELECT id, tipo, valor, categoria, descricao
+     FROM transactions
+     WHERE user_id = $1
+     ORDER BY criado_em DESC
+     LIMIT 1`,
+    [user.id]
+  );
+
+  if (result.rows.length === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Nenhum lançamento encontrado para apagar." });
+    return { success: false, userId: user.id, erro: "Sem transações" };
+  }
+
+  const tx      = result.rows[0];
+  const valor   = Number(tx.valor);
+  const tipoIcon = tx.tipo === "entrada" ? "💰" : "💸";
+
+  await pool.query(`DELETE FROM transactions WHERE id = $1`, [tx.id]);
+
+  const linhas = [
+    "❌ Último lançamento apagado:",
+    "",
+    `${tipoIcon} ${tx.descricao ?? tx.categoria} — ${fmtValor(valor)}`,
+    tx.tipo === "saida" ? `Categoria: ${tx.categoria}` : "Entrada",
+  ];
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("apagar enviado", { to: telefone, txId: tx.id, valor, categoria: tx.categoria });
+  } catch (err) {
+    log.error("falha ao enviar apagar", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "apagar", txId: tx.id, valor, categoria: tx.categoria, tipo: tx.tipo },
+  };
 }
 
 async function handleTopGastosCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
