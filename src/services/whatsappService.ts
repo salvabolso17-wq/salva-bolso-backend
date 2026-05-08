@@ -94,6 +94,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^hoje$/i.test(message.texto.trim())) {
     return await handleHojeCommand(user, message.telefone);
   }
+  if (/^semana$/i.test(message.texto.trim())) {
+    return await handleSemanaCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -345,6 +348,55 @@ async function handleLimiteCommand(user: UserRow, telefone: string, texto: strin
     userId:       user.id,
     transacao:    {},
     interpretado: { comando: "limite", categoria, valorLimite },
+  };
+}
+
+async function handleSemanaCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando semana", { userId: user.id });
+
+  const now        = new Date();
+  const inicio7d   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6));
+  const fimHoje    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+
+  const result = await pool.query<{ categoria: string; total: string }>(
+    `SELECT COALESCE(categoria, 'Outros') AS categoria, SUM(valor) AS total
+     FROM transactions
+     WHERE user_id = $1
+       AND tipo = 'saida'
+       AND criado_em >= $2
+       AND criado_em < $3
+     GROUP BY categoria
+     ORDER BY total DESC`,
+    [user.id, inicio7d, fimHoje]
+  );
+
+  const linhas = ["Gastos da semana", ""];
+
+  if (result.rows.length === 0) {
+    linhas.push("Nenhum gasto registrado nesta semana.");
+  } else {
+    let total = 0;
+    for (const row of result.rows) {
+      const valor = Number(row.total);
+      total += valor;
+      linhas.push(`${row.categoria} — R$ ${valor.toFixed(2)}`);
+    }
+    linhas.push("");
+    linhas.push(`Total na semana: R$ ${total.toFixed(2)}`);
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("semana enviado", { to: telefone, categorias: result.rows.length });
+  } catch (err) {
+    log.error("falha ao enviar semana", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "semana", categorias: result.rows.length },
   };
 }
 
