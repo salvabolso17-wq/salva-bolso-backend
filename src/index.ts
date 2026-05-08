@@ -17,7 +17,7 @@ import insightsRoutes from "./routes/insights";
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 app.use("/auth", authRoutes);
 app.use("/users", usersRoutes);
@@ -26,6 +26,12 @@ app.use("/financial-goals", financialGoalsRoutes);
 app.use("/reports", reportsRoutes);
 app.use("/webhooks", webhooksRoutes);
 app.use("/insights", insightsRoutes);
+
+// Global error handler — catches sync throws and next(err) calls
+app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("[GLOBAL ERROR]", err);
+  res.status(200).json({ received: true });
+});
 
 app.get("/", async (req, res) => {
   try {

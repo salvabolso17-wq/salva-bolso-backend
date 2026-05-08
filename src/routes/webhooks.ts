@@ -124,6 +124,7 @@ async function fetchAsaasCustomerPhone(customerId: string): Promise<string | nul
 
 // POST /webhooks/asaas — ativa usuário quando pagamento é confirmado
 router.post("/asaas", async (req, res) => {
+  console.log("[ASAAS] rota acessada");
   try {
     console.error("[ASAAS] webhook recebido — body:", JSON.stringify(req.body).slice(0, 500));
 
