@@ -758,84 +758,66 @@ async function handleDesafioCommand(user: UserRow, telefone: string): Promise<Pr
 async function handleCompararCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando comparar", { userId: user.id });
 
-  const now = new Date();
-
+  const now            = new Date();
   const inicioAtual    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const fimAtual       = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   const inicioAnterior = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-  const fimAnterior    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-
-  const meses = ["janeiro","fevereiro","março","abril","maio","junho",
-                 "julho","agosto","setembro","outubro","novembro","dezembro"];
+  const fimAnterior    = inicioAtual;
 
   const [atual, anterior] = await Promise.all([
     fetchPeriodMetrics(user.id, inicioAtual, fimAtual),
     fetchPeriodMetrics(user.id, inicioAnterior, fimAnterior),
   ]);
 
-  const nomeMesAtual    = meses[now.getUTCMonth()];
-  const nomeMesAnterior = meses[(now.getUTCMonth() + 11) % 12];
-
-  if (anterior.total_saidas === 0 && atual.total_saidas === 0) {
-    await whatsapp.sendText({ to: telefone, text: "Sem dados suficientes para comparar." });
+  if (anterior.total_saidas === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Sem dados do mês anterior para comparar." });
     return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "comparar" } };
   }
 
-  const diff       = atual.total_saidas - anterior.total_saidas;
-  const diffSinal  = diff >= 0 ? "+" : "-";
-  const diffAbs    = Math.abs(diff);
-  const diffPct    = anterior.total_saidas > 0
-    ? Math.round((diff / anterior.total_saidas) * 100)
-    : 100;
+  // Variações por categoria — filtra ruído (< R$50) e mudanças irrelevantes (< 10%)
+  const anteriorMap = new Map(anterior.gastos_por_categoria.map(c => [c.categoria, c.total]));
+  type CatChange = { categoria: string; pct: number };
+  const mudancas: CatChange[] = [];
 
-  const linhas = [
-    "📈 Comparação mensal",
-    "",
-    `${nomeMesAtual.charAt(0).toUpperCase() + nomeMesAtual.slice(1)}:`,
-    `${fmtValor(atual.total_saidas)} gastos`,
-    "",
-    `${nomeMesAnterior.charAt(0).toUpperCase() + nomeMesAnterior.slice(1)}:`,
-    `${fmtValor(anterior.total_saidas)} gastos`,
-    "",
-    "Diferença:",
-    `${diffSinal}${fmtValor(diffAbs)} (${diffSinal}${Math.abs(diffPct)}%)`,
-  ];
+  for (const cat of atual.gastos_por_categoria) {
+    const antes = anteriorMap.get(cat.categoria) ?? 0;
+    if (antes < 50 && cat.total < 50) continue;
+    if (antes === 0) continue;
+    const pct = Math.round(((cat.total - antes) / antes) * 100);
+    if (Math.abs(pct) < 10) continue;
+    mudancas.push({ categoria: cat.categoria, pct });
+  }
 
-  // Categoria que mais aumentou
-  if (atual.gastos_por_categoria.length > 0 && anterior.gastos_por_categoria.length > 0) {
-    const anteriorMap = new Map(anterior.gastos_por_categoria.map(c => [c.categoria, c.total]));
-    let maiorAumento     = -Infinity;
-    let categoriaMaior   = "";
+  // Top 3 pelo maior |Δ%|
+  mudancas.sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+  const top3 = mudancas.slice(0, 3);
 
-    for (const cat of atual.gastos_por_categoria) {
-      const totalAntes = anteriorMap.get(cat.categoria) ?? 0;
-      const aumento    = cat.total - totalAntes;
-      if (aumento > maiorAumento) {
-        maiorAumento   = aumento;
-        categoriaMaior = cat.categoria;
-      }
-    }
+  const linhas: string[] = ["📈 Comparado ao mês passado:", ""];
 
-    if (categoriaMaior && maiorAumento > 0) {
-      const emoji = CATEGORIA_EMOJI[categoriaMaior] ?? "•";
-      linhas.push("", "Categoria que mais aumentou:");
-      linhas.push(`${emoji} ${categoriaMaior}`);
-    }
+  for (const { categoria, pct } of top3) {
+    const emoji = CATEGORIA_EMOJI[categoria] ?? "💸";
+    linhas.push(`${emoji} ${categoria}:`);
+    linhas.push(`${pct >= 0 ? "+" : ""}${pct}%`);
+    linhas.push("");
+  }
+
+  const diff = atual.total_saidas - anterior.total_saidas;
+  if (diff < 0) {
+    linhas.push(`💰 Você economizou ${fmtValor(Math.abs(diff))} a mais este mês.`);
+  } else if (diff > 0) {
+    linhas.push(`📊 Você gastou ${fmtValor(diff)} a mais que no mês passado.`);
+  } else {
+    linhas.push("✅ Gastos iguais ao mês anterior.");
   }
 
   try {
-    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-    log.whatsapp("comparar enviado", { to: telefone, diff, diffPct });
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n").trimEnd() });
+    log.whatsapp("comparar enviado", { to: telefone, diff, mudancas: top3.length });
   } catch (err) {
     log.error("falha ao enviar comparar", err, { to: telefone });
   }
 
-  return {
-    success:      true,
-    userId:       user.id,
-    transacao:    {},
-    interpretado: { comando: "comparar", diff, diffPct },
-  };
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "comparar", diff } };
 }
 
 async function handleRankingCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
