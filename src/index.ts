@@ -1,9 +1,11 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import cron from "node-cron";
 import pool from "./db/client";
 import { createTables } from "./database";
 import { selfRegisterWebhook } from "./services/webhookSelfRegister";
+import { runDailyNotifications } from "./services/notificationService";
 import usersRoutes from "./routes/users";
 import transactionsRoutes from "./routes/transactions";
 import authRoutes from "./routes/auth";
@@ -51,5 +53,9 @@ const PORT = 80;
     console.log(`Servidor rodando na porta ${PORT}`);
     // Auto-registra webhook na Evolution após a rede overlay estabilizar
     setTimeout(() => selfRegisterWebhook(), 5000);
+    // Notificações de retenção — diariamente às 9h horário de Brasília
+    cron.schedule("0 9 * * *", () => {
+      runDailyNotifications().catch(err => console.error("cron diario falhou:", err));
+    }, { timezone: "America/Sao_Paulo" });
   });
 })();
