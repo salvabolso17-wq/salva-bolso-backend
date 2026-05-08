@@ -91,6 +91,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^limite\s+.+\s+[\d,.]+$/i.test(message.texto.trim())) {
     return await handleLimiteCommand(user, message.telefone, message.texto.trim());
   }
+  if (/^hoje$/i.test(message.texto.trim())) {
+    return await handleHojeCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -342,6 +345,55 @@ async function handleLimiteCommand(user: UserRow, telefone: string, texto: strin
     userId:       user.id,
     transacao:    {},
     interpretado: { comando: "limite", categoria, valorLimite },
+  };
+}
+
+async function handleHojeCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando hoje", { userId: user.id });
+
+  const now      = new Date();
+  const inicioDia = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const fimDia    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+
+  const result = await pool.query<{ descricao: string; valor: string }>(
+    `SELECT descricao, valor
+     FROM transactions
+     WHERE user_id = $1
+       AND tipo = 'saida'
+       AND criado_em >= $2
+       AND criado_em < $3
+     ORDER BY criado_em DESC
+     LIMIT 10`,
+    [user.id, inicioDia, fimDia]
+  );
+
+  const linhas = ["Gastos de hoje", ""];
+
+  if (result.rows.length === 0) {
+    linhas.push("Nenhum gasto registrado hoje.");
+  } else {
+    let total = 0;
+    for (const row of result.rows) {
+      const valor = Number(row.valor);
+      total += valor;
+      linhas.push(`${row.descricao ?? "Sem descrição"} — R$ ${valor.toFixed(2)}`);
+    }
+    linhas.push("");
+    linhas.push(`Total hoje: R$ ${total.toFixed(2)}`);
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("hoje enviado", { to: telefone, count: result.rows.length });
+  } catch (err) {
+    log.error("falha ao enviar hoje", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "hoje", count: result.rows.length },
   };
 }
 
