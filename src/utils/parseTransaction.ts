@@ -77,7 +77,7 @@ export function parseTransaction(texto: string): ParsedTransaction | null {
   const valor = parseFloat(valorMatch[1].replace(",", "."));
   if (isNaN(valor) || valor <= 0) return null;
 
-  const descricao  = textoParse.replace(valorMatch[0], "").trim() || "Sem descrição";
+  const descricao  = textoParse.replace(valorMatch[0], "").replace(/\+/g, "").trim() || "Sem descrição";
   const textoLower = textoParse.toLowerCase();
 
   for (const [categoria, config] of Object.entries(CATEGORIAS)) {
