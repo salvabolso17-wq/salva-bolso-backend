@@ -304,10 +304,10 @@ async function checkLimiteCategoria(userId: number, categoria: string): Promise<
   const percentual  = Math.round((totalGasto / valorLimite) * 100);
 
   if (percentual >= 100) {
-    return `Você ultrapassou o limite de ${categoria} (R$ ${valorLimite.toFixed(2)}).`;
+    return `Você ultrapassou o limite mensal de ${categoria}: R$ ${totalGasto.toFixed(2)} de R$ ${valorLimite.toFixed(2)} (${percentual}%).`;
   }
   if (percentual >= 80) {
-    return `Atenção: você já utilizou ${percentual}% do limite de ${categoria}.`;
+    return `Atenção: você já utilizou R$ ${totalGasto.toFixed(2)} de R$ ${valorLimite.toFixed(2)} do limite mensal de ${categoria} (${percentual}%).`;
   }
   return null;
 }
