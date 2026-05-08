@@ -85,6 +85,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^resumo$/i.test(message.texto.trim())) {
     return await handleResumoCommand(user, message.telefone);
   }
+  if (/^top\s*gastos$/i.test(message.texto.trim())) {
+    return await handleTopGastosCommand(user, message.telefone);
+  }
 
   // ── Parser ────────────────────────────────────────────────────────────────
   log.parser("analisando", { texto: message.texto });
@@ -253,5 +256,58 @@ async function handleResumoCommand(user: UserRow, telefone: string): Promise<Pro
     userId:       user.id,
     transacao:    {},
     interpretado: { comando: "resumo", totalGasto: metrics.total_saidas, categorias: metrics.gastos_por_categoria.length },
+  };
+}
+
+async function handleTopGastosCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando top gastos", { userId: user.id });
+
+  const now       = new Date();
+  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const result = await pool.query<{ descricao: string; valor: string }>(
+    `SELECT descricao, valor
+     FROM transactions
+     WHERE user_id = $1
+       AND tipo = 'saida'
+       AND criado_em >= $2
+       AND criado_em < $3
+     ORDER BY valor DESC
+     LIMIT 5`,
+    [user.id, inicioMes, fimMes]
+  );
+
+  const meses = ["janeiro","fevereiro","março","abril","maio","junho",
+                 "julho","agosto","setembro","outubro","novembro","dezembro"];
+
+  const linhas = [`Maiores gastos de ${meses[now.getMonth()]}/${now.getFullYear()}`, ""];
+
+  if (result.rows.length === 0) {
+    linhas.push("Nenhum gasto registrado este mês.");
+  } else {
+    let somaTop = 0;
+    result.rows.forEach((row, i) => {
+      const valor = Number(row.valor);
+      somaTop += valor;
+      const desc = row.descricao ?? "Sem descrição";
+      linhas.push(`${i + 1}. ${desc} — R$ ${valor.toFixed(2)}`);
+    });
+    linhas.push("");
+    linhas.push(`Total dos ${result.rows.length} maiores: R$ ${somaTop.toFixed(2)}`);
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("top gastos enviado", { to: telefone, count: result.rows.length });
+  } catch (err) {
+    log.error("falha ao enviar top gastos", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "top gastos", count: result.rows.length },
   };
 }
