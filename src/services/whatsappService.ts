@@ -145,13 +145,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   // ── Enviar confirmação WhatsApp ───────────────────────────────────────────
-  const emoji  = parsed.tipo === "entrada" ? "+" : "-";
-  const sinal  = parsed.tipo === "entrada" ? "Entrada" : "Saída";
+  const icone = parsed.tipo === "entrada" ? "💰" : "✅";
   const linhasConfirmacao = [
-    `Registrado!`,
-    `${emoji} R$ ${parsed.valor.toFixed(2)} | ${sinal}`,
-    `Categoria: ${parsed.categoria}`,
-    `Desc: ${parsed.descricao}`,
+    `${icone} ${fmtValor(parsed.valor)} • ${parsed.categoria}`,
+    parsed.descricao,
   ];
 
   if (parsed.tipo === "saida") {
@@ -275,6 +272,10 @@ async function handleResumoCommand(user: UserRow, telefone: string): Promise<Pro
   };
 }
 
+function fmtValor(valor: number): string {
+  return valor % 1 === 0 ? `R$ ${valor.toFixed(0)}` : `R$ ${valor.toFixed(2)}`;
+}
+
 const CATEGORIAS_CONHECIDAS = [
   "Alimentação", "Transporte", "Moradia", "Lazer", "Saúde",
   "Educação", "Investimentos", "Receita Extra", "Outros",
@@ -309,11 +310,8 @@ async function checkLimiteCategoria(userId: number, categoria: string): Promise<
   const totalGasto  = Number(gastoRow.rows[0].total);
   const percentual  = Math.round((totalGasto / valorLimite) * 100);
 
-  if (percentual >= 100) {
-    return `Você ultrapassou o limite mensal de ${categoria}: R$ ${totalGasto.toFixed(2)} de R$ ${valorLimite.toFixed(2)} (${percentual}%).`;
-  }
   if (percentual >= 80) {
-    return `Atenção: você já utilizou R$ ${totalGasto.toFixed(2)} de R$ ${valorLimite.toFixed(2)} do limite mensal de ${categoria} (${percentual}%).`;
+    return `⚠️ Limite ${categoria}: ${fmtValor(totalGasto)} / ${fmtValor(valorLimite)} (${percentual}%)`;
   }
   return null;
 }
