@@ -9,50 +9,84 @@ fail() { echo -e "${R}[XX]${N} $1"; }
 
 CID=$(docker ps -q --filter "name=evolution" | head -1)
 [ -z "$CID" ] && fail "Container Evolution nao encontrado" && exit 1
-
 info "Container Evolution: $CID"
 
 echo ""
-info "=== 1. DNS do backend ==="
-DNS=$(docker exec "$CID" nslookup salva-bolso_backend-salvabolso 2>&1 | grep "Address:" | grep -v "127.0.0.11")
-echo "$DNS"
-IP_COUNT=$(echo "$DNS" | grep -c "Address:" || true)
-[ "$IP_COUNT" -gt 1 ] && warn "Ghost DNS detectado ($IP_COUNT IPs) — pode causar falha intermitente"
-[ "$IP_COUNT" -eq 1 ] && ok "DNS limpo — 1 IP apenas"
+info "=== 1. Status do backend ==="
+BACKEND_CID=$(docker ps -q --filter "name=backend-salvabolso" | head -1)
+if [ -z "$BACKEND_CID" ]; then
+  fail "Container backend NAO esta rodando!"
+  docker service ps salva-bolso_backend-salvabolso --no-trunc | head -5
+  exit 1
+fi
+ok "Backend container: $BACKEND_CID"
 
 echo ""
-info "=== 2. Conectividade backend ==="
+info "=== 2. IPs reais do backend ==="
+docker inspect "$BACKEND_CID" \
+  --format '{{range $net, $cfg := .NetworkSettings.Networks}}  {{$net}}: {{$cfg.IPAddress}}{{"\n"}}{{end}}'
+
+BACKEND_IP=$(docker inspect "$BACKEND_CID" \
+  --format '{{range $net, $cfg := .NetworkSettings.Networks}}{{if eq $net "easypanel-salva-bolso"}}{{$cfg.IPAddress}}{{end}}{{end}}')
+[ -z "$BACKEND_IP" ] && BACKEND_IP=$(docker inspect "$BACKEND_CID" \
+  --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' | awk '{print $1}')
+info "Usando IP: $BACKEND_IP"
+
+echo ""
+info "=== 3. DNS do backend (do container Evolution) ==="
+docker exec "$CID" nslookup salva-bolso_backend-salvabolso 2>&1 | grep -E "Address|Name"
+
+echo ""
+info "=== 4. Conectividade via IP direto ==="
 HTTP=$(docker exec "$CID" wget -SO- -T5 \
-  "http://salva-bolso_backend-salvabolso/webhooks/whatsapp?provider=evolution" 2>&1 | grep "HTTP/" | head -1)
+  "http://$BACKEND_IP/webhooks/whatsapp?provider=evolution" 2>&1 | grep "HTTP/" | head -1)
 if echo "$HTTP" | grep -qE "403|200|400|422"; then
-  ok "Backend alcancavel: $HTTP"
+  ok "Backend alcancavel via IP direto: $HTTP"
+  WEBHOOK_TARGET="http://$BACKEND_IP/webhooks/whatsapp?provider=evolution"
 else
-  fail "Backend inacessivel: $HTTP"
-  warn "Aguarde 2 minutos para o ghost DNS expirar e rode novamente"
-  exit 1
+  warn "IP direto falhou ($HTTP), tentando via service name..."
+  HTTP2=$(docker exec "$CID" wget -SO- -T5 \
+    "http://salva-bolso_backend-salvabolso/webhooks/whatsapp?provider=evolution" 2>&1 | grep "HTTP/" | head -1)
+  if echo "$HTTP2" | grep -qE "403|200|400|422"; then
+    ok "Backend alcancavel via service name: $HTTP2"
+    WEBHOOK_TARGET="http://salva-bolso_backend-salvabolso/webhooks/whatsapp?provider=evolution"
+  else
+    fail "Backend inacessivel por IP e por service name"
+    fail "IP direto: $HTTP | Service name: $HTTP2"
+    exit 1
+  fi
 fi
 
 echo ""
-info "=== 3. Enviando webhook de teste ==="
+info "=== 5. Enviando webhook de teste para: $WEBHOOK_TARGET ==="
 RESP=$(docker exec "$CID" wget -qO- -T10 \
   --post-data='{"event":"MESSAGES_UPSERT","instance":"salva-bolso","data":{"key":{"remoteJid":"5568992383325@s.whatsapp.net","fromMe":false,"id":"TESTE_'$(date +%s)'"},"message":{"conversation":"50 uber"},"messageTimestamp":'$(date +%s)'}}' \
   --header="Content-Type: application/json" \
-  "http://salva-bolso_backend-salvabolso/webhooks/whatsapp?provider=evolution" 2>&1)
+  "$WEBHOOK_TARGET" 2>&1)
 echo "Resposta: $RESP"
 
 echo ""
-info "=== 4. Logs backend (ultimos 10s) ==="
+info "=== 6. Logs backend ==="
 sleep 2
-LOGS=$(docker service logs --since 15s salva-bolso_backend-salvabolso 2>&1 | grep -v "^$")
+LOGS=$(docker service logs --since 20s salva-bolso_backend-salvabolso 2>&1 | grep -v "^$")
 echo "$LOGS"
 
 echo ""
 if echo "$LOGS" | grep -q "\[WEBHOOK\]"; then
-  ok "WEBHOOK RECEBIDO PELO BACKEND"
+  ok "WEBHOOK PROCESSADO COM SUCESSO"
   echo "$LOGS" | grep -E "\[WEBHOOK\]|\[USER\]|\[PARSER\]|\[DB\]|\[WHATSAPP\]|\[ERROR\]"
-elif echo "$LOGS" | grep -q "unreachable\|ECONNREFUSED"; then
-  fail "Backend nao alcancou destino — verificar rede"
+  echo ""
+  if echo "$BACKEND_IP" != "salva-bolso_backend-salvabolso"; then
+    warn "ATENCAO: backend so esta acessivel via IP $BACKEND_IP"
+    warn "Atualizando webhook da Evolution para usar IP direto..."
+    docker exec "$CID" wget -qO- -T10 \
+      --post-data="{\"url\":\"http://$BACKEND_IP/webhooks/whatsapp?provider=evolution\",\"enabled\":true,\"events\":[\"MESSAGES_UPSERT\"]}" \
+      --header="apikey: salvabolsoevolution123456" \
+      --header="Content-Type: application/json" \
+      http://localhost:8080/webhook/set/salva-bolso 2>&1
+    ok "Webhook da Evolution atualizado para IP direto"
+  fi
 else
-  warn "Nenhuma entrada de webhook nos logs — possivelmente caiu no ghost IP"
-  warn "Aguarde 2 minutos e rode novamente"
+  warn "Webhook nao apareceu nos logs"
+  echo "$LOGS" | tail -5
 fi
