@@ -179,6 +179,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^pr[oó]ximas$/i.test(message.texto.trim())) {
     return await handleProximasCommand(user, message.telefone);
   }
+  if (/^buscar\s+.+$/i.test(message.texto.trim())) {
+    return await handleBuscarCommand(user, message.telefone, message.texto.trim());
+  }
   if (/^recorrente\s+[\d,.]+\s+.+$/i.test(message.texto.trim())) {
     return await handleRecorrenteCommand(user, message.telefone, message.texto.trim());
   }
@@ -954,6 +957,7 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
     "📈 previsão",
     "🔁 recorrentes",
     "📅 próximas",
+    "🔎 buscar <termo>",
     "❌ apagar",
     "✏️ corrigir",
     "",
@@ -1260,6 +1264,63 @@ async function handleRecorrenteCommand(user: UserRow, telefone: string, texto: s
   };
 }
 
+async function handleBuscarCommand(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  const termo = texto.replace(/^buscar\s+/i, "").trim();
+  log.webhook("comando buscar", { userId: user.id, termo });
+
+  const result = await pool.query<{ descricao: string; valor: string; categoria: string; criado_em: Date }>(
+    `SELECT descricao, valor, categoria, criado_em
+     FROM transactions
+     WHERE user_id = $1
+       AND tipo = 'saida'
+       AND descricao ILIKE $2
+     ORDER BY criado_em DESC
+     LIMIT 10`,
+    [user.id, `%${termo}%`]
+  );
+
+  if (result.rows.length === 0) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `🔎 Nenhum gasto encontrado para:\n${termo}`,
+    });
+    return {
+      success:      true,
+      userId:       user.id,
+      transacao:    {},
+      interpretado: { comando: "buscar", termo, count: 0 },
+    };
+  }
+
+  const linhas = [`🔎 Resultados para "${termo}"`, ""];
+
+  for (const row of result.rows) {
+    const data = new Date(row.criado_em);
+    const dia  = String(data.getUTCDate()).padStart(2, "0");
+    const mes  = String(data.getUTCMonth() + 1).padStart(2, "0");
+    linhas.push(`• ${fmtValor(Number(row.valor))} — ${row.categoria}`);
+    linhas.push(`${dia}/${mes}`);
+    linhas.push("");
+  }
+
+  // remove última linha em branco
+  if (linhas[linhas.length - 1] === "") linhas.pop();
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("buscar enviado", { to: telefone, termo, count: result.rows.length });
+  } catch (err) {
+    log.error("falha ao enviar buscar", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "buscar", termo, count: result.rows.length },
+  };
+}
+
 async function handleProximasCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando proximas", { userId: user.id });
 
@@ -1362,7 +1423,7 @@ async function handleRecorrentesCommand(user: UserRow, telefone: string): Promis
 
 function isKnownCommand(texto: string): boolean {
   return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|recorrentes|pr[oó]ximas|apagar|corrigir|top\s*gastos)$/i.test(texto)
-      || /^(limite|meta|guardar|recorrente)\s+/i.test(texto);
+      || /^(limite|meta|guardar|recorrente|buscar)\s+/i.test(texto);
 }
 
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
