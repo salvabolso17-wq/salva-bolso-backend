@@ -87,6 +87,19 @@ export async function createTables() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS recurring_expenses (
+        id          SERIAL PRIMARY KEY,
+        user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        nome        VARCHAR(100) NOT NULL,
+        valor       NUMERIC(10,2) NOT NULL,
+        frequencia  VARCHAR(20) NOT NULL DEFAULT 'mensal',
+        ativo       BOOLEAN NOT NULL DEFAULT TRUE,
+        criado_em   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, nome)
+      );
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS pending_actions (
         user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         action         VARCHAR(20)  NOT NULL,

@@ -173,6 +173,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^previs[aã]o$/i.test(message.texto.trim())) {
     return await handlePrevisaoCommand(user, message.telefone);
   }
+  if (/^recorrentes$/i.test(message.texto.trim())) {
+    return await handleRecorrentesCommand(user, message.telefone);
+  }
+  if (/^recorrente\s+[\d,.]+\s+.+$/i.test(message.texto.trim())) {
+    return await handleRecorrenteCommand(user, message.telefone, message.texto.trim());
+  }
   if (/^apagar$/i.test(message.texto.trim())) {
     return await handleApagarCommand(user, message.telefone);
   }
@@ -943,6 +949,7 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
     "📂 categorias",
     "🎯 metas",
     "📈 previsão",
+    "🔁 recorrentes",
     "❌ apagar",
     "✏️ corrigir",
     "",
@@ -1195,9 +1202,113 @@ async function handlePrevisaoCommand(user: UserRow, telefone: string): Promise<P
   };
 }
 
+async function handleRecorrenteCommand(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  log.webhook("comando recorrente", { userId: user.id, texto });
+
+  const match = texto.match(/^recorrente\s+([\d,.]+)\s+(.+)$/i);
+  if (!match) {
+    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: recorrente 39 netflix mensal" });
+    return { success: false, userId: user.id, erro: "Formato inválido" };
+  }
+
+  const valor  = parseFloat(match[1].replace(",", "."));
+  const partes = match[2].trim().split(/\s+/);
+  const ultima = partes[partes.length - 1].toLowerCase();
+
+  const FREQUENCIAS = ["mensal", "semanal", "anual"];
+  let frequencia = "mensal";
+  let nomePartes = partes;
+
+  if (FREQUENCIAS.includes(ultima)) {
+    frequencia = ultima;
+    nomePartes = partes.slice(0, -1);
+  }
+
+  if (nomePartes.length === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Formato inválido. Use: recorrente 39 netflix mensal" });
+    return { success: false, userId: user.id, erro: "Nome ausente" };
+  }
+
+  const nomeRaw = nomePartes.join(" ");
+  const nome    = nomeRaw.charAt(0).toUpperCase() + nomeRaw.slice(1).toLowerCase();
+  const freqLabel = frequencia.charAt(0).toUpperCase() + frequencia.slice(1);
+
+  await pool.query(
+    `INSERT INTO recurring_expenses (user_id, nome, valor, frequencia)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, nome)
+     DO UPDATE SET valor = $3, frequencia = $4, ativo = TRUE`,
+    [user.id, nome, valor, frequencia]
+  );
+
+  await whatsapp.sendText({
+    to:   telefone,
+    text: `🔁 Gasto recorrente criado\n\n${nome} — ${fmtValor(valor)}\n${freqLabel}`,
+  });
+
+  log.whatsapp("recorrente criado", { to: telefone, nome, valor, frequencia });
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "recorrente", nome, valor, frequencia },
+  };
+}
+
+async function handleRecorrentesCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando recorrentes", { userId: user.id });
+
+  const result = await pool.query<{ nome: string; valor: string; frequencia: string }>(
+    `SELECT nome, valor, frequencia
+     FROM recurring_expenses
+     WHERE user_id = $1 AND ativo = TRUE
+     ORDER BY criado_em ASC`,
+    [user.id]
+  );
+
+  if (result.rows.length === 0) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: "Nenhum recorrente cadastrado.\nUse: recorrente 39 netflix mensal",
+    });
+    return {
+      success:      true,
+      userId:       user.id,
+      transacao:    {},
+      interpretado: { comando: "recorrentes", count: 0 },
+    };
+  }
+
+  const linhas = ["🔁 Seus recorrentes", ""];
+  let totalMensal = 0;
+
+  for (const row of result.rows) {
+    const valor = Number(row.valor);
+    totalMensal += valor;
+    linhas.push(`${row.nome} — ${fmtValor(valor)}`);
+  }
+
+  linhas.push("", `Total: ${fmtValor(totalMensal)}/mês`);
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("recorrentes enviado", { to: telefone, count: result.rows.length, totalMensal });
+  } catch (err) {
+    log.error("falha ao enviar recorrentes", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "recorrentes", count: result.rows.length, totalMensal },
+  };
+}
+
 function isKnownCommand(texto: string): boolean {
-  return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|apagar|corrigir|top\s*gastos)$/i.test(texto)
-      || /^(limite|meta|guardar)\s+/i.test(texto);
+  return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|recorrentes|apagar|corrigir|top\s*gastos)$/i.test(texto)
+      || /^(limite|meta|guardar|recorrente)\s+/i.test(texto);
 }
 
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
