@@ -313,12 +313,40 @@ async function checkLimiteCategoria(userId: number, categoria: string): Promise<
        AND tipo = 'saida' AND criado_em >= $3 AND criado_em < $4`,
     [userId, categoria, inicioMes, fimMes]
   );
-  const totalGasto  = Number(gastoRow.rows[0].total);
-  const percentual  = Math.round((totalGasto / valorLimite) * 100);
+  const totalGasto = Number(gastoRow.rows[0].total);
+  const percentual = Math.round((totalGasto / valorLimite) * 100);
 
-  if (percentual >= 80) {
+  if (percentual < 80) return null;
+
+  // Verifica quais marcos já foram enviados este mês
+  const sentRow = await pool.query<{ marco: number }>(
+    `SELECT marco FROM sent_insights
+     WHERE user_id = $1 AND categoria = $2 AND mes_referencia = $3
+       AND marco IN (80, 100)`,
+    [userId, categoria, inicioMes]
+  );
+  const marcosSent = new Set(sentRow.rows.map(r => r.marco));
+
+  if (percentual >= 100 && !marcosSent.has(100)) {
+    await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, $2, 100, $3)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, categoria, inicioMes]
+    );
+    return `🚨 Você ultrapassou o limite mensal de ${categoria}.`;
+  }
+
+  if (percentual >= 80 && !marcosSent.has(80)) {
+    await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, $2, 80, $3)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, categoria, inicioMes]
+    );
     return `⚠️ Limite ${categoria}: ${fmtValor(totalGasto)} / ${fmtValor(valorLimite)} (${percentual}%)`;
   }
+
   return null;
 }
 
