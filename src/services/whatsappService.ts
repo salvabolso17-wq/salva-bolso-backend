@@ -1,5 +1,6 @@
 import pool from "../db/client";
 import { parseTransaction } from "../utils/parseTransaction";
+import { fetchPeriodMetrics } from "./reportService";
 import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
@@ -8,6 +9,8 @@ interface UserRow {
   id: number;
   telefone: string;
   nome: string | null;
+  renda: string;
+  renda_extra: string;
 }
 
 type ProcessResult =
@@ -20,7 +23,7 @@ async function findUserByTelefone(telefone: string): Promise<UserRow | null> {
   log.user("buscando", { telefone: normalized });
 
   const result = await pool.query<UserRow>(
-    `SELECT id, telefone, nome FROM users
+    `SELECT id, telefone, nome, renda, renda_extra FROM users
      WHERE REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = $1
         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 11) = RIGHT($1, 11)
         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 8)  = RIGHT($1, 8)
@@ -73,6 +76,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   if (!user) {
     return { success: false, erro: `Nenhum usuário com telefone ${message.telefone}` };
+  }
+
+  // ── Comando: saldo ────────────────────────────────────────────────────────
+  if (/^saldo$/i.test(message.texto.trim())) {
+    return await handleSaldoCommand(user, message.telefone);
   }
 
   // ── Parser ────────────────────────────────────────────────────────────────
@@ -155,5 +163,44 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       categoria: parsed.categoria,
       tipo:      parsed.tipo,
     },
+  };
+}
+
+async function handleSaldoCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando saldo", { userId: user.id });
+
+  const now     = new Date();
+  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const metrics = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
+
+  const renda      = Number(user.renda ?? 0);
+  const rendaExtra = Number(user.renda_extra ?? 0);
+  const totalRenda = renda + rendaExtra;
+  const sobrou     = totalRenda + metrics.total_entradas - metrics.total_saidas;
+
+  const meses = ["janeiro","fevereiro","março","abril","maio","junho",
+                 "julho","agosto","setembro","outubro","novembro","dezembro"];
+  const cabecalho = `Saldo de ${meses[now.getMonth()]}/${now.getFullYear()}`;
+
+  const linhas = [cabecalho, ""];
+  if (totalRenda > 0)               linhas.push(`Renda: R$ ${totalRenda.toFixed(2)}`);
+  if (metrics.total_entradas > 0)   linhas.push(`Entradas: R$ ${metrics.total_entradas.toFixed(2)}`);
+  linhas.push(`Gastos: R$ ${metrics.total_saidas.toFixed(2)}`);
+  linhas.push(`Sobrou: R$ ${sobrou.toFixed(2)}`);
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("saldo enviado", { to: telefone });
+  } catch (err) {
+    log.error("falha ao enviar saldo", err, { to: telefone });
+  }
+
+  return {
+    success:     true,
+    userId:      user.id,
+    transacao:   {},
+    interpretado: { comando: "saldo" },
   };
 }
