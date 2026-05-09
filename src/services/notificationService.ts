@@ -2,6 +2,7 @@ import pool from "../db/client";
 import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import { fetchPeriodMetrics } from "./reportService";
+import { buildPlansBlock } from "../utils/plansMessage";
 
 const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
@@ -241,19 +242,17 @@ const SUBSCRIPTION_REMINDERS = [
   { daysAhead: 0, marco: 0 },
 ] as const;
 
-function buildReminderText(daysAhead: number, link: string): string {
-  const linkLine = link ? `\n\n👉 ${link}` : "";
-  if (daysAhead === 7) {
-    return `⏰ Lembrete: sua assinatura do Salva Bolso vence em 7 dias.\n\nRenove agora e continue sem interrupções:${linkLine}`;
-  }
-  if (daysAhead === 3) {
-    return `⚠️ Sua assinatura vence em 3 dias!\n\nNão perca seu acesso ao Salva Bolso:${linkLine}`;
-  }
-  return `🔴 Sua assinatura vence hoje!\n\nRenove agora para não perder o acesso:${linkLine}`;
+function buildReminderText(daysAhead: number, plansBlock: string): string {
+  const intro = daysAhead === 7
+    ? "⏰ Lembrete: sua assinatura do Salva Bolso vence em 7 dias.\n\nRenove agora e continue sem interrupções:"
+    : daysAhead === 3
+    ? "⚠️ Sua assinatura vence em 3 dias!\n\nNão perca seu acesso ao Salva Bolso:"
+    : "🔴 Sua assinatura vence hoje!\n\nRenove agora para não perder o acesso:";
+  return plansBlock ? `${intro}\n\n${plansBlock}` : intro;
 }
 
 async function sendSubscriptionReminders(): Promise<void> {
-  const link = process.env.PAYMENT_LINK ?? "";
+  const plansBlock = await buildPlansBlock();
 
   for (const { daysAhead, marco } of SUBSCRIPTION_REMINDERS) {
     let rows: { id: number; telefone: string; expires_date: string }[];
@@ -290,7 +289,7 @@ async function sendSubscriptionReminders(): Promise<void> {
         );
         if ((inserted.rowCount ?? 0) === 0) continue;
 
-        await whatsapp.sendText({ to: user.telefone, text: buildReminderText(daysAhead, link) });
+        await whatsapp.sendText({ to: user.telefone, text: buildReminderText(daysAhead, plansBlock) });
         log.whatsapp(`sub_reminder ${daysAhead}d enviado`, { to: user.telefone, userId: user.id });
       } catch (err) {
         log.error(`falha sub_reminder ${daysAhead}d`, err, { userId: user.id });

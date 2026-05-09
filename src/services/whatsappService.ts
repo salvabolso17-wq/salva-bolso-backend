@@ -3,6 +3,7 @@ import { parseTransaction } from "../utils/parseTransaction";
 import { fetchPeriodMetrics } from "./reportService";
 import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
+import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
 
 interface UserRow {
@@ -120,33 +121,20 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Controle de acesso (trial / active / expired) ────────────────────────
   if (!isSubscriptionActive(user)) {
-    const link = process.env.PAYMENT_LINK ?? "";
     const ehTrialExpirado =
       user.subscription_status === "trial" &&
       !!user.trial_ends_at &&
       new Date(user.trial_ends_at) <= new Date();
 
-    const texto = ehTrialExpirado
-      ? [
-          "⏰ Seu período de teste encerrou.",
-          "",
-          "Para continuar controlando suas finanças no WhatsApp, assine o Salva Bolso:",
-          "",
-          link ? `👉 ${link}` : "Entre em contato para assinar.",
-          "",
-          "Após o pagamento, seu acesso é liberado automaticamente em instantes! 🚀",
-        ].join("\n")
-      : [
-          "🔒 Sua assinatura expirou.",
-          "",
-          "Para continuar usando o Salva Bolso, renove agora:",
-          "",
-          link ? `👉 ${link}` : "Entre em contato para renovar.",
-          "",
-          "Após o pagamento, seu acesso volta automaticamente em instantes! 🚀",
-        ].join("\n");
+    const intro = ehTrialExpirado
+      ? "⏰ Seu período de teste encerrou.\n\nPara continuar controlando suas finanças no WhatsApp, escolha um plano:"
+      : "🔒 Sua assinatura expirou.\n\nPara continuar usando o Salva Bolso, renove agora:";
 
-    await whatsapp.sendText({ to: message.telefone, text: texto });
+    const plansBlock = await buildPlansBlock();
+    const corpo = plansBlock || "Entre em contato para assinar.";
+    const rodape = "\n\n✅ Após o pagamento, seu acesso é liberado automaticamente!";
+
+    await whatsapp.sendText({ to: message.telefone, text: `${intro}\n\n${corpo}${rodape}` });
     return { success: false, userId: user.id, erro: "Assinatura expirada" };
   }
 
