@@ -127,6 +127,30 @@ export async function createTables() {
       );
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS plans (
+        id           SERIAL PRIMARY KEY,
+        nome         VARCHAR(50) UNIQUE NOT NULL,
+        duration_days INTEGER NOT NULL,
+        ativo        BOOLEAN NOT NULL DEFAULT TRUE
+      );
+    `);
+
+    await pool.query(`
+      INSERT INTO plans (nome, duration_days) VALUES
+        ('mensal', 30),
+        ('anual', 365)
+      ON CONFLICT (nome) DO NOTHING;
+    `);
+
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_expires_at TIMESTAMPTZ;
+    `);
+
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS current_plan VARCHAR(50);
+    `);
+
     console.log("Tabelas criadas/verificadas ✅");
   } catch (error) {
     console.error("ERRO REAL DO BANCO:");

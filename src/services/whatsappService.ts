@@ -13,6 +13,7 @@ interface UserRow {
   renda_extra: string;
   subscription_status: string;
   trial_ends_at: Date | null;
+  subscription_expires_at: Date | null;
 }
 
 type ProcessResult =
@@ -25,7 +26,7 @@ async function findUserByTelefone(telefone: string): Promise<UserRow | null> {
   log.user("buscando", { telefone: normalized });
 
   const result = await pool.query<UserRow>(
-    `SELECT id, telefone, nome, renda, renda_extra, subscription_status, trial_ends_at FROM users
+    `SELECT id, telefone, nome, renda, renda_extra, subscription_status, trial_ends_at, subscription_expires_at FROM users
      WHERE REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = $1
         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 11) = RIGHT($1, 11)
         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 8)  = RIGHT($1, 8)
@@ -1550,7 +1551,10 @@ async function handleRecorrentesCommand(user: UserRow, telefone: string): Promis
 }
 
 function isSubscriptionActive(user: UserRow): boolean {
-  if (user.subscription_status === "active") return true;
+  if (user.subscription_status === "active") {
+    if (!user.subscription_expires_at) return true;
+    return new Date(user.subscription_expires_at) > new Date();
+  }
   if (user.subscription_status === "trial") {
     return !user.trial_ends_at || new Date(user.trial_ends_at) > new Date();
   }

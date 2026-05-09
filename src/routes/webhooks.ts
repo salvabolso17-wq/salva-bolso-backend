@@ -176,13 +176,23 @@ router.post("/asaas", async (req, res) => {
     const variantsArr = Array.from(variants);
     console.error("[ASAAS] variantes de telefone:", variantsArr);
 
+    // Detecta plano pelo description do pagamento
+    const description = ((payment?.description ?? payment?.billingType ?? "") as string).toLowerCase();
+    const planRow = await pool.query<{ nome: string; duration_days: number }>(
+      `SELECT nome, duration_days FROM plans WHERE ativo = true AND $1 ILIKE '%' || nome || '%' LIMIT 1`,
+      [description]
+    );
+    const plan = planRow.rows[0] ?? { nome: "mensal", duration_days: 30 };
+    console.error("[ASAAS] plano detectado:", plan.nome, `(${plan.duration_days} dias)`);
+
     const result = await pool.query<{ id: number; telefone: string }>(
       `UPDATE users
-       SET subscription_status = 'active'
+       SET subscription_status = 'active',
+           subscription_expires_at = NOW() + ($2 || ' days')::INTERVAL,
+           current_plan = $3
        WHERE REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = ANY($1::text[])
-       AND subscription_status != 'active'
        RETURNING id, telefone`,
-      [variantsArr]
+      [variantsArr, plan.duration_days.toString(), plan.nome]
     );
 
     console.error("[ASAAS] rowCount:", result.rowCount);

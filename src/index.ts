@@ -61,6 +61,23 @@ const PORT = Number(process.env.PORT ?? 3000);
     console.log(`[STARTUP] Servidor ouvindo em 0.0.0.0:${PORT}`);
     // Auto-registra webhook na Evolution após a rede overlay estabilizar
     setTimeout(() => selfRegisterWebhook(), 5000);
+    // Expiração de assinaturas — a cada hora
+    cron.schedule("0 * * * *", async () => {
+      try {
+        const r = await pool.query(
+          `UPDATE users SET subscription_status = 'expired'
+           WHERE subscription_status = 'active'
+             AND subscription_expires_at IS NOT NULL
+             AND subscription_expires_at < NOW()`
+        );
+        if ((r.rowCount ?? 0) > 0) {
+          console.log(`[CRON] ${r.rowCount} assinatura(s) expirada(s)`);
+        }
+      } catch (err) {
+        console.error("[CRON] falha na expiracao de assinaturas:", err);
+      }
+    });
+
     // Notificações de retenção — diariamente às 9h horário de Brasília
     cron.schedule("0 9 * * *", () => {
       runDailyNotifications().catch(err => console.error("cron diario falhou:", err));
