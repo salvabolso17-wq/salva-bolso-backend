@@ -22,6 +22,7 @@ router.get("/whatsapp", (req, res) => {
 
 // POST /webhooks/whatsapp?provider=meta|evolution|360dialog
 router.post("/whatsapp", async (req, res) => {
+  console.log("[WHATSAPP-HIT] rota atingida, body keys:", Object.keys(req.body ?? {}));
   const start    = Date.now();
   const provider = (req.query.provider as string) ?? "meta";
   const body     = req.body as Record<string, unknown>;
