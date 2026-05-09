@@ -9,4 +9,8 @@ export const cronState = {
     registrado: false,
     ultimaExecucao: null as Date | null,
   },
+  relatorioSemanal: {
+    registrado: false,
+    ultimaExecucao: null as Date | null,
+  },
 };

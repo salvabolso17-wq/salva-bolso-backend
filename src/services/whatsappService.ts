@@ -297,6 +297,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^corrigir$/i.test(message.texto.trim())) {
     return await handleCorrigirCommand(user, message.telefone);
   }
+  if (/^extrato\s+.+$/i.test(message.texto.trim())) {
+    return await handleExtratoCommand(user, message.telefone, message.texto.trim());
+  }
 
   // ── Proteção contra mensagens ambíguas ───────────────────────────────────
   if (isAmbiguousIntent(message.texto)) {
@@ -935,10 +938,11 @@ async function handleGuardarCommand(user: UserRow, telefone: string, texto: stri
     return { success: false, userId: user.id, erro: "Meta não encontrada" };
   }
 
-  const row     = result.rows[0];
-  const meta    = Number(row.valor_meta);
-  const atual   = Number(row.valor_atual);
-  const percent = meta > 0 ? Math.round((atual / meta) * 100) : 0;
+  const row          = result.rows[0];
+  const meta         = Number(row.valor_meta);
+  const atual        = Number(row.valor_atual);
+  const percent      = meta > 0 ? Math.round((atual / meta) * 100) : 0;
+  const acabouAgora  = (atual - valor) < meta && atual >= meta;
 
   const linhas = [
     `🎯 ${fmtValor(valor)} adicionados à meta ${row.nome}`,
@@ -947,15 +951,32 @@ async function handleGuardarCommand(user: UserRow, telefone: string, texto: stri
     `${fmtValor(atual)} / ${fmtValor(meta)} (${percent}%)`,
   ];
 
-  if (atual >= meta) {
-    linhas.push("", "🏆 Meta concluída!");
-  }
+  if (atual >= meta && !acabouAgora) linhas.push("", "✅ Meta já concluída!");
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
     log.whatsapp("guardar enviado", { to: telefone, nome: row.nome, atual, meta });
   } catch (err) {
     log.error("falha ao enviar guardar", err, { to: telefone });
+  }
+
+  if (acabouAgora) {
+    setTimeout(async () => {
+      try {
+        const celebracao = [
+          `🏆 META CONCLUÍDA!`,
+          "",
+          `Você atingiu sua meta "${row.nome}"!`,
+          `${fmtValor(meta)} guardados com sucesso. 🎉`,
+          "",
+          "Disciplina financeira é o caminho. Continue assim!",
+        ].join("\n");
+        await whatsapp.sendText({ to: telefone, text: celebracao });
+        log.whatsapp("celebracao meta enviada", { to: telefone, nome: row.nome, meta });
+      } catch (err) {
+        log.error("falha ao enviar celebracao meta", err, { to: telefone });
+      }
+    }, 1500);
   }
 
   return {
@@ -1561,6 +1582,92 @@ async function handleRecorrentesCommand(user: UserRow, telefone: string): Promis
   };
 }
 
+const MESES_PT: Record<string, number> = {
+  janeiro: 1, fevereiro: 2, março: 3, marco: 3, abril: 4, maio: 5, junho: 6,
+  julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12,
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6,
+  jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
+};
+const MESES_NOME = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+                    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+function parseMesExtrato(raw: string): { ano: number; mes: number } | null {
+  const agora = new Date();
+  const texto = raw.toLowerCase().trim();
+
+  // "março/2026" | "3/2026" | "03/26"
+  const mAno = texto.match(/^(.+?)\/(\d{2,4})$/);
+  if (mAno) {
+    let ano = parseInt(mAno[2]);
+    if (ano < 100) ano += 2000;
+    const nome = mAno[1].trim();
+    const mes  = MESES_PT[nome] ?? (parseInt(nome) || null);
+    if (mes && mes >= 1 && mes <= 12) return { ano, mes };
+  }
+
+  // só nome ou número
+  const mes = MESES_PT[texto] ?? (parseInt(texto) || null);
+  if (mes && mes >= 1 && mes <= 12) return { ano: agora.getFullYear(), mes };
+  return null;
+}
+
+async function handleExtratoCommand(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  log.webhook("comando extrato", { userId: user.id, texto });
+
+  const match = texto.match(/^extrato\s+(.+)$/i);
+  const parsed = match ? parseMesExtrato(match[1]) : null;
+
+  if (!parsed) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: "💡 Ex:\nextrato março\nextrato 3\nextrato março/2026",
+    });
+    return { success: false, userId: user.id, erro: "Mês inválido" };
+  }
+
+  const { ano, mes } = parsed;
+  const inicio = new Date(Date.UTC(ano, mes - 1, 1));
+  const fim    = new Date(Date.UTC(ano, mes, 1));
+  const metrics = await fetchPeriodMetrics(user.id, inicio, fim);
+
+  const nomeMes = MESES_NOME[mes];
+  const linhas = [`📋 Extrato de ${nomeMes}/${ano}`, ""];
+
+  if (metrics.quantidade_transacoes === 0) {
+    linhas.push("Nenhum lançamento neste mês.");
+  } else {
+    if (metrics.total_entradas > 0) linhas.push(`💰 Entradas: ${fmtValor(metrics.total_entradas)}`);
+    linhas.push(`💸 Gastos: ${fmtValor(metrics.total_saidas)}`);
+    const sinal = metrics.saldo >= 0 ? "+" : "-";
+    linhas.push(`💼 Saldo: ${sinal}${fmtValor(Math.abs(metrics.saldo))}`, "");
+
+    if (metrics.gastos_por_categoria.length > 0) {
+      linhas.push("Por categoria:");
+      for (const cat of metrics.gastos_por_categoria) {
+        const emoji = CATEGORIA_EMOJI[cat.categoria] ?? "•";
+        linhas.push(`${emoji} ${cat.categoria} — ${fmtValor(cat.total)}`);
+      }
+      linhas.push("");
+    }
+
+    linhas.push(`${metrics.quantidade_transacoes} transações`);
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("extrato enviado", { to: telefone, ano, mes, transacoes: metrics.quantidade_transacoes });
+  } catch (err) {
+    log.error("falha ao enviar extrato", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "extrato", ano, mes, transacoes: metrics.quantidade_transacoes },
+  };
+}
+
 function isSubscriptionActive(user: UserRow): boolean {
   if (user.subscription_status === "active") {
     if (!user.subscription_expires_at) return true;
@@ -1583,7 +1690,7 @@ function isOnboardingEnabled(telefone: string): boolean {
 
 function isKnownCommand(texto: string): boolean {
   return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|recorrentes|pr[oó]ximas|apagar|corrigir|top\s*gastos)$/i.test(texto)
-      || /^(limite|meta|guardar|recorrente|buscar)\s+/i.test(texto);
+      || /^(limite|meta|guardar|recorrente|buscar|extrato)\s+/i.test(texto);
 }
 
 // Detecta frases conversacionais/de intenção que NÃO devem virar lançamento automático

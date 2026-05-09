@@ -5,7 +5,7 @@ import cron from "node-cron";
 import pool from "./db/client";
 import { createTables } from "./database";
 import { selfRegisterWebhook } from "./services/webhookSelfRegister";
-import { runDailyNotifications } from "./services/notificationService";
+import { runDailyNotifications, runWeeklyNotifications } from "./services/notificationService";
 import { cronState } from "./utils/cronState";
 import usersRoutes from "./routes/users";
 import transactionsRoutes from "./routes/transactions";
@@ -91,6 +91,13 @@ const PORT = Number(process.env.PORT ?? 3000);
     cron.schedule("0 9 * * *", () => {
       cronState.notificacoes.ultimaExecucao = new Date();
       runDailyNotifications().catch(err => console.error("cron diario falhou:", err));
+    }, { timezone: "America/Sao_Paulo" });
+
+    // Push semanal comparativo — segunda-feira 9h Brasília
+    cronState.relatorioSemanal.registrado = true;
+    cron.schedule("0 9 * * 1", () => {
+      cronState.relatorioSemanal.ultimaExecucao = new Date();
+      runWeeklyNotifications().catch(err => console.error("cron semanal falhou:", err));
     }, { timezone: "America/Sao_Paulo" });
   });
 })();

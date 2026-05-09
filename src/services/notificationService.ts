@@ -298,13 +298,248 @@ async function sendSubscriptionReminders(): Promise<void> {
   }
 }
 
+// Dia 25: alerta proativo de recorrentes do próximo mês (diferente de "próximas" que é sob demanda)
+async function sendRecorrentesAlert(): Promise<void> {
+  if (new Date().getUTCDate() !== 25) return;
+  const sentinel = currentMonthStart();
+
+  const { rows } = await pool.query<{ id: number; telefone: string }>(`
+    SELECT DISTINCT u.id, u.telefone
+    FROM users u
+    WHERE (u.subscription_status = 'active' OR (u.subscription_status = 'trial' AND u.trial_ends_at > NOW()))
+      AND EXISTS (SELECT 1 FROM recurring_expenses WHERE user_id = u.id AND ativo = TRUE)
+      AND NOT EXISTS (
+        SELECT 1 FROM sent_insights
+        WHERE user_id = u.id AND categoria = 'alerta_recorrentes' AND mes_referencia = $1
+      )
+  `, [sentinel]);
+
+  for (const user of rows) {
+    if (!(await tryMarkSent(user.id, "alerta_recorrentes", sentinel))) continue;
+    try {
+      const recRows = await pool.query<{ nome: string; valor: string }>(
+        `SELECT nome, valor FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE ORDER BY valor DESC`,
+        [user.id]
+      );
+      const total = recRows.rows.reduce((s, r) => s + Number(r.valor), 0);
+      const lista = recRows.rows.map(r => `• ${r.nome} — R$ ${Number(r.valor).toFixed(2)}`).join("\n");
+
+      await whatsapp.sendText({
+        to: user.telefone,
+        text: [
+          "📋 Contas do próximo mês",
+          "",
+          lista,
+          "",
+          `Total previsto: R$ ${total.toFixed(2)}/mês`,
+          "",
+          'Envie "próximas" para detalhes.',
+        ].join("\n"),
+      });
+      log.whatsapp("alerta recorrentes enviado", { to: user.telefone, userId: user.id, total });
+    } catch (err) {
+      log.error("falha ao enviar alerta recorrentes", err, { userId: user.id });
+    }
+  }
+}
+
+// Dia 1: score financeiro mensal — enviado junto ao fechamento
+async function sendMonthlyScore(): Promise<void> {
+  if (new Date().getUTCDate() !== 1) return;
+  const now       = new Date();
+  const prevStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const prevEnd   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const sentinel  = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 2)); // dia 2 do mês anterior = sentinela única
+
+  const { rows } = await pool.query<{ id: number; telefone: string; renda: string; renda_extra: string }>(`
+    SELECT u.id, u.telefone, u.renda, u.renda_extra
+    FROM users u
+    WHERE (u.subscription_status = 'active' OR (u.subscription_status = 'trial' AND u.trial_ends_at > NOW()))
+      AND (SELECT COUNT(*) FROM transactions WHERE user_id = u.id AND tipo = 'saida' AND criado_em >= $1 AND criado_em < $2) >= 3
+      AND NOT EXISTS (
+        SELECT 1 FROM sent_insights
+        WHERE user_id = u.id AND categoria = 'score_mensal' AND mes_referencia = $1
+      )
+  `, [prevStart, prevEnd]);
+
+  for (const user of rows) {
+    try {
+      const inserted = await pool.query(
+        `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+         VALUES ($1, 'score_mensal', 1, $2)
+         ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+        [user.id, prevStart]
+      );
+      if ((inserted.rowCount ?? 0) === 0) continue;
+
+      // Coleta dados para o score
+      const [totaisRes, limRes, metasRes, recRes, txRes] = await Promise.all([
+        pool.query<{ entradas: string; saidas: string }>(
+          `SELECT COALESCE(SUM(CASE WHEN tipo='entrada' THEN valor ELSE 0 END),0) AS entradas,
+                  COALESCE(SUM(CASE WHEN tipo='saida'   THEN valor ELSE 0 END),0) AS saidas
+           FROM transactions WHERE user_id = $1 AND criado_em >= $2 AND criado_em < $3`,
+          [user.id, prevStart, prevEnd]
+        ),
+        pool.query<{ excedidos: string }>(
+          `SELECT COUNT(*) AS excedidos FROM category_limits cl
+           WHERE cl.user_id = $1
+             AND (SELECT COALESCE(SUM(valor),0) FROM transactions
+                  WHERE user_id = $1 AND LOWER(categoria) = LOWER(cl.categoria)
+                    AND tipo='saida' AND criado_em >= $2 AND criado_em < $3) > cl.valor_limite`,
+          [user.id, prevStart, prevEnd]
+        ),
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*) AS count FROM user_goals WHERE user_id = $1 AND valor_atual > 0`,
+          [user.id]
+        ),
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*) AS count FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE`,
+          [user.id]
+        ),
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*) AS count FROM transactions
+           WHERE user_id = $1 AND tipo='saida' AND criado_em >= $2 AND criado_em < $3`,
+          [user.id, prevStart, prevEnd]
+        ),
+      ]);
+
+      const saidas    = Number(totaisRes.rows[0].saidas);
+      const entradas  = Number(totaisRes.rows[0].entradas);
+      const rendaFixa = Number(user.renda ?? 0) + Number(user.renda_extra ?? 0);
+      const rendaTotal = rendaFixa + entradas;
+      const excedidos  = Number(limRes.rows[0].excedidos);
+      const temMetas   = Number(metasRes.rows[0].count) > 0;
+      const temRec     = Number(recRes.rows[0].count) > 0;
+      const txCount    = Number(txRes.rows[0].count);
+
+      let score = 0;
+      const criterios: string[] = [];
+
+      if (rendaTotal > 0 && saidas <= rendaTotal) {
+        score += 3; criterios.push("✅ Ficou dentro do orçamento");
+      } else {
+        criterios.push("⚠️ Gastos acima da renda");
+      }
+      if (excedidos === 0 && (await pool.query(`SELECT COUNT(*) AS c FROM category_limits WHERE user_id = $1`, [user.id])).rows[0].c > 0) {
+        score += 2; criterios.push("✅ Nenhum limite excedido");
+      } else if (excedidos > 0) {
+        criterios.push(`⚠️ ${excedidos} limite(s) ultrapassado(s)`);
+      }
+      if (temMetas) { score += 2; criterios.push("✅ Metas ativas"); }
+      if (txCount >= 10) { score += 2; criterios.push("✅ Controle consistente"); }
+      else if (txCount >= 5) { score += 1; criterios.push("✅ Bom registro de gastos"); }
+      if (temRec) { score += 1; criterios.push("✅ Recorrentes organizados"); }
+
+      const nivel = score >= 8 ? "🌟 Excelente" : score >= 6 ? "👍 Bom" : score >= 4 ? "📈 Em progresso" : "💪 Continue tentando";
+
+      await whatsapp.sendText({
+        to: user.telefone,
+        text: [
+          `⭐ Score financeiro do mês: ${score}/10`,
+          `${nivel}`,
+          "",
+          ...criterios,
+        ].join("\n"),
+      });
+      log.whatsapp("score mensal enviado", { to: user.telefone, userId: user.id, score });
+    } catch (err) {
+      log.error("falha ao enviar score mensal", err, { userId: user.id });
+    }
+  }
+}
+
+// Segunda-feira 9h: push semanal com comparativo real (diferente do comando "semana" que é sob demanda)
+export async function runWeeklyNotifications(): Promise<void> {
+  // Semana anterior: de segunda a domingo passados
+  const now    = new Date();
+  const nowBR  = new Date(now.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const dow    = nowBR.getDay(); // 1 = monday
+  if (dow !== 1) return; // garante que só roda na segunda (proteção extra)
+
+  const semIni  = new Date(Date.UTC(nowBR.getFullYear(), nowBR.getMonth(), nowBR.getDate() - 7));
+  const semFim  = new Date(Date.UTC(nowBR.getFullYear(), nowBR.getMonth(), nowBR.getDate()));
+  const antIni  = new Date(Date.UTC(nowBR.getFullYear(), nowBR.getMonth(), nowBR.getDate() - 14));
+  const sentinel = semIni;
+
+  const { rows } = await pool.query<{ id: number; telefone: string }>(`
+    SELECT u.id, u.telefone
+    FROM users u
+    WHERE (u.subscription_status = 'active' OR (u.subscription_status = 'trial' AND u.trial_ends_at > NOW()))
+      AND (SELECT COUNT(*) FROM transactions WHERE user_id = u.id AND tipo='saida' AND criado_em >= $1 AND criado_em < $2) >= 2
+      AND NOT EXISTS (
+        SELECT 1 FROM sent_insights
+        WHERE user_id = u.id AND categoria = 'relatorio_semanal' AND mes_referencia = $3
+      )
+  `, [semIni, semFim, sentinel]);
+
+  for (const user of rows) {
+    try {
+      const inserted = await pool.query(
+        `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+         VALUES ($1, 'relatorio_semanal', 1, $2)
+         ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+        [user.id, sentinel]
+      );
+      if ((inserted.rowCount ?? 0) === 0) continue;
+
+      const [cur, prev] = await Promise.all([
+        pool.query<{ total: string; categoria: string }>(
+          `SELECT COALESCE(SUM(valor),0)::text AS total,
+                  (SELECT COALESCE(categoria,'Outros') FROM transactions
+                   WHERE user_id = $1 AND tipo='saida' AND criado_em >= $2 AND criado_em < $3
+                   GROUP BY categoria ORDER BY SUM(valor) DESC LIMIT 1) AS categoria
+           FROM transactions WHERE user_id = $1 AND tipo='saida' AND criado_em >= $2 AND criado_em < $3`,
+          [user.id, semIni, semFim]
+        ),
+        pool.query<{ total: string }>(
+          `SELECT COALESCE(SUM(valor),0)::text AS total FROM transactions
+           WHERE user_id = $1 AND tipo='saida' AND criado_em >= $2 AND criado_em < $3`,
+          [user.id, antIni, semIni]
+        ),
+      ]);
+
+      const totalSem  = Number(cur.rows[0]?.total ?? 0);
+      const totalAnt  = Number(prev.rows[0]?.total ?? 0);
+      const topCat    = cur.rows[0]?.categoria ?? null;
+      const emoji     = { "Alimentação":"🍔","Transporte":"🚗","Moradia":"🏠","Lazer":"🎮",
+                          "Saúde":"💊","Educação":"📚","Outros":"📦" }[topCat ?? ""] ?? "💸";
+
+      let comparativo = "";
+      if (totalAnt > 0) {
+        const pct = Math.round(((totalSem - totalAnt) / totalAnt) * 100);
+        comparativo = pct > 0
+          ? `📈 ${pct}% a mais que na semana anterior`
+          : pct < 0
+          ? `📉 ${Math.abs(pct)}% a menos que na semana anterior`
+          : "➡️ Igual à semana anterior";
+      }
+
+      const linhas = [
+        "📊 Resumo da semana",
+        "",
+        `💸 Total gasto: R$ ${totalSem.toFixed(2)}`,
+      ];
+      if (comparativo) linhas.push(comparativo);
+      if (topCat) linhas.push("", `${emoji} Maior gasto: ${topCat}`);
+      linhas.push("", 'Envie "ranking" para ver o detalhamento.');
+
+      await whatsapp.sendText({ to: user.telefone, text: linhas.join("\n") });
+      log.whatsapp("push semanal enviado", { to: user.telefone, userId: user.id, totalSem });
+    } catch (err) {
+      log.error("falha ao enviar push semanal", err, { userId: user.id });
+    }
+  }
+}
+
 export async function runDailyNotifications(): Promise<void> {
   log.webhook("iniciando notificações diárias");
   try { await sendSubscriptionReminders(); }            catch (err) { log.error("falha sub reminders", err); }
+  try { await sendRecorrentesAlert(); }                 catch (err) { log.error("falha alerta recorrentes", err); }
   try { await sendInactivityNotifications(); }          catch (err) { log.error("falha notif inatividade", err); }
   try { await sendMonthEndNotifications(); }             catch (err) { log.error("falha notif fim mes", err); }
   try { await sendGoalStagnationNotifications(); }       catch (err) { log.error("falha notif meta parada", err); }
   try { await sendMonthlyClosingNotifications(); }       catch (err) { log.error("falha notif fechamento", err); }
+  try { await sendMonthlyScore(); }                     catch (err) { log.error("falha score mensal", err); }
   try { await sendNewMonthFlowNotifications(); }         catch (err) { log.error("falha notif novo mes", err); }
   log.webhook("notificações diárias concluídas");
 }
