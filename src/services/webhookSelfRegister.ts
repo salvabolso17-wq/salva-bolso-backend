@@ -34,13 +34,12 @@ async function callWebhookSet(webhookUrl: string): Promise<boolean> {
 export async function selfRegisterWebhook(): Promise<void> {
   if (process.env.WHATSAPP_PROVIDER !== "evolution") return;
 
-  const base = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
-  if (!base) {
-    log.error("self-register: APP_BASE_URL nao configurado", undefined, {});
-    return;
-  }
+  // Usa URL interna (service name Docker) para evitar hairpin NAT.
+  // WEBHOOK_SELF_URL sobrescreve se necessário.
+  const port = process.env.PORT ?? "3000";
+  const defaultInternal = `http://salva-bolso_backend-salvabolso:${port}/webhooks/whatsapp?provider=evolution`;
+  const webhookUrl = (process.env.WEBHOOK_SELF_URL ?? defaultInternal).replace(/\/$/, "");
 
-  const webhookUrl = `${base}/webhooks/whatsapp?provider=evolution`;
   log.webhook("self-register: iniciando", { webhookUrl });
 
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
