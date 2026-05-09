@@ -154,18 +154,35 @@ router.post("/asaas", async (req, res) => {
     }
 
     const telefone = telefoneRaw.replace(/\D/g, "");
-    console.error("[ASAAS] telefone normalizado:", telefone);
+
+    // Gera variantes para cobrir reforma do 9 dígito e DDI 55
+    const variants = new Set<string>([telefone]);
+    const expand = (t: string) => {
+      if (t.length === 13) { // 55+DDD+9+local
+        const s = t.slice(2); variants.add(s);                          // DDD+9+local
+        const n = s.slice(0, 2) + s.slice(3); variants.add(n); variants.add("55" + n); // sem 9
+      } else if (t.length === 12) { // 55+DDD+local
+        const s = t.slice(2); variants.add(s);                          // DDD+local
+        const c = s.slice(0, 2) + "9" + s.slice(2); variants.add(c); variants.add("55" + c); // com 9
+      } else if (t.length === 11) { // DDD+9+local
+        variants.add("55" + t);
+        const n = t.slice(0, 2) + t.slice(3); variants.add(n); variants.add("55" + n);
+      } else if (t.length === 10) { // DDD+local
+        variants.add("55" + t);
+        const c = t.slice(0, 2) + "9" + t.slice(2); variants.add(c); variants.add("55" + c);
+      }
+    };
+    expand(telefone);
+    const variantsArr = Array.from(variants);
+    console.error("[ASAAS] variantes de telefone:", variantsArr);
 
     const result = await pool.query<{ id: number; telefone: string }>(
       `UPDATE users
        SET subscription_status = 'active'
-       WHERE (
-         REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = $1
-         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 11) = RIGHT($1, 11)
-       )
+       WHERE REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = ANY($1::text[])
        AND subscription_status != 'active'
        RETURNING id, telefone`,
-      [telefone]
+      [variantsArr]
     );
 
     console.error("[ASAAS] rowCount:", result.rowCount);
