@@ -22,7 +22,6 @@ router.get("/whatsapp", (req, res) => {
 
 // POST /webhooks/whatsapp?provider=meta|evolution|360dialog
 router.post("/whatsapp", async (req, res) => {
-  console.log("[WHATSAPP-HIT] rota atingida, body keys:", Object.keys(req.body ?? {}));
   const start    = Date.now();
   const provider = (req.query.provider as string) ?? "meta";
   const body     = req.body as Record<string, unknown>;
@@ -93,14 +92,107 @@ router.post("/whatsapp", async (req, res) => {
   }
 });
 
-// STUB — rota mínima para isolar Bad Gateway
-router.get("/asaas", (_req, res) => {
-  res.status(200).send("asaas ok");
-});
+// Busca o telefone do customer no Asaas (fallback quando externalReference está ausente)
+async function fetchAsaasCustomerPhone(customerId: string): Promise<string | null> {
+  const apiKey  = process.env.ASAAS_API_KEY;
+  const baseUrl = (process.env.ASAAS_API_URL ?? "https://api.asaas.com/v3").replace(/\/$/, "");
 
-router.post("/asaas", (req, res) => {
-  console.log("[ASAAS] webhook simples funcionando");
-  return res.status(200).json({ ok: true });
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch(`${baseUrl}/customers/${customerId}`, {
+      headers: { "access_token": apiKey },
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as Record<string, unknown>;
+    return ((data.mobilePhone ?? data.phone) as string | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// POST /webhooks/asaas — ativa usuário quando pagamento é confirmado
+router.post("/asaas", async (req, res) => {
+  try {
+    console.error("[ASAAS] webhook recebido — body:", JSON.stringify(req.body).slice(0, 300));
+
+    const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
+    if (webhookToken && req.headers["asaas-access-token"] !== webhookToken) {
+      console.error("[ASAAS] token invalido");
+      res.status(200).json({ received: true, error: "Token inválido" });
+      return;
+    }
+
+    const body    = req.body as Record<string, unknown>;
+    const event   = body.event as string | undefined;
+    const payment = body.payment as Record<string, unknown> | undefined;
+
+    console.error("[ASAAS] event:", event, "paymentId:", payment?.id);
+
+    if (event !== "PAYMENT_CONFIRMED" && event !== "PAYMENT_RECEIVED") {
+      res.status(200).json({ received: true, ignored: true, event });
+      return;
+    }
+
+    let telefoneRaw = payment?.externalReference as string | undefined;
+    console.error("[ASAAS] externalReference:", telefoneRaw ?? "(ausente)");
+
+    if (!telefoneRaw) {
+      const customerId = payment?.customer as string | undefined;
+      console.error("[ASAAS] buscando telefone via customer:", customerId ?? "(ausente)");
+      if (!customerId) {
+        res.status(200).json({ received: true, error: "Sem identificador de usuário" });
+        return;
+      }
+      const phone = await fetchAsaasCustomerPhone(customerId);
+      console.error("[ASAAS] telefone retornado:", phone ?? "(nulo)");
+      if (!phone) {
+        res.status(200).json({ received: true, error: "Telefone não encontrado" });
+        return;
+      }
+      telefoneRaw = phone;
+    }
+
+    const telefone = telefoneRaw.replace(/\D/g, "");
+    console.error("[ASAAS] telefone normalizado:", telefone);
+
+    const result = await pool.query<{ id: number; telefone: string }>(
+      `UPDATE users
+       SET subscription_status = 'active'
+       WHERE (
+         REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = $1
+         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 11) = RIGHT($1, 11)
+       )
+       AND subscription_status != 'active'
+       RETURNING id, telefone`,
+      [telefone]
+    );
+
+    console.error("[ASAAS] rowCount:", result.rowCount);
+
+    if (result.rowCount === 0) {
+      res.status(200).json({ received: true, alreadyActive: true });
+      return;
+    }
+
+    const user = result.rows[0];
+    console.error("[ASAAS] usuario ativado:", user.id, user.telefone);
+    log.webhook("asaas: usuario ativado", { userId: user.id, telefone: user.telefone, paymentId: payment?.id });
+
+    try {
+      await whatsapp.sendText({
+        to:   user.telefone,
+        text: "✅ Assinatura ativada!\n\nBem-vindo ao Salva Bolso 🚀",
+      });
+    } catch (err) {
+      console.error("[ASAAS] falha ao notificar WhatsApp:", err);
+    }
+
+    res.status(200).json({ received: true, activated: true, userId: user.id });
+  } catch (err) {
+    console.error("[ASAAS] ERRO INTERNO:", err);
+    res.status(200).json({ received: true });
+  }
 });
 
 export default router;
