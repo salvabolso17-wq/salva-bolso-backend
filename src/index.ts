@@ -6,6 +6,7 @@ import pool from "./db/client";
 import { createTables } from "./database";
 import { selfRegisterWebhook } from "./services/webhookSelfRegister";
 import { runDailyNotifications } from "./services/notificationService";
+import { cronState } from "./utils/cronState";
 import usersRoutes from "./routes/users";
 import transactionsRoutes from "./routes/transactions";
 import authRoutes from "./routes/auth";
@@ -13,6 +14,7 @@ import financialGoalsRoutes from "./routes/financial-goals";
 import reportsRoutes from "./routes/reports";
 import webhooksRoutes from "./routes/webhooks";
 import insightsRoutes from "./routes/insights";
+import healthDeepRoutes from "./routes/healthDeep";
 
 const app = express();
 
@@ -26,6 +28,7 @@ app.use("/financial-goals", financialGoalsRoutes);
 app.use("/reports", reportsRoutes);
 app.use("/webhooks", webhooksRoutes);
 app.use("/insights", insightsRoutes);
+app.use("/healthz/deep", healthDeepRoutes);
 
 // Global error handler — catches sync throws and next(err) calls
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -62,7 +65,10 @@ const PORT = Number(process.env.PORT ?? 3000);
     // Auto-registra webhook na Evolution após a rede overlay estabilizar
     setTimeout(() => selfRegisterWebhook(), 5000);
     // Expiração de assinaturas — a cada hora
+    cronState.expiracao.registrado = true;
     cron.schedule("0 * * * *", async () => {
+      cronState.expiracao.ultimaExecucao = new Date();
+      cronState.expiracao.erroUltimo = null;
       try {
         const r = await pool.query(
           `UPDATE users SET subscription_status = 'expired'
@@ -70,16 +76,20 @@ const PORT = Number(process.env.PORT ?? 3000);
              AND subscription_expires_at IS NOT NULL
              AND subscription_expires_at < NOW()`
         );
+        cronState.expiracao.ultimoExpiredCount = r.rowCount ?? 0;
         if ((r.rowCount ?? 0) > 0) {
           console.log(`[CRON] ${r.rowCount} assinatura(s) expirada(s)`);
         }
       } catch (err) {
+        cronState.expiracao.erroUltimo = String(err);
         console.error("[CRON] falha na expiracao de assinaturas:", err);
       }
     });
 
     // Notificações de retenção — diariamente às 9h horário de Brasília
+    cronState.notificacoes.registrado = true;
     cron.schedule("0 9 * * *", () => {
+      cronState.notificacoes.ultimaExecucao = new Date();
       runDailyNotifications().catch(err => console.error("cron diario falhou:", err));
     }, { timezone: "America/Sao_Paulo" });
   });
