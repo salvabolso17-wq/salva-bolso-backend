@@ -97,13 +97,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
 
       const boas_vindas = [
-        "👋 Bem-vindo ao Salva Bolso!",
+        "👋 Olá! Sou o Salva Bolso — seu assistente financeiro no WhatsApp.",
         "",
-        "Controle seus gastos direto no WhatsApp 💸",
+        "Vou te ajudar a saber exatamente onde seu dinheiro vai, sem planilha e sem app.",
         "",
-        "Você tem 7 dias grátis para experimentar.",
-        "",
-        "Comece enviando sua renda mensal:",
+        "Para começar, me conta sua renda mensal:",
         "Ex: 3000 salário",
       ].join("\n");
 
@@ -216,13 +214,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
     if (count === 0) {
       const boas_vindas = [
-        "👋 Bem-vindo ao Salva Bolso!",
+        "👋 Olá! Sou o Salva Bolso — seu assistente financeiro no WhatsApp.",
         "",
-        "Controle seus gastos direto no WhatsApp 💸",
+        "Vou te ajudar a saber exatamente onde seu dinheiro vai, sem planilha e sem app.",
         "",
-        "Você tem 7 dias grátis para experimentar.",
-        "",
-        "Comece enviando sua renda mensal:",
+        "Para começar, me conta sua renda mensal:",
         "Ex: 3000 salário",
       ].join("\n");
       try {
@@ -396,9 +392,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       const msg = [
         `💰 Renda registrada: ${fmtValor(parsed.valor)}`,
         "",
-        "Agora envie um gasto:",
-        "Ex:",
-        "120 mercado",
+        "Agora me conta um gasto:",
+        "Ex: 50 mercado",
       ].join("\n");
       try {
         await whatsapp.sendText({ to: message.telefone, text: msg });
@@ -1237,7 +1232,7 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
         `SELECT COUNT(DISTINCT categoria) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
         [userId]
       );
-      if (n >= 5 || Number(catRow.rows[0].count) >= 3) tipId = 3;
+      if (n >= 5 && Number(catRow.rows[0].count) >= 3) tipId = 3;
     }
   } else if (evento === "saldo_usado") {
     tipId = 2;                     // usou saldo → resumo
