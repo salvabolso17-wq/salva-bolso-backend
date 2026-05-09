@@ -59,7 +59,7 @@ async function sendInactivityNotifications(): Promise<void> {
     try {
       await whatsapp.sendText({
         to:   user.telefone,
-        text: "👋 Faz alguns dias sem registrar gastos.\n\n💡 Ex:\n120 mercado",
+        text: "Oi! 👋 Faz alguns dias sem registrar nada.\n\nMe conta um gasto recente — ex: 30 almoço",
       });
       log.whatsapp("notif inatividade enviada", { to: user.telefone, userId: user.id });
     } catch (err) {
@@ -92,7 +92,7 @@ async function sendMonthEndNotifications(): Promise<void> {
     try {
       await whatsapp.sendText({
         to:   user.telefone,
-        text: "📊 O mês está acabando.\n\nEnvie:\nresumo",
+        text: "📊 O mês está quase no fim.\n\nEnvie 'resumo' para ver onde você mais gastou.",
       });
       log.whatsapp("notif fim de mes enviada", { to: user.telefone, userId: user.id });
     } catch (err) {
@@ -148,7 +148,7 @@ async function sendMonthlyClosingNotifications(): Promise<void> {
     WHERE (
       SELECT COUNT(*) FROM transactions
       WHERE user_id = u.id AND tipo = 'saida' AND criado_em >= $1 AND criado_em < $2
-    ) >= 3
+    ) >= 5
     AND NOT EXISTS (
       SELECT 1 FROM sent_insights
       WHERE user_id = u.id AND categoria = 'notif_fechamento' AND mes_referencia = $1
@@ -355,7 +355,7 @@ async function sendMonthlyScore(): Promise<void> {
     SELECT u.id, u.telefone, u.renda, u.renda_extra
     FROM users u
     WHERE (u.subscription_status = 'active' OR (u.subscription_status = 'trial' AND u.trial_ends_at > NOW()))
-      AND (SELECT COUNT(*) FROM transactions WHERE user_id = u.id AND tipo = 'saida' AND criado_em >= $1 AND criado_em < $2) >= 3
+      AND (SELECT COUNT(*) FROM transactions WHERE user_id = u.id AND tipo = 'saida' AND criado_em >= $1 AND criado_em < $2) >= 8
       AND NOT EXISTS (
         SELECT 1 FROM sent_insights
         WHERE user_id = u.id AND categoria = 'score_mensal' AND mes_referencia = $1
@@ -466,6 +466,7 @@ export async function runWeeklyNotifications(): Promise<void> {
     FROM users u
     WHERE (u.subscription_status = 'active' OR (u.subscription_status = 'trial' AND u.trial_ends_at > NOW()))
       AND (SELECT COUNT(*) FROM transactions WHERE user_id = u.id AND tipo='saida' AND criado_em >= $1 AND criado_em < $2) >= 2
+      AND (SELECT COUNT(*) FROM transactions WHERE user_id = u.id) >= 5
       AND NOT EXISTS (
         SELECT 1 FROM sent_insights
         WHERE user_id = u.id AND categoria = 'relatorio_semanal' AND mes_referencia = $3
@@ -521,7 +522,7 @@ export async function runWeeklyNotifications(): Promise<void> {
       ];
       if (comparativo) linhas.push(comparativo);
       if (topCat) linhas.push("", `${emoji} Maior gasto: ${topCat}`);
-      linhas.push("", 'Envie "ranking" para ver o detalhamento.');
+      linhas.push("", 'Envie "resumo" para ver por categoria.');
 
       await whatsapp.sendText({ to: user.telefone, text: linhas.join("\n") });
       log.whatsapp("push semanal enviado", { to: user.telefone, userId: user.id, totalSem });

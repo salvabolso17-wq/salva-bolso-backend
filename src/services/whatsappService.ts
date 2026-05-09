@@ -1224,8 +1224,8 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
     const n = Number(countRow.rows[0].count);
     if (n === 1) {
       tipId = 1;   // 1º gasto → saldo
-    } else if (n === 8) {
-      tipId = 4;   // 8º gasto → criar meta
+    } else if (n === 15) {
+      tipId = 4;   // 15º gasto → criar meta
     } else {
       // ranking: 5+ gastos OU 3+ categorias distintas (o que vier primeiro)
       const catRow = await pool.query<{ count: string }>(
