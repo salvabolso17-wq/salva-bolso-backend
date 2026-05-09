@@ -484,12 +484,6 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
   const meses = ["janeiro","fevereiro","março","abril","maio","junho",
                  "julho","agosto","setembro","outubro","novembro","dezembro"];
 
-  const saldoCTA = totalRenda > 0 && sobrou >= 0
-    ? '💪 Você está no controle. Envie "resumo" para ver por categoria.'
-    : totalRenda > 0
-    ? 'Veja o "resumo" para identificar o que pesou mais.'
-    : 'Envie "resumo" para ver por categoria.';
-
   const linhas = [
     `Saldo de ${meses[now.getMonth()]}/${now.getFullYear()}`,
     "",
@@ -500,8 +494,6 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
     sobrou >= 0
       ? `💚 Sobrou: R$ ${sobrou.toFixed(2)}`
       : `⚠️ Deficit: R$ ${Math.abs(sobrou).toFixed(2)}`,
-    "",
-    saldoCTA,
   ];
 
   try {
@@ -544,13 +536,6 @@ async function handleResumoCommand(user: UserRow, telefone: string): Promise<Pro
     if (metrics.categoria_top) {
       linhas.push(`Maior categoria: ${metrics.categoria_top}`);
     }
-    const topCat = metrics.gastos_por_categoria[0];
-    const pctTop = metrics.total_saidas > 0 ? Math.round((topCat.total / metrics.total_saidas) * 100) : 0;
-    if (pctTop >= 40) {
-      linhas.push("", `💡 ${topCat.categoria} teve o maior peso (${pctTop}%). Quer definir um limite?\nEx: limite ${topCat.categoria.toLowerCase()} 500`);
-    } else {
-      linhas.push("", 'Use "previsão" para estimar o fechamento do mês.');
-    }
   }
 
   try {
@@ -575,8 +560,6 @@ function fmtValor(valor: number): string {
 // Dica contextual inline: só em contagens estratégicas, para não poluir toda confirmação
 function nextStepHint(n: number): string | null {
   if (n === 2) return "Continue assim! 👌";
-  if (n === 3) return 'Envie "saldo" quando quiser ver o mês.';
-  if (n === 4) return 'Use "saldo" para checar o quanto sobrou.';
   if (n === 7) return 'Envie "resumo" para ver por categoria.';
   if (n === 10) return 'Use "previsão" para estimar o fechamento.';
   return null;
@@ -929,7 +912,6 @@ async function handleRankingCommand(user: UserRow, telefone: string): Promise<Pr
 
   linhas.push("", "Maior impacto:");
   linhas.push(`${top.categoria} representa ${percentTop}% dos gastos.`);
-  linhas.push("", '📈 Envie "previsão" para ver como o mês vai fechar.');
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
@@ -1396,14 +1378,6 @@ async function handlePrevisaoCommand(user: UserRow, telefone: string): Promise<P
         ? `💰 Devem sobrar ${fmtValor(saldo)}`
         : `💸 Podem faltar ${fmtValor(Math.abs(saldo))}`
     );
-    linhas.push(
-      "",
-      saldo >= 0
-        ? "Continue registrando para manter essa precisão. 💪"
-        : "Cada gasto registrado torna a previsão mais fiel."
-    );
-  } else {
-    linhas.push("", "Continue registrando para manter a previsão atualizada.");
   }
 
   try {
