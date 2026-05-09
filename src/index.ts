@@ -59,7 +59,7 @@ const PORT = Number(process.env.PORT ?? 3000);
 
 (async () => {
   await createTables();
-  console.log(`[STARTUP] tentando ouvir em 0.0.0.0:${PORT} | build=20260509-asaas-fix`);
+  console.log(`[STARTUP] tentando ouvir em 0.0.0.0:${PORT} | build=20260509-producao-publica`);
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[STARTUP] Servidor ouvindo em 0.0.0.0:${PORT}`);
     // Auto-registra webhook na Evolution após a rede overlay estabilizar

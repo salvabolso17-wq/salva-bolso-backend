@@ -4,7 +4,7 @@ import { cronState } from "../utils/cronState";
 
 const router = Router();
 
-const BUILD = "20260509-expiracao-planos";
+const BUILD = "20260509-producao-publica";
 
 // Verifica token via header ou query param
 function isAuthorized(req: import("express").Request): boolean {

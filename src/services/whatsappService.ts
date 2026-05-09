@@ -82,7 +82,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const ehSaudacao = /^(oi|ol[aá]|ola|começar|comecar|menu|ajuda|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i
       .test(message.texto.trim());
 
-    if (ehSaudacao && isOnboardingEnabled(message.telefone)) {
+    if (ehSaudacao) {
       log.user("criando usuario via onboarding", { telefone: message.telefone });
       try {
         await pool.query(
@@ -97,13 +97,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
 
       const boas_vindas = [
-        "👋 Bem-vindo ao Salva Bolso",
+        "👋 Bem-vindo ao Salva Bolso!",
         "",
         "Controle seus gastos direto no WhatsApp 💸",
         "",
+        "Você tem 7 dias grátis para experimentar.",
+        "",
         "Comece enviando sua renda mensal:",
-        "Ex:",
-        "3000 salário",
+        "Ex: 3000 salário",
       ].join("\n");
 
       try {
@@ -213,15 +214,16 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     );
     const count = Number(countRow.rows[0].count);
 
-    if (count === 0 && isOnboardingEnabled(message.telefone)) {
+    if (count === 0) {
       const boas_vindas = [
-        "👋 Bem-vindo ao Salva Bolso",
+        "👋 Bem-vindo ao Salva Bolso!",
         "",
         "Controle seus gastos direto no WhatsApp 💸",
         "",
+        "Você tem 7 dias grátis para experimentar.",
+        "",
         "Comece enviando sua renda mensal:",
-        "Ex:",
-        "3000 salário",
+        "Ex: 3000 salário",
       ].join("\n");
       try {
         await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
@@ -314,7 +316,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // Onboarding step 1: número puro sem palavra-chave → interpretar como renda
   let textoParsear = message.texto;
-  if (isOnboardingEnabled(message.telefone) && /^\d[\d,.]*$/.test(message.texto.trim())) {
+  if (/^\d[\d,.]*$/.test(message.texto.trim())) {
     const cRow = await pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
       [user.id]
@@ -373,7 +375,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // ── Enviar confirmação WhatsApp ───────────────────────────────────────────
 
   // Onboarding step 2: primeira transação é uma entrada → direcionar para o primeiro gasto
-  if (parsed.tipo === "entrada" && isOnboardingEnabled(message.telefone)) {
+  if (parsed.tipo === "entrada") {
     const countRow = await pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
       [user.id]
@@ -1202,8 +1204,6 @@ const ONBOARDING_TIPS: Record<number, string> = {
 };
 
 async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<void> {
-  if (!isOnboardingEnabled(telefone)) return;
-
   // mes_referencia fixo como sentinel de lifetime (não se repete mensalmente)
   const LIFETIME = new Date("2000-01-01");
 
@@ -1260,8 +1260,7 @@ async function checkAndSendInsights(userId: number, telefone: string, categoria:
     `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
     [userId]
   );
-  // Durante onboarding aguarda 10 gastos para não sobrepor as dicas progressivas; fora do onboarding: 3
-  const insightThreshold = isOnboardingEnabled(telefone) ? 10 : 3;
+  const insightThreshold = 10;
   if (Number(countRow.rows[0].count) < insightThreshold) return;
 
   const now       = new Date();
@@ -1679,14 +1678,6 @@ function isSubscriptionActive(user: UserRow): boolean {
   return false;
 }
 
-function isOnboardingEnabled(telefone: string): boolean {
-  const raw = process.env.ONBOARDING_WHITELIST ?? "";
-  if (!raw.trim()) return false;
-  const normalized = telefone.replace(/\D/g, "");
-  return raw.split(",")
-    .map(n => n.trim().replace(/\D/g, ""))
-    .some(n => n && (normalized.endsWith(n) || n.endsWith(normalized)));
-}
 
 function isKnownCommand(texto: string): boolean {
   return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|recorrentes|pr[oó]ximas|apagar|corrigir|top\s*gastos)$/i.test(texto)
