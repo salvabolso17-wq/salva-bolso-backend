@@ -311,6 +311,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handleExtratoCommand(user, message.telefone, message.texto.trim());
   }
 
+  // ── Interpretação conversacional ─────────────────────────────────────────
+  const intentResult = await tryHandleIntent(user, message.telefone, message.texto);
+  if (intentResult !== null) return intentResult;
+
   // ── Proteção contra mensagens ambíguas ───────────────────────────────────
   if (isAmbiguousIntent(message.texto)) {
     await whatsapp.sendText({
@@ -1713,6 +1717,109 @@ function isSubscriptionActive(user: UserRow): boolean {
 function isKnownCommand(texto: string): boolean {
   return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|recorrentes|pr[oó]ximas|apagar|corrigir|top\s*gastos)$/i.test(texto)
       || /^(limite|meta|guardar|recorrente|buscar|extrato)\s+/i.test(texto);
+}
+
+// Mostra dados reais quando o usuário expressa preocupação com gastos
+async function handleSpendingConcern(user: UserRow, telefone: string): Promise<ProcessResult> {
+  const now       = new Date();
+  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const metrics   = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
+
+  if (metrics.total_saidas === 0) {
+    await whatsapp.sendText({
+      to:   telefone,
+      text: "Ainda não há gastos registrados este mês.\n\nMe conta um:\nEx: 50 mercado",
+    });
+    return { success: false, userId: user.id, erro: "spending_concern sem dados" };
+  }
+
+  const top   = metrics.gastos_por_categoria[0];
+  const linhas = [
+    "Vamos ver.",
+    "",
+    `📊 Maior gasto este mês: ${top.categoria} — ${fmtValor(top.total)}`,
+    `Total gasto: ${fmtValor(metrics.total_saidas)}`,
+    "",
+    'Envie "resumo" para o detalhamento.',
+  ];
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("spending_concern respondido", { to: telefone, userId: user.id });
+  } catch (err) {
+    log.error("falha spending_concern", err, { userId: user.id });
+  }
+  return { success: false, userId: user.id, erro: "spending_concern tratado" };
+}
+
+// Responde "e agora?" com próximo passo útil baseado no contexto atual
+async function handleNextStepSuggestion(user: UserRow, telefone: string): Promise<ProcessResult> {
+  const countRow = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
+    [user.id]
+  );
+  const count = Number(countRow.rows[0].count);
+
+  const text = count === 0
+    ? "Vamos começar!\n\nMe conta sua renda mensal:\nEx: 3000 salário"
+    : count <= 3
+    ? "Continue registrando seus gastos.\n\nEx: 50 mercado"
+    : 'Envie "saldo" para ver como está o mês, ou "resumo" para ver por categoria.';
+
+  try {
+    await whatsapp.sendText({ to: telefone, text });
+    log.whatsapp("next_step_suggestion enviado", { to: telefone, userId: user.id, count });
+  } catch (err) {
+    log.error("falha next_step_suggestion", err, { userId: user.id });
+  }
+  return { success: false, userId: user.id, erro: "next_step tratado" };
+}
+
+// Interpreta intenção conversacional antes de cair no parser ou no hint genérico
+async function tryHandleIntent(user: UserRow, telefone: string, texto: string): Promise<ProcessResult | null> {
+  const t         = texto.trim().toLowerCase();
+  const temNumero = /\d/.test(t);
+
+  // Intenção de ajuda
+  if (
+    !temNumero &&
+    /^(preciso\s+de\s+(ajuda|help|suporte)|me\s+(ajuda|ajude|ensina|ensine)|como\s+(funciona|uso|usar|fa[çc]o)|o\s+que\s+(posso|d[aá]|consigo)\s+(fazer|ver|usar)|n[aã]o\s+sei(\s+o\s+que\s+fazer)?(\s+por\s+onde\s+come[çc]ar)?|o\s+que\s+tem\s+(aqui|nesse\s+bot)|quero\s+(aprender|entender|saber\s+mais))[\?!.]*$/.test(t)
+  ) {
+    return await handleAjudaCommand(user, telefone);
+  }
+
+  // Preocupação com gastos → mostra dado real do mês
+  if (
+    !temNumero &&
+    /acho\s+que\s+gastei\s+(muito|demais)|(estou?|t[oô])\s+gastando\s+(muito|demais)|(estou?\s+|t[oô]\s+|to\s+)?no\s+vermelho|gastei\s+(demais|muito)/.test(t)
+  ) {
+    return await handleSpendingConcern(user, telefone);
+  }
+
+  // Incerteza / "e agora?"
+  if (
+    !temNumero &&
+    /^(e\s+agora|e\s+a[ií]|o\s+que\s+fa[çc]o(\s+agora)?|o\s+que\s+(fazer|devo\s+fazer)|o\s+que\s+(você|voce|vc)\s+(sugere|recomenda))[\?!.]*$/.test(t)
+  ) {
+    return await handleNextStepSuggestion(user, telefone);
+  }
+
+  // Recusa / agradecimento → encerra naturalmente sem insistir
+  if (
+    !temNumero &&
+    /^(n[aã]o\s+quero(\s+ver\s+\S+)?|n[aã]o\s+agora|depois|por\s+enquanto\s+n[aã]o|obrigad[ao]|brigad[ao]|valeu|tudo\s+bem|td\s+bem|blz)[\?!.]*$/.test(t)
+  ) {
+    try {
+      await whatsapp.sendText({ to: telefone, text: "Tudo bem! 😊" });
+      log.whatsapp("ack conversacional enviado", { to: telefone, userId: user.id });
+    } catch (err) {
+      log.error("falha ack conversacional", err, { userId: user.id });
+    }
+    return { success: false, userId: user.id, erro: "ack reconhecido" };
+  }
+
+  return null;
 }
 
 // Detecta frases conversacionais/de intenção que NÃO devem virar lançamento automático
