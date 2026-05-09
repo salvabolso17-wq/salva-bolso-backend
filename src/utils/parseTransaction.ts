@@ -40,6 +40,7 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
       "café da manhã", "cafe da manha",
       "açaí", "acai", "sorvete", "gelato",
       "pastel", "coxinha", "salgado", "salgados",
+      "carne", "carne bovina", "picanha", "fraldinha", "linguiça", "linguica",
       "espetinho", "churrasco", "tapioca", "crepe", "waffle", "churros",
       "esfiha", "esfira", "quibe", "kibbeh",
       "sushi", "temaki", "yakisoba",
@@ -85,7 +86,7 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
   Moradia: {
     keywords: [
       // Aluguel e taxas
-      "aluguel", "condomínio", "condominio", "iptu", "boleto",
+      "aluguel", "alguel", "alugel", "condomínio", "condominio", "iptu", "boleto",
       // Água
       "conta de água", "conta de agua", "água", "agua",
       "sabesp", "copasa", "saneamento",

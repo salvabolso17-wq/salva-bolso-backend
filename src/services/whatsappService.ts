@@ -415,8 +415,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   const linhasConfirmacao = parsed.tipo === "entrada"
-    ? [`💰 Entrada registrada: ${fmtValor(parsed.valor)}`, parsed.descricao]
-    : [`✅ ${fmtValor(parsed.valor)} • ${parsed.categoria}`, parsed.descricao];
+    ? [`💰 ${fmtValor(parsed.valor)} registrado`]
+    : [`✅ ${fmtValor(parsed.valor)} — ${parsed.descricao}`];
 
   if (parsed.tipo === "saida") {
     const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
@@ -492,12 +492,12 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
     `Saldo de ${meses[now.getMonth()]}/${now.getFullYear()}`,
     "",
     totalRenda > 0
-      ? `Renda: R$ ${totalRenda.toFixed(2)}`
+      ? `Renda: ${fmtValor(totalRenda)}`
       : `Renda: não cadastrada`,
-    `Gastos: R$ ${metrics.total_saidas.toFixed(2)}`,
+    `Gastos: ${fmtValor(metrics.total_saidas)}`,
     sobrou >= 0
-      ? `💚 Sobrou: R$ ${sobrou.toFixed(2)}`
-      : `⚠️ Deficit: R$ ${Math.abs(sobrou).toFixed(2)}`,
+      ? `💚 Sobrou: ${fmtValor(sobrou)}`
+      : `⚠️ Deficit: ${fmtValor(Math.abs(sobrou))}`,
   ];
 
   try {
@@ -533,10 +533,10 @@ async function handleResumoCommand(user: UserRow, telefone: string): Promise<Pro
     linhas.push("Nenhum gasto registrado este mês.");
   } else {
     for (const cat of metrics.gastos_por_categoria) {
-      linhas.push(`${cat.categoria}: R$ ${cat.total.toFixed(2)}`);
+      linhas.push(`${cat.categoria}: ${fmtValor(cat.total)}`);
     }
     linhas.push("");
-    linhas.push(`Total gasto: R$ ${metrics.total_saidas.toFixed(2)}`);
+    linhas.push(`Total gasto: ${fmtValor(metrics.total_saidas)}`);
     if (metrics.categoria_top) {
       linhas.push(`Maior categoria: ${metrics.categoria_top}`);
     }
@@ -1109,38 +1109,43 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
 
   if (n < 5) {
     linhas = [
-      "Para registrar um gasto:",
-      "Ex: 50 mercado, 35 gasolina",
+      "É bem simples! Basta enviar o valor e o que foi:",
       "",
-      "Para registrar uma entrada:",
-      "Ex: 3000 salário",
+      "50 mercado",
+      "35 gasolina",
+      "120 farmácia",
+      "+3000 salário",
       "",
-      "📊 saldo — ver o mês atual",
-      "📋 resumo — gastos por categoria",
-      "📅 hoje — o que gastei hoje",
+      "Para consultar:",
+      "saldo — como está o mês",
+      "resumo — gastos por categoria",
+      "hoje — o que gastei hoje",
     ];
   } else if (n < 15) {
     linhas = [
-      "📊 saldo  •  📋 resumo  •  📅 hoje",
-      "📈 semana  •  🏆 ranking",
+      "Para registrar: 50 mercado  •  +3000 salário",
       "",
-      "🎯 meta viagem 5000",
-      "⚙️ limite alimentação 800",
+      "Consultas:",
+      "saldo  •  resumo  •  hoje  •  semana",
+      "ranking  •  previsão",
       "",
-      "Para registrar: 50 mercado | 3000 salário",
+      "Extras:",
+      "meta viagem 5000",
+      "limite alimentação 800",
     ];
   } else {
     linhas = [
-      "📊 saldo  •  📋 resumo  •  📅 hoje",
-      "📈 semana  •  🏆 ranking  •  📂 categorias",
-      "🎯 metas  •  📈 previsão  •  🔁 recorrentes",
-      "📅 próximas  •  🔎 buscar <termo>",
-      "❌ apagar  •  ✏️ corrigir",
+      "Para registrar: 50 mercado  •  +3000 salário",
       "",
-      "🎯 meta viagem 5000  •  ⚙️ limite alimentação 800",
-      "guardar 200 viagem  •  recorrente 39 netflix mensal",
+      "Consultas:",
+      "saldo  •  resumo  •  hoje  •  semana",
+      "ranking  •  previsão  •  categorias",
+      "recorrentes  •  próximas  •  buscar <termo>",
+      "apagar  •  corrigir",
       "",
-      "Para registrar: 50 mercado | 3000 salário",
+      "Extras:",
+      "meta viagem 5000  •  guardar 200 viagem",
+      "limite alimentação 800  •  recorrente 39 netflix mensal",
     ];
   }
 
@@ -1781,6 +1786,19 @@ async function handleNextStepSuggestion(user: UserRow, telefone: string): Promis
 async function tryHandleIntent(user: UserRow, telefone: string, texto: string): Promise<ProcessResult | null> {
   const t         = texto.trim().toLowerCase();
   const temNumero = /\d/.test(t);
+
+  // "?" / "??" / ponto de interrogação solto → guia próximo passo
+  if (/^[?\s!.]+$/.test(t)) {
+    return await handleNextStepSuggestion(user, telefone);
+  }
+
+  // Confusão / não entendeu → explica como usar
+  if (
+    !temNumero &&
+    /n[aã]o\s+(estou?|t[oô]|to)\s+entendendo|n[aã]o\s+entendi|entendi\s+foi\s+nada|que\s+[eéè]\s+isso|o\s+que\s+[eéè]\s+isso|n[aã]o\s+(sei|entendo)\s+(nada|nada\s+disso)|como\s+assim/.test(t)
+  ) {
+    return await handleAjudaCommand(user, telefone);
+  }
 
   // Intenção de ajuda
   if (
