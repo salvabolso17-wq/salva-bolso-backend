@@ -79,43 +79,68 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   if (!user) {
-    const ehSaudacao = /^(oi|ol[aá]|ola|começar|comecar|menu|ajuda|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i
-      .test(message.texto.trim());
+    const textoNew       = message.texto.trim();
+    const parsedFirst    = parseTransaction(textoNew);
+    const isCommandFirst = isKnownCommand(textoNew);
+    const ehSaudacao     = /^(oi|ol[aá]|ola|começar|comecar|menu|ajuda|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i.test(textoNew);
+    const ehPergunta     = /como\s+(funciona|uso|usar|fa[çc]o)|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|me\s+(ajuda|ajude|ensina)|o\s+que\s+[eéè]\s+isso/i.test(textoNew);
 
-    if (ehSaudacao) {
-      log.user("criando usuario via onboarding", { telefone: message.telefone });
+    if (!parsedFirst && !isCommandFirst && !ehSaudacao && !ehPergunta) {
+      return { success: false, erro: `Nenhum usuário com telefone ${message.telefone}` };
+    }
+
+    try {
+      await pool.query(
+        `INSERT INTO users (telefone, trial_ends_at)
+         VALUES ($1, NOW() + INTERVAL '7 days')
+         ON CONFLICT (telefone) DO NOTHING`,
+        [message.telefone]
+      );
+    } catch (err) {
+      log.error("falha ao criar usuario no onboarding", err, { telefone: message.telefone });
+      return { success: false, erro: "Erro ao criar usuário" };
+    }
+
+    if (parsedFirst || isCommandFirst) {
+      // Fast-track: usuário já sabe o que quer → processa direto, sem tutorial
       try {
-        await pool.query(
-          `INSERT INTO users (telefone, trial_ends_at)
-           VALUES ($1, NOW() + INTERVAL '7 days')
-           ON CONFLICT (telefone) DO NOTHING`,
-          [message.telefone]
-        );
+        user = await findUserByTelefone(message.telefone);
       } catch (err) {
-        log.error("falha ao criar usuario no onboarding", err, { telefone: message.telefone });
-        return { success: false, erro: "Erro ao criar usuário" };
+        return { success: false, erro: "Erro ao carregar usuário" };
       }
-
-      const boas_vindas = [
-        "👋 Olá! Sou o Salva Bolso — seu assistente financeiro no WhatsApp.",
-        "",
-        "Vou te ajudar a saber exatamente onde seu dinheiro vai, sem planilha e sem app.",
-        "",
-        "Para começar, me conta sua renda mensal:",
-        "Ex: 3000 salário",
-      ].join("\n");
+      if (!user) return { success: false, erro: "Erro ao criar usuário" };
+      log.user("fast-track onboarding — processando direto", { telefone: message.telefone, userId: user.id });
+      // Continua no fluxo normal abaixo
+    } else {
+      // Guided: usuário chegou perdido ou curioso → welcome adaptado
+      const boas_vindas = ehPergunta
+        ? [
+            "Sou o Salva Bolso — registro seus gastos e te mostro para onde o dinheiro vai.",
+            "",
+            "Para registrar um gasto:",
+            "35 uber  •  50 mercado  •  120 farmácia",
+            "",
+            "Para consultar:",
+            "saldo  •  resumo  •  hoje",
+            "",
+            "Começa me mandando um gasto:",
+          ].join("\n")
+        : [
+            "Olá! Controlo seus gastos direto no WhatsApp.",
+            "",
+            "Me manda um gasto para começar:",
+            "Ex: 35 uber, 50 mercado",
+          ].join("\n");
 
       try {
         await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
-        log.whatsapp("onboarding welcome (novo usuario) enviado", { to: message.telefone });
+        log.whatsapp("onboarding welcome enviado", { to: message.telefone, tipo: ehPergunta ? "guided" : "greeting" });
       } catch (err) {
-        log.error("falha ao enviar welcome novo usuario", err, { to: message.telefone });
+        log.error("falha ao enviar welcome", err, { to: message.telefone });
       }
 
-      return { success: false, userId: undefined, erro: "Onboarding novo usuario iniciado" };
+      return { success: false, userId: undefined, erro: "Onboarding iniciado" };
     }
-
-    return { success: false, erro: `Nenhum usuário com telefone ${message.telefone}` };
   }
 
   // ── Controle de acesso (trial / active / expired) ────────────────────────
@@ -214,12 +239,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
     if (count === 0) {
       const boas_vindas = [
-        "👋 Olá! Sou o Salva Bolso — seu assistente financeiro no WhatsApp.",
-        "",
-        "Vou te ajudar a saber exatamente onde seu dinheiro vai, sem planilha e sem app.",
-        "",
-        "Para começar, me conta sua renda mensal:",
-        "Ex: 3000 salário",
+        "Olá! Me manda um gasto para começar:",
+        "Ex: 35 uber, 50 mercado, 120 farmácia",
       ].join("\n");
       try {
         await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
@@ -235,10 +256,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       return await handleAjudaCommand(user, message.telefone);
     }
 
-    // Saudação social de usuário ativo → nudge curto, sem spam de comandos
+    // Saudação social de usuário ativo → resposta natural, sem listar comandos
     await whatsapp.sendText({
       to:   message.telefone,
-      text: 'Olá! 👋 Envie "saldo" para ver o mês, ou "ajuda" para ver os comandos.',
+      text: "Olá! 👋 Me manda um gasto ou envie \"saldo\" para ver o mês.",
     });
     return { success: false, userId: user.id, erro: "Saudacao de usuario ativo" };
   }
@@ -488,12 +509,42 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
   const meses = ["janeiro","fevereiro","março","abril","maio","junho",
                  "julho","agosto","setembro","outubro","novembro","dezembro"];
 
+  // Renda ausente → mostra gastos parciais e captura renda contextualmente
+  if (totalRenda === 0) {
+    const linhasParcial = [`Gastos de ${meses[now.getMonth()]}/${now.getFullYear()}`, ""];
+    if (metrics.gastos_por_categoria.length === 0) {
+      linhasParcial.push("Nenhum gasto registrado este mês.");
+    } else {
+      for (const cat of metrics.gastos_por_categoria) {
+        linhasParcial.push(`${cat.categoria}: ${fmtValor(cat.total)}`);
+      }
+      linhasParcial.push("", `Total: ${fmtValor(metrics.total_saidas)}`);
+    }
+    linhasParcial.push("", "Para ver o que sobrou, me conta sua renda:");
+    linhasParcial.push("Ex: 3000");
+
+    await pool.query(
+      `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+       VALUES ($1, 'novo_mes', 'waiting_renda', '[]'::jsonb)
+       ON CONFLICT (user_id) DO UPDATE
+         SET action = 'novo_mes', step = 'waiting_renda', tx_ids = '[]'::jsonb,
+             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '30 minutes'`,
+      [user.id]
+    );
+
+    try {
+      await whatsapp.sendText({ to: telefone, text: linhasParcial.join("\n") });
+      log.whatsapp("saldo parcial enviado — aguardando renda", { to: telefone });
+    } catch (err) {
+      log.error("falha ao enviar saldo parcial", err, { to: telefone });
+    }
+    return { success: false, userId: user.id, erro: "Aguardando renda" };
+  }
+
   const linhas = [
     `Saldo de ${meses[now.getMonth()]}/${now.getFullYear()}`,
     "",
-    totalRenda > 0
-      ? `Renda: ${fmtValor(totalRenda)}`
-      : `Renda: não cadastrada`,
+    `Renda: ${fmtValor(totalRenda)}`,
     `Gastos: ${fmtValor(metrics.total_saidas)}`,
     sobrou >= 0
       ? `💚 Sobrou: ${fmtValor(sobrou)}`
@@ -1260,6 +1311,33 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
     const n = Number(countRow.rows[0].count);
     if (n === 1) {
       tipId = 1;   // 1º gasto → saldo
+    } else if (n === 4) {
+      // Aha moment — mostra dados reais do mês, uma vez por lifetime
+      const now       = new Date();
+      const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      const metrics   = await fetchPeriodMetrics(userId, inicioMes, fimMes);
+
+      if (metrics.total_saidas > 0) {
+        const inserted = await pool.query(
+          `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+           VALUES ($1, 'aha_moment', 4, $2)
+           ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+          [userId, LIFETIME]
+        );
+        if ((inserted.rowCount ?? 0) > 0) {
+          const top    = metrics.gastos_por_categoria[0];
+          const linhas = [
+            `Você já registrou ${fmtValor(metrics.total_saidas)} este mês.`,
+            `Maior gasto: ${top.categoria}.`,
+            "",
+            'Envie "resumo" para ver o detalhamento.',
+          ];
+          await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+          log.whatsapp("aha moment enviado", { to: telefone, userId, totalSaidas: metrics.total_saidas });
+        }
+      }
+      return;
     } else if (n === 15) {
       tipId = 4;   // 15º gasto → criar meta
     } else {
@@ -1850,15 +1928,20 @@ function isAmbiguousIntent(texto: string): boolean {
 
 function buildContextualHint(texto: string): string {
   const t = texto.toLowerCase();
-  // Contexto de consulta → sugere comando
-  if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))      return "💡 Use:\nsaldo";
-  if (/onde\s+gasto|mais\s+caro|\branking\b/.test(t))               return "💡 Use:\nranking";
-  if (/meus?\s+gastos?|\bresumo\b/.test(t))                         return "💡 Use:\nresumo";
-  if (/\bcontas?\b|recorrente|vencimento|pr[oó]ximas?/.test(t))     return "💡 Use:\npróximas";
+  // Contexto de consulta → sugere comando diretamente
+  if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))         return 'Use "saldo" para ver o mês.';
+  if (/onde\s+gasto|mais\s+caro|\branking\b/.test(t))                  return 'Use "ranking" para ver as categorias.';
+  if (/meus?\s+gastos?|\bresumo\b/.test(t))                            return 'Use "resumo" para ver por categoria.';
+  if (/\bcontas?\b|recorrente|vencimento|pr[oó]ximas?/.test(t))        return 'Use "próximas" para ver contas recorrentes.';
   // Contexto de movimentação
-  if (/guardar|juntar|economiz|\bmeta\b|objetivo|poupan/.test(t))   return "💡 Ex:\nguardar 200 viagem";
-  if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return "💡 Ex:\n+250 salário";
-  return "💡 Ex:\n120 mercado";
+  if (/guardar|juntar|economiz|\bmeta\b|objetivo|poupan/.test(t))      return "Para guardar para uma meta:\nguardar 200 viagem";
+  if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return "Para registrar uma entrada:\n+3000 salário";
+  // Parece pergunta ou confusão
+  if (/\?|como|o\s+que|n[aã]o\s+(sei|entend)/.test(t))                return "Não entendi. Quer ver seus gastos (resumo) ou registrar algo novo?";
+  // Parece sobre dinheiro mas não é transação
+  if (/dinheiro|gast|paguei|comprei|gastei/.test(t))                   return "Para registrar um gasto:\n50 mercado";
+  // Genérico — convite, não muro
+  return "Posso ajudar com seus gastos. Me manda um:\n50 mercado";
 }
 
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
