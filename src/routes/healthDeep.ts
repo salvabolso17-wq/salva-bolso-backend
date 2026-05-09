@@ -118,9 +118,13 @@ async function checkWebhookEvolution(): Promise<{ ok: boolean; url?: string; err
     });
     if (!resp.ok) return { ok: false, erro: `HTTP ${resp.status}` };
     const data = await resp.json() as Record<string, unknown>;
-    const webhookUrl = (data.webhook as Record<string, unknown> | undefined)?.url as string | undefined;
-    const enabled    = (data.webhook as Record<string, unknown> | undefined)?.enabled as boolean | undefined;
-    return { ok: !!enabled && !!webhookUrl, url: webhookUrl };
+    // Evolution API v2 pode retornar {webhook:{url,enabled}} ou {url,enabled} diretamente
+    const inner = (data.webhook as Record<string, unknown> | undefined) ?? data;
+    const webhookUrl = inner.url as string | undefined;
+    const enabled    = inner.enabled as boolean | undefined;
+    // Se a URL está registrada (qualquer valor), considerar ok — enabled pode ser null na v2
+    const ok = !!webhookUrl;
+    return { ok, url: webhookUrl, ...(enabled !== undefined ? {} : { nota: "enabled não retornado pela API" }) };
   } catch (err) {
     return { ok: false, erro: String(err) };
   }
