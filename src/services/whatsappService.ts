@@ -233,6 +233,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
       return { success: false, userId: user.id, erro: "Onboarding iniciado" };
     }
+
+    // Usuário já tem histórico e mandou saudação → mostra menu de comandos
+    return await handleAjudaCommand(user, message.telefone);
   }
 
   // ── Comandos de consulta ──────────────────────────────────────────────────
