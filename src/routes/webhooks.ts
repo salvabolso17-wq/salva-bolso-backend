@@ -185,32 +185,42 @@ router.post("/asaas", async (req, res) => {
     const plan = planRow.rows[0] ?? { nome: "mensal", duration_days: 30 };
     console.error("[ASAAS] plano detectado:", plan.nome, `(${plan.duration_days} dias)`);
 
-    const result = await pool.query<{ id: number; telefone: string }>(
-      `UPDATE users
-       SET subscription_status = 'active',
-           subscription_expires_at = NOW() + ($2 || ' days')::INTERVAL,
-           current_plan = $3
-       WHERE REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = ANY($1::text[])
-       RETURNING id, telefone`,
+    const result = await pool.query<{ id: number; telefone: string; prev_status: string }>(
+      `WITH prev AS (
+         SELECT id, subscription_status AS prev_status
+         FROM users
+         WHERE REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = ANY($1::text[])
+         LIMIT 1
+       )
+       UPDATE users u
+       SET subscription_status      = 'active',
+           subscription_expires_at  = NOW() + ($2 || ' days')::INTERVAL,
+           current_plan             = $3
+       FROM prev
+       WHERE u.id = prev.id
+       RETURNING u.id, u.telefone, prev.prev_status`,
       [variantsArr, plan.duration_days.toString(), plan.nome]
     );
 
     console.error("[ASAAS] rowCount:", result.rowCount);
 
     if (result.rowCount === 0) {
-      res.status(200).json({ received: true, alreadyActive: true });
+      res.status(200).json({ received: true, updated: false });
       return;
     }
 
     const user = result.rows[0];
-    console.error("[ASAAS] usuario ativado:", user.id, user.telefone);
-    log.webhook("asaas: usuario ativado", { userId: user.id, telefone: user.telefone, paymentId: payment?.id });
+    const isRenovacao = user.prev_status === "expired";
+    console.error("[ASAAS] usuario ativado:", user.id, user.telefone, isRenovacao ? "(renovacao)" : "(novo)");
+    log.webhook("asaas: usuario ativado", { userId: user.id, telefone: user.telefone, paymentId: payment?.id, isRenovacao });
+
+    const planLabel = plan.nome === "anual" ? "anual" : "mensal";
+    const texto = isRenovacao
+      ? `✅ Assinatura renovada!\n\nSeu plano *${planLabel}* está ativo por mais ${plan.duration_days} dias.\n\nBom controle financeiro! 💪`
+      : `✅ Assinatura ativada!\n\nBem-vindo ao Salva Bolso! Seu plano *${planLabel}* está pronto. 🚀`;
 
     try {
-      await whatsapp.sendText({
-        to:   user.telefone,
-        text: "✅ Assinatura ativada!\n\nBem-vindo ao Salva Bolso 🚀",
-      });
+      await whatsapp.sendText({ to: user.telefone, text: texto });
     } catch (err) {
       console.error("[ASAAS] falha ao notificar WhatsApp:", err);
     }

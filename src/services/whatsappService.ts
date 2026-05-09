@@ -120,10 +120,33 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Controle de acesso (trial / active / expired) ────────────────────────
   if (!isSubscriptionActive(user)) {
-    await whatsapp.sendText({
-      to:   message.telefone,
-      text: "🔒 Seu acesso expirou.\n\nAssine para continuar usando o Salva Bolso 😄",
-    });
+    const link = process.env.PAYMENT_LINK ?? "";
+    const ehTrialExpirado =
+      user.subscription_status === "trial" &&
+      !!user.trial_ends_at &&
+      new Date(user.trial_ends_at) <= new Date();
+
+    const texto = ehTrialExpirado
+      ? [
+          "⏰ Seu período de teste encerrou.",
+          "",
+          "Para continuar controlando suas finanças no WhatsApp, assine o Salva Bolso:",
+          "",
+          link ? `👉 ${link}` : "Entre em contato para assinar.",
+          "",
+          "Após o pagamento, seu acesso é liberado automaticamente em instantes! 🚀",
+        ].join("\n")
+      : [
+          "🔒 Sua assinatura expirou.",
+          "",
+          "Para continuar usando o Salva Bolso, renove agora:",
+          "",
+          link ? `👉 ${link}` : "Entre em contato para renovar.",
+          "",
+          "Após o pagamento, seu acesso volta automaticamente em instantes! 🚀",
+        ].join("\n");
+
+    await whatsapp.sendText({ to: message.telefone, text: texto });
     return { success: false, userId: user.id, erro: "Assinatura expirada" };
   }
 
