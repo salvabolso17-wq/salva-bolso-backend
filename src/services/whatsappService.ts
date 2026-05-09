@@ -417,6 +417,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (parsed.tipo === "saida") {
     const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
     if (aviso) linhasConfirmacao.push("", aviso);
+
+    const nRow = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+      [user.id]
+    );
+    const hint = nextStepHint(Number(nRow.rows[0].count));
+    if (hint) linhasConfirmacao.push("", hint);
   }
 
   const confirmacao = linhasConfirmacao.join("\n");
@@ -487,6 +494,8 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
     sobrou >= 0
       ? `Sobrou: R$ ${sobrou.toFixed(2)}`
       : `Sobrou: -R$ ${Math.abs(sobrou).toFixed(2)}`,
+    "",
+    'Envie "resumo" para ver por categoria.',
   ];
 
   try {
@@ -495,12 +504,6 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
   } catch (err) {
     log.error("falha ao enviar saldo", err, { to: telefone });
   }
-
-  setTimeout(() => {
-    checkAndSendOnboardingTip(user.id, telefone, "saldo_usado").catch(err =>
-      log.error("falha ao verificar onboarding tip saldo_usado", err, { userId: user.id })
-    );
-  }, 800);
 
   return {
     success:      true,
@@ -535,6 +538,7 @@ async function handleResumoCommand(user: UserRow, telefone: string): Promise<Pro
     if (metrics.categoria_top) {
       linhas.push(`Maior categoria: ${metrics.categoria_top}`);
     }
+    linhas.push("", 'Use "previsão" para estimar o fechamento do mês.');
   }
 
   try {
@@ -554,6 +558,16 @@ async function handleResumoCommand(user: UserRow, telefone: string): Promise<Pro
 
 function fmtValor(valor: number): string {
   return valor % 1 === 0 ? `R$ ${valor.toFixed(0)}` : `R$ ${valor.toFixed(2)}`;
+}
+
+// Dica contextual inline: só em contagens estratégicas, para não poluir toda confirmação
+function nextStepHint(n: number): string | null {
+  if (n === 2) return "Continue assim!";
+  if (n === 3) return 'Envie "saldo" quando quiser ver o mês.';
+  if (n === 4) return 'Use "saldo" para checar o quanto sobrou.';
+  if (n === 7) return 'Envie "resumo" para ver por categoria.';
+  if (n === 10) return 'Use "previsão" para estimar o fechamento.';
+  return null;
 }
 
 const CATEGORIAS_CONHECIDAS = [
@@ -1085,36 +1099,54 @@ async function handleMetasCommand(user: UserRow, telefone: string): Promise<Proc
 async function handleAjudaCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando ajuda", { userId: user.id });
 
-  const texto = [
-    "Comandos disponíveis",
-    "",
-    "💰 saldo",
-    "📊 resumo",
-    "📅 hoje",
-    "📈 semana",
-    "🏆 top gastos",
-    "📂 categorias",
-    "🎯 metas",
-    "📈 previsão",
-    "🔁 recorrentes",
-    "📅 próximas",
-    "🔎 buscar <termo>",
-    "❌ apagar",
-    "✏️ corrigir",
-    "",
-    "⚙️ limite alimentação 800",
-    "🎯 meta viagem 5000",
-    "",
-    "Para registrar um gasto:",
-    "Ex: 35 gasolina, 120 mercado",
-    "",
-    "Para registrar uma entrada:",
-    "Ex: 1500 salário, 200 freelance",
-  ].join("\n");
+  const nRow = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+    [user.id]
+  );
+  const n = Number(nRow.rows[0].count);
+
+  let linhas: string[];
+
+  if (n < 5) {
+    linhas = [
+      "Para registrar um gasto:",
+      "Ex: 50 mercado, 35 gasolina",
+      "",
+      "Para registrar uma entrada:",
+      "Ex: 3000 salário",
+      "",
+      "📊 saldo — ver o mês atual",
+      "📋 resumo — gastos por categoria",
+      "📅 hoje — o que gastei hoje",
+    ];
+  } else if (n < 15) {
+    linhas = [
+      "📊 saldo  •  📋 resumo  •  📅 hoje",
+      "📈 semana  •  🏆 ranking",
+      "",
+      "🎯 meta viagem 5000",
+      "⚙️ limite alimentação 800",
+      "",
+      "Para registrar: 50 mercado | 3000 salário",
+    ];
+  } else {
+    linhas = [
+      "📊 saldo  •  📋 resumo  •  📅 hoje",
+      "📈 semana  •  🏆 ranking  •  📂 categorias",
+      "🎯 metas  •  📈 previsão  •  🔁 recorrentes",
+      "📅 próximas  •  🔎 buscar <termo>",
+      "❌ apagar  •  ✏️ corrigir",
+      "",
+      "🎯 meta viagem 5000  •  ⚙️ limite alimentação 800",
+      "guardar 200 viagem  •  recorrente 39 netflix mensal",
+      "",
+      "Para registrar: 50 mercado | 3000 salário",
+    ];
+  }
 
   try {
-    await whatsapp.sendText({ to: telefone, text: texto });
-    log.whatsapp("ajuda enviado", { to: telefone });
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("ajuda enviado", { to: telefone, n });
   } catch (err) {
     log.error("falha ao enviar ajuda", err, { to: telefone });
   }
@@ -1202,11 +1234,10 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
 
 const ONBOARDING_TIPS: Record<number, string> = {
   1:  `💡 Envie "saldo" para acompanhar quanto ainda resta no mês.`,
-  2:  `📊 Envie "resumo" para ver onde você mais gastou.`,
-  3:  `🏆 Envie "ranking" para descobrir suas categorias mais caras.`,
-  4:  `🎯 Crie sua primeira meta:\nEx: meta viagem 5000`,
+  3:  `Você já tem gastos em várias categorias!\nEnvie "ranking" para ver onde vai mais.`,
+  4:  `Que tal criar uma meta?\nEx: meta viagem 5000`,
   10: `💡 Use "guardar 200 <nome da meta>" para registrar seu progresso.`,
-  11: `📈 Use "comparar" para ver como seus gastos evoluíram mês a mês.`,
+  11: `📈 Use "previsão" para estimar o fechamento do mês.`,
   12: `📅 Use "próximas" para ver suas contas recorrentes.`,
 };
 
@@ -1234,8 +1265,6 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
       );
       if (n >= 5 && Number(catRow.rows[0].count) >= 3) tipId = 3;
     }
-  } else if (evento === "saldo_usado") {
-    tipId = 2;                     // usou saldo → resumo
   } else if (evento === "recorrente_criado") {
     tipId = 12;                    // criou recorrente → próximas
   } else if (evento === "meta_criada") {
