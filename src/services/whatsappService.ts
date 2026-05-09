@@ -234,8 +234,17 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       return { success: false, userId: user.id, erro: "Onboarding iniciado" };
     }
 
-    // Usuário já tem histórico e mandou saudação → mostra menu de comandos
-    return await handleAjudaCommand(user, message.telefone);
+    // Usuário ativo pediu ajuda ou menu explicitamente → lista completa
+    if (/^(ajuda|menu)$/i.test(message.texto.trim())) {
+      return await handleAjudaCommand(user, message.telefone);
+    }
+
+    // Saudação social de usuário ativo → nudge curto, sem spam de comandos
+    await whatsapp.sendText({
+      to:   message.telefone,
+      text: 'Olá! 👋 Envie "saldo" para ver o mês, ou "ajuda" para ver os comandos.',
+    });
+    return { success: false, userId: user.id, erro: "Saudacao de usuario ativo" };
   }
 
   // ── Comandos de consulta ──────────────────────────────────────────────────
