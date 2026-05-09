@@ -571,7 +571,7 @@ function nextStepHint(n: number): string | null {
 
 const CATEGORIAS_CONHECIDAS = [
   "Alimentação", "Transporte", "Moradia", "Lazer", "Saúde",
-  "Educação", "Investimentos", "Receita Extra", "Outros",
+  "Educação", "Vestuário", "Investimentos", "Receita Extra", "Outros",
 ];
 
 function normalizarCategoria(input: string): string {
@@ -732,6 +732,7 @@ const CATEGORIA_EMOJI: Record<string, string> = {
   "Lazer":        "🎮",
   "Saúde":        "💊",
   "Educação":     "📚",
+  "Vestuário":    "👕",
   "Investimentos":"💰",
   "Receita Extra":"💵",
   "Outros":       "📦",
