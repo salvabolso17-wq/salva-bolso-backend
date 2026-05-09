@@ -234,12 +234,78 @@ async function sendNewMonthFlowNotifications(): Promise<void> {
   }
 }
 
+// Lembretes de vencimento de assinatura: 7d, 3d, dia do vencimento (1x por marco por ciclo)
+const SUBSCRIPTION_REMINDERS = [
+  { daysAhead: 7, marco: 7 },
+  { daysAhead: 3, marco: 3 },
+  { daysAhead: 0, marco: 0 },
+] as const;
+
+function buildReminderText(daysAhead: number, link: string): string {
+  const linkLine = link ? `\n\n👉 ${link}` : "";
+  if (daysAhead === 7) {
+    return `⏰ Lembrete: sua assinatura do Salva Bolso vence em 7 dias.\n\nRenove agora e continue sem interrupções:${linkLine}`;
+  }
+  if (daysAhead === 3) {
+    return `⚠️ Sua assinatura vence em 3 dias!\n\nNão perca seu acesso ao Salva Bolso:${linkLine}`;
+  }
+  return `🔴 Sua assinatura vence hoje!\n\nRenove agora para não perder o acesso:${linkLine}`;
+}
+
+async function sendSubscriptionReminders(): Promise<void> {
+  const link = process.env.PAYMENT_LINK ?? "";
+
+  for (const { daysAhead, marco } of SUBSCRIPTION_REMINDERS) {
+    let rows: { id: number; telefone: string; expires_date: string }[];
+    try {
+      ({ rows } = await pool.query<{ id: number; telefone: string; expires_date: string }>(
+        `SELECT u.id, u.telefone,
+                DATE(u.subscription_expires_at AT TIME ZONE 'America/Sao_Paulo')::text AS expires_date
+         FROM users u
+         WHERE u.subscription_status = 'active'
+           AND u.subscription_expires_at IS NOT NULL
+           AND DATE(u.subscription_expires_at AT TIME ZONE 'America/Sao_Paulo')
+               = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date + ($1 || ' days')::INTERVAL
+           AND NOT EXISTS (
+             SELECT 1 FROM sent_insights
+             WHERE user_id = u.id
+               AND categoria = 'sub_reminder'
+               AND marco = $2
+               AND mes_referencia = DATE(u.subscription_expires_at AT TIME ZONE 'America/Sao_Paulo')
+           )`,
+        [daysAhead.toString(), marco]
+      ));
+    } catch (err) {
+      log.error(`falha ao buscar usuarios para sub_reminder ${daysAhead}d`, err);
+      continue;
+    }
+
+    for (const user of rows) {
+      try {
+        const inserted = await pool.query(
+          `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+           VALUES ($1, 'sub_reminder', $2, $3::date)
+           ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+          [user.id, marco, user.expires_date]
+        );
+        if ((inserted.rowCount ?? 0) === 0) continue;
+
+        await whatsapp.sendText({ to: user.telefone, text: buildReminderText(daysAhead, link) });
+        log.whatsapp(`sub_reminder ${daysAhead}d enviado`, { to: user.telefone, userId: user.id });
+      } catch (err) {
+        log.error(`falha sub_reminder ${daysAhead}d`, err, { userId: user.id });
+      }
+    }
+  }
+}
+
 export async function runDailyNotifications(): Promise<void> {
   log.webhook("iniciando notificações diárias");
-  try { await sendInactivityNotifications(); }         catch (err) { log.error("falha notif inatividade", err); }
-  try { await sendMonthEndNotifications(); }            catch (err) { log.error("falha notif fim mes", err); }
-  try { await sendGoalStagnationNotifications(); }      catch (err) { log.error("falha notif meta parada", err); }
-  try { await sendMonthlyClosingNotifications(); }      catch (err) { log.error("falha notif fechamento", err); }
-  try { await sendNewMonthFlowNotifications(); }        catch (err) { log.error("falha notif novo mes", err); }
+  try { await sendSubscriptionReminders(); }            catch (err) { log.error("falha sub reminders", err); }
+  try { await sendInactivityNotifications(); }          catch (err) { log.error("falha notif inatividade", err); }
+  try { await sendMonthEndNotifications(); }             catch (err) { log.error("falha notif fim mes", err); }
+  try { await sendGoalStagnationNotifications(); }       catch (err) { log.error("falha notif meta parada", err); }
+  try { await sendMonthlyClosingNotifications(); }       catch (err) { log.error("falha notif fechamento", err); }
+  try { await sendNewMonthFlowNotifications(); }         catch (err) { log.error("falha notif novo mes", err); }
   log.webhook("notificações diárias concluídas");
 }
