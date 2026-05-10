@@ -168,7 +168,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         user.subscription_status === "trial" ||
         (user.subscription_status === "expired" && !user.subscription_expires_at);
       const expirouEm = user.subscription_expires_at ?? user.trial_ends_at ?? new Date();
-      await sendExpirationBlock(user.id, message.telefone, eraTrialUser, expirouEm);
+      try {
+        await sendExpirationBlock(user.id, message.telefone, eraTrialUser, expirouEm);
+      } catch (err) {
+        log.error("falha no expiracao block", err, { userId: user.id });
+      }
       return { success: false, userId: user.id, erro: "Acesso limitado" };
     }
     // Comandos de leitura passam — o usuário continua vendo seus dados
@@ -1975,10 +1979,9 @@ function isReadOnlyCommand(texto: string): boolean {
       || /^(buscar|extrato)\s+/i.test(texto);
 }
 
-// Envia mensagem de expiração com dedup:
-//   marco 1 + mes_referencia = data de expiração → versão completa (1x por ciclo de expiração)
-//   marco 2 + mes_referencia = hoje             → versão curta (1x por dia)
-//   silent após isso
+// Envia mensagem de expiração:
+//   primeira vez no ciclo (marco 1) → mensagem completa com contexto
+//   demais vezes → versão curta com link do plano (sem silêncio)
 async function sendExpirationBlock(userId: number, telefone: string, eraTrialUser: boolean, expirouEm: Date): Promise<void> {
   const plansBlock = await buildPlansBlock();
   const expirouEmDate = new Date(Date.UTC(expirouEm.getUTCFullYear(), expirouEm.getUTCMonth(), expirouEm.getUTCDate()));
@@ -2010,19 +2013,7 @@ async function sendExpirationBlock(userId: number, telefone: string, eraTrialUse
     return;
   }
 
-  // Versão curta — 1x por dia
-  const hoje = new Date();
-  const hojeUTC = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate()));
-  try {
-    const ins2 = await pool.query(
-      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
-       VALUES ($1, 'expiracao_aviso', 2, $2::date)
-       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
-      [userId, hojeUTC]
-    );
-    if ((ins2.rowCount ?? 0) === 0) return; // já enviou hoje — silêncio
-  } catch { return; }
-
+  // Versão curta — sempre (sem silêncio)
   const curto = plansBlock
     ? `Para registrar novos gastos, ative um plano:\n\n${plansBlock}`
     : "Para registrar novos gastos, ative um plano.";
