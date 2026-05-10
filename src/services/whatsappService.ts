@@ -91,9 +91,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const ehSaudacao     = /^(oi|ol[aá]|ola|começar|comecar|menu|ajuda|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i.test(textoNew);
     const ehPergunta     = /como\s+(funciona|uso|usar|fa[çc]o)|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|me\s+(ajuda|ajude|ensina)|o\s+que\s+[eéè]\s+isso/i.test(textoNew);
 
-    if (!parsedFirst && !isCommandFirst && !ehSaudacao && !ehPergunta) {
-      return { success: false, erro: `Nenhum usuário com telefone ${message.telefone}` };
-    }
+    // Qualquer mensagem de texto de um novo usuário entra no fluxo de onboarding
 
     try {
       const nomeNovo = firstNameOf(message.pushName);
@@ -448,9 +446,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
+  const PREFIXOS_CONFIRMACAO = ["Anotado", "Registrado", "Salvo", "Organizado"];
+  const prefixo = PREFIXOS_CONFIRMACAO[Math.floor(Math.random() * PREFIXOS_CONFIRMACAO.length)];
+
   const linhasConfirmacao = parsed.tipo === "entrada"
     ? [`💰 ${fmtValor(parsed.valor)} registrado`]
-    : [`✅ ${fmtValor(parsed.valor)} — ${capitalizeFirst(parsed.descricao)}`];
+    : [`✅ ${prefixo}: ${fmtValor(parsed.valor)} — ${capitalizeFirst(parsed.descricao)}`];
 
   if (parsed.tipo === "saida") {
     const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
