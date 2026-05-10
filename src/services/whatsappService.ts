@@ -89,7 +89,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const parsedFirst    = parseTransaction(textoNew);
     const isCommandFirst = isKnownCommand(textoNew);
     const ehSaudacao     = /^(oi|ol[aá]|ola|começar|comecar|menu|ajuda|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i.test(textoNew);
-    const ehPergunta     = /como\s+(funciona|uso|usar|fa[çc]o)|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|me\s+(ajuda|ajude|ensina)|o\s+que\s+[eéè]\s+isso/i.test(textoNew);
+    const ehPergunta     = isCuriosityPhrase(textoNew);
 
     // Qualquer mensagem de texto de um novo usuário entra no fluxo de onboarding
 
@@ -126,30 +126,48 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       log.user("fast-track onboarding — processando direto", { telefone: message.telefone, userId: user.id });
       // Continua no fluxo normal abaixo
     } else {
-      // Guided: usuário chegou perdido ou curioso → welcome adaptado
-      const nome       = firstNameOf(message.pushName);
-      const saudacao   = nome ? `Olá, ${nome} 👋` : `Olá 👋`;
-      const corpoLinha = ehPergunta
-        ? "Registro seus gastos aqui e organizo tudo — sem app, sem planilha."
-        : "Pode me mandar seus gastos por aqui mesmo.";
+      // Guided: welcome sempre igual + convite ou menu dependendo da intenção
+      const nome      = firstNameOf(message.pushName);
+      const saudacao  = nome ? `Olá, ${nome} 👋` : `Olá 👋`;
       const boas_vindas = [
         saudacao,
         "",
-        corpoLinha,
-        "Tipo:",
+        "Pode me mandar seus gastos por aqui mesmo.",
         "",
-        "35 uber  •  50 mercado  •  120 farmácia",
-        "",
-        "Que eu vou organizando tudo pra você 📝",
+        "35 uber  •  50 mercado  •  120 farmácia 📝",
         "",
         "Você tem 7 dias grátis pra testar no seu ritmo.",
       ].join("\n");
 
       try {
         await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
-        log.whatsapp("onboarding welcome enviado", { to: message.telefone, tipo: ehPergunta ? "guided" : "greeting" });
+        log.whatsapp("onboarding welcome enviado", { to: message.telefone });
       } catch (err) {
         log.error("falha ao enviar welcome", err, { to: message.telefone });
+      }
+
+      if (ehPergunta) {
+        try {
+          await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText() });
+          log.whatsapp("onboarding menu enviado", { to: message.telefone });
+        } catch (err) {
+          log.error("falha ao enviar menu onboarding", err, { to: message.telefone });
+        }
+      } else {
+        const convite = [
+          "Quer que eu te mostre tudo que consigo acompanhar por aqui?",
+          "",
+          "Pode responder algo como:",
+          `• "quero ver"`,
+          `• "como funciona?"`,
+          `• "me mostra"`,
+        ].join("\n");
+        try {
+          await whatsapp.sendText({ to: message.telefone, text: convite });
+          log.whatsapp("onboarding convite enviado", { to: message.telefone });
+        } catch (err) {
+          log.error("falha ao enviar convite onboarding", err, { to: message.telefone });
+        }
       }
 
       return { success: false, userId: undefined, erro: "Onboarding iniciado" };
@@ -240,6 +258,17 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
       await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     }
+  }
+
+  // ── Curiosidade sobre funcionalidades (linguagem natural) ────────────────
+  if (isCuriosityPhrase(message.texto.trim())) {
+    try {
+      await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText() });
+      log.whatsapp("features menu enviado", { to: message.telefone, userId: user.id });
+    } catch (err) {
+      log.error("falha ao enviar features menu", err, { userId: user.id });
+    }
+    return { success: false, userId: user.id, erro: "Features menu enviado" };
   }
 
   // ── Onboarding: boas-vindas para usuário novo ────────────────────────────
@@ -2031,6 +2060,33 @@ function isSubscriptionActive(user: UserRow): boolean {
   return false;
 }
 
+
+function isCuriosityPhrase(texto: string): boolean {
+  return /quero\s+ver|me\s+mostra|como\s+funciona|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|o\s+que\s+d[aá]\s+pra\s+fa[çz]|tem\s+mais\s+coisa|quero\s+entender|me\s+explica|o\s+que\s+[eéè]\s+isso|como\s+(uso|usar|fa[çc]o)\b|o\s+que\s+tem\s+aqui|conta\s+mais|o\s+que\s+voc[eê]\s+conseg/i.test(texto);
+}
+
+function buildFeaturesMenuText(): string {
+  return [
+    "Além de registrar gastos, também consigo:",
+    "",
+    "📊 Mostrar quanto sobrou no mês",
+    "🧾 Organizar seus gastos por categoria",
+    "📈 Mostrar onde você mais gastou",
+    "🔁 Acompanhar contas recorrentes",
+    "📅 Prever como o mês pode terminar",
+    "🎯 Ajudar com metas e limites de gasto",
+    "🏆 Mostrar ranking de categorias",
+    "📚 Guardar histórico dos seus gastos",
+    "💡 Trazer insights automáticos sobre seus hábitos",
+    "",
+    "Pode falar naturalmente comigo 🙂",
+    "",
+    "Ex:",
+    "• como tá meu mês?",
+    "• quanto gastei hoje?",
+    "• me mostra meus gastos",
+  ].join("\n");
+}
 
 function isKnownCommand(texto: string): boolean {
   return /^(saldo|resumo|hoje|semana|ranking|comparar|desafio|previs[aã]o|categorias|ajuda|metas|recorrentes|pr[oó]ximas|apagar|corrigir|top\s*gastos)$/i.test(texto)
