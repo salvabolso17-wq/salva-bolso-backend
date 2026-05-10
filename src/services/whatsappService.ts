@@ -115,21 +115,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       // Guided: usuário chegou perdido ou curioso → welcome adaptado
       const boas_vindas = ehPergunta
         ? [
-            "Sou o Salva Bolso — registro seus gastos e te mostro para onde o dinheiro vai.",
-            "",
-            "Para registrar um gasto:",
-            "35 uber  •  50 mercado  •  120 farmácia",
-            "",
-            "Para consultar:",
-            "saldo  •  resumo  •  hoje",
-            "",
-            "Começa me mandando um gasto:",
+            "Registro seus gastos e te mostro para onde o dinheiro vai.",
+            "Me manda um valor: 35 uber, 50 mercado",
+            "Para consultar: saldo ou resumo",
           ].join("\n")
         : [
-            "Olá! Controlo seus gastos direto no WhatsApp.",
-            "",
-            "Me manda um gasto para começar:",
-            "Ex: 35 uber, 50 mercado",
+            "Olá! Me manda um gasto para começar — eu categorizo e registro.",
+            "35 uber  •  50 mercado  •  120 farmácia",
           ].join("\n");
 
       try {
@@ -239,8 +231,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
     if (count === 0) {
       const boas_vindas = [
-        "Olá! Me manda um gasto para começar:",
-        "Ex: 35 uber, 50 mercado, 120 farmácia",
+        "Olá! Me manda um gasto:",
+        "35 uber  •  50 mercado  •  120 farmácia 📝",
       ].join("\n");
       try {
         await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
@@ -257,9 +249,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
 
     // Saudação social de usuário ativo → resposta natural, sem listar comandos
+    const saudacoes = [
+      "Olá! Me manda um gasto ou fala 'saldo'.",
+      "Oi! Manda um gasto ou 'saldo' pra ver o mês.",
+      "Olá! Estou aqui. Manda um gasto ou 'saldo'.",
+    ];
     await whatsapp.sendText({
       to:   message.telefone,
-      text: "Olá! 👋 Me manda um gasto ou envie \"saldo\" para ver o mês.",
+      text: saudacoes[new Date().getHours() % saudacoes.length],
     });
     return { success: false, userId: user.id, erro: "Saudacao de usuario ativo" };
   }
@@ -414,12 +411,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       [user.id]
     );
     if (Number(countRow.rows[0].count) === 1) {
-      const msg = [
-        `💰 Renda registrada: ${fmtValor(parsed.valor)}`,
-        "",
-        "Agora me conta um gasto:",
-        "Ex: 50 mercado",
-      ].join("\n");
+      const msg = `💰 ${fmtValor(parsed.valor)} registrado.\nQuando quiser, me manda um gasto.`;
       try {
         await whatsapp.sendText({ to: message.telefone, text: msg });
         log.whatsapp("onboarding step2 enviado", { to: message.telefone, userId: user.id });
@@ -1719,7 +1711,7 @@ async function handleRecorrentesCommand(user: UserRow, telefone: string): Promis
   if (result.rows.length === 0) {
     await whatsapp.sendText({
       to:   telefone,
-      text: "Nenhum recorrente cadastrado.\n\n💡 Ex:\nrecorrente 39 netflix mensal",
+      text: "Nenhum recorrente ainda.\nPara adicionar: recorrente 39 netflix mensal",
     });
     return {
       success:      true,
@@ -2013,6 +2005,60 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     return { success: false, userId: user.id, erro: "ack reconhecido" };
   }
 
+  // Consulta de saldo via linguagem natural
+  if (
+    !temNumero &&
+    /quanto\s+(tenho|sobrou|resta|restou|tenho\s+de\s+saldo)|quanto\s+gastei\s+(esse|este|no)\s+m[eê]s|o\s+que\s+sobrou|quanto\s+est[aá]\s+sobrando/.test(t)
+  ) {
+    return await handleSaldoCommand(user, telefone);
+  }
+
+  // Consulta de gastos via linguagem natural
+  if (
+    !temNumero &&
+    /(me\s+mostra|ver|quero\s+ver|mostrar)\s+(meus?\s+gastos?|o\s+resumo)|meus?\s+gastos?\s+(do\s+m[eê]s|de\s+hoje|essa\s+semana)/.test(t)
+  ) {
+    return await handleResumoCommand(user, telefone);
+  }
+
+  // Intenção de apagar via linguagem natural
+  if (
+    !temNumero &&
+    /quero\s+apagar|apagar\s+o\s+[uú]ltimo|remover\s+(o\s+)?[uú]ltimo|deletar\s+(o\s+)?[uú]ltimo/.test(t)
+  ) {
+    return await handleApagarCommand(user, telefone);
+  }
+
+  // Erro no registro → orienta corrigir
+  if (
+    !temNumero &&
+    /registrei\s+errado|coloquei\s+errado|lancei\s+errado|esqueci\s+de\s+registrar|n[aã]o\s+registrei/.test(t)
+  ) {
+    try {
+      await whatsapp.sendText({ to: telefone, text: "Para corrigir um valor, manda: corrigir\nPara apagar um lançamento: apagar" });
+      log.whatsapp("orientacao corrigir enviada", { to: telefone, userId: user.id });
+    } catch (err) {
+      log.error("falha orientacao corrigir", err, { userId: user.id });
+    }
+    return { success: false, userId: user.id, erro: "orientacao corrigir" };
+  }
+
+  // Ack positivo de economia
+  if (
+    !temNumero &&
+    /t[oô]\s+economizando|estou?\s+economizando|consegui\s+economizar|economizei\s+(bem|bastante|muito)/.test(t)
+  ) {
+    const acks = ["Ótimo! Continue assim. 💪", "Isso! Cada real conta.", "Excelente. Vai acumulando. 🎯"];
+    const pick  = acks[new Date().getHours() % acks.length];
+    try {
+      await whatsapp.sendText({ to: telefone, text: pick });
+      log.whatsapp("positive_eco_ack enviado", { to: telefone, userId: user.id });
+    } catch (err) {
+      log.error("falha positive_eco_ack", err, { userId: user.id });
+    }
+    return { success: false, userId: user.id, erro: "positive_eco_ack" };
+  }
+
   return null;
 }
 
@@ -2032,7 +2078,12 @@ function buildContextualHint(texto: string): string {
   if (/guardar|juntar|economiz|\bmeta\b|objetivo|poupan/.test(t))      return 'Para criar uma meta:\nguardar 200 viagem 🎯';
   if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return 'Para registrar renda:\n+3000 salário';
   if (/dinheiro|gast|paguei|comprei|gastei/.test(t))                   return 'Me manda o valor e o que foi:\n50 mercado';
-  return 'Não entendi. Me manda um gasto ou um comando. 🤔';
+  const fallbacks = [
+    "Não peguei bem. Manda um gasto ou um comando.",
+    "Não entendi 😅 Me manda: 50 mercado",
+    "Não reconheci. Me manda um gasto: 50 mercado",
+  ];
+  return fallbacks[new Date().getHours() % fallbacks.length];
 }
 
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
