@@ -5,7 +5,7 @@ import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
-import { initSession, classifyIntent, recordAction } from "./conversationEngine";
+import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep } from "./conversationEngine";
 
 function firstNameOf(rawName?: string | null): string | null {
   if (!rawName) return null;
@@ -684,6 +684,7 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
     log.error("falha ao enviar saldo", err, { to: telefone });
   }
 
+  recordAction(user.id, "queried_balance");
   return {
     success:      true,
     userId:       user.id,
@@ -726,6 +727,7 @@ async function handleResumoCommand(user: UserRow, telefone: string): Promise<Pro
     log.error("falha ao enviar resumo", err, { to: telefone });
   }
 
+  recordAction(user.id, "queried_summary");
   return {
     success:      true,
     userId:       user.id,
@@ -858,6 +860,7 @@ async function handleConfirmarRecorrente(user: UserRow, telefone: string, txIds:
       [user.id, data.nome, data.valor, data.frequencia]
     );
     const nome = capitalizeFirst(data.nome);
+    recordAction(user.id, "created_recurring");
     await whatsapp.sendText({
       to:   telefone,
       text: `Perfeito 🙂\nVou acompanhar ${nome} automaticamente.`,
@@ -1091,6 +1094,8 @@ async function handleLimiteCommand(user: UserRow, telefone: string, texto: strin
     to:   telefone,
     text: `Limite da categoria ${categoria} definido em R$ ${valorLimite.toFixed(2)}`,
   });
+
+  recordAction(user.id, "set_limit");
 
   setTimeout(() => {
     checkAndSendOnboardingTip(user.id, telefone, "limite_criado").catch(err =>
@@ -1355,6 +1360,7 @@ async function handleRankingCommand(user: UserRow, telefone: string): Promise<Pr
     log.error("falha ao enviar ranking", err, { to: telefone });
   }
 
+  recordAction(user.id, "queried_other");
   return {
     success:      true,
     userId:       user.id,
@@ -1461,6 +1467,8 @@ async function handleMetaCommand(user: UserRow, telefone: string, texto: string)
     to:   telefone,
     text: `🎯 Meta criada: ${nome}\nObjetivo: ${fmtValor(valorMeta)}`,
   });
+
+  recordAction(user.id, "created_goal");
 
   setTimeout(() => {
     checkAndSendOnboardingTip(user.id, telefone, "meta_criada").catch(err =>
@@ -1898,6 +1906,7 @@ async function handleRecorrenteCommand(user: UserRow, telefone: string, texto: s
   });
 
   log.whatsapp("recorrente criado", { to: telefone, nome, valor, frequencia });
+  recordAction(user.id, "created_recurring");
 
   setTimeout(() => {
     checkAndSendOnboardingTip(user.id, telefone, "recorrente_criado").catch(err =>
@@ -2276,35 +2285,20 @@ async function handleSpendingConcern(user: UserRow, telefone: string): Promise<P
   return { success: false, userId: user.id, erro: "spending_concern tratado" };
 }
 
-// Responde "e agora?" / "o que mais posso fazer?" com contexto real do usuário
+// Responde "e agora?" / "o que mais posso fazer?" com contexto da sessão atual
 async function handleNextStepSuggestion(user: UserRow, telefone: string): Promise<ProcessResult> {
   const countRow = await pool.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
     [user.id]
   );
-  const count = Number(countRow.rows[0].count);
+  const txCountDb = Number(countRow.rows[0].count);
 
-  let text: string;
-  if (count === 0) {
-    text = "Me manda um gasto para começar 📝\nEx: 50 mercado";
-  } else if (count <= 4) {
-    text = "Continue registrando 🙂 Com mais gastos, consigo mostrar padrões e insights.";
-  } else {
-    // Usuário ativo: mostra funcionalidades que pode não ter descoberto ainda
-    const dicas = [
-      "Você pode criar metas para objetivos 🎯\nEx: meta viagem 3000",
-      "\"ranking\" mostra onde vai mais o seu dinheiro no mês 📊",
-      "\"previsão\" estima como o mês vai fechar com base no ritmo atual 📈",
-      "Pode definir limites por categoria e eu aviso quando passar 🔔\nEx: limite alimentação 500",
-      "\"recorrentes\" organiza suas contas fixas automaticamente 🔁",
-      "\"semana\" mostra os gastos dos últimos 7 dias por categoria 📅",
-    ];
-    text = dicas[user.id % dicas.length];
-  }
+  const session = getSession(user.id) ?? initSession(user.id);
+  const text    = getContextualNextStep(session, txCountDb);
 
   try {
     await whatsapp.sendText({ to: telefone, text });
-    log.whatsapp("next_step_suggestion enviado", { to: telefone, userId: user.id, count });
+    log.whatsapp("next_step_suggestion enviado", { to: telefone, userId: user.id, txCountDb, phase: session.phase });
   } catch (err) {
     log.error("falha next_step_suggestion", err, { userId: user.id });
   }
