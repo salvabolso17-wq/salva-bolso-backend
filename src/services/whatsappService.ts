@@ -492,6 +492,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         log.error("falha sugestao recorrente", err, { userId: user.id })
       );
     }, 2500);
+    setTimeout(() => {
+      checkAndDetectInstallment(user.id, message.telefone, parsed.descricao, message.texto, parsed.valor).catch(err =>
+        log.error("falha deteccao parcelamento", err, { userId: user.id })
+      );
+    }, 3200);
   }
 
   return {
@@ -680,6 +685,58 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
     log.whatsapp("sugestao recorrente enviada", { to: telefone, userId, descricao });
   } catch (err) {
     log.error("falha sugestao recorrente", err, { userId });
+  }
+}
+
+const INSTALLMENT_KEYWORDS = [
+  "iphone", "ipad", "macbook", "airpods",
+  "notebook", "laptop", "computador",
+  "celular", "smartphone",
+  "sofá", "sofa", "cama", "colchão", "colchao", "móveis", "moveis", "armário", "armario",
+  "tv", "televisão", "televisao", "geladeira", "fogão", "fogao", "microondas", "lavadora",
+  "moto", "carro", "bicicleta",
+  "curso", "treinamento",
+];
+
+// Detecta parcelamentos explícitos (6x, parcelado, 2/10) ou compras típicas de alto valor
+async function checkAndDetectInstallment(
+  userId: number, telefone: string, descricao: string, textoOriginal: string, valor: number
+): Promise<void> {
+  try {
+    const textoLower = textoOriginal.toLowerCase();
+    const descLower  = descricao.toLowerCase();
+
+    // Sinal explícito: "6x", "parcelado/a", "2/10"
+    const matchX     = textoLower.match(/\b(\d{1,2})[xX]\b/);
+    const hasExplicit = !!matchX
+      || /\bparcelad[ao]\b/.test(textoLower)
+      || /\b[1-9]\d?\/[1-9]\d?\b/.test(textoLower);
+
+    // Sinal implícito: keyword conhecida + valor relevante
+    const hasImplicit = valor > 200 && INSTALLMENT_KEYWORDS.some(kw => descLower.includes(kw));
+
+    if (!hasExplicit && !hasImplicit) return;
+
+    const sentinel = `inst_${descLower.replace(/\s+/g, "_").slice(0, 45)}`;
+    const LIFETIME = new Date("2000-01-01");
+    const inserted = await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, $2, 1, $3)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, sentinel, LIFETIME]
+    );
+    if ((inserted.rowCount ?? 0) === 0) return;
+
+    // Mensagem: ecoa número de parcelas se detectado, senão pergunta genérica
+    const numParcelas = matchX ? Number(matchX[1]) : null;
+    const texto = numParcelas
+      ? `Parcelado em ${numParcelas}x?`
+      : "Isso foi parcelado?";
+
+    await whatsapp.sendText({ to: telefone, text: texto });
+    log.whatsapp("deteccao parcelamento enviada", { to: telefone, userId, descricao, numParcelas });
+  } catch (err) {
+    log.error("falha deteccao parcelamento", err, { userId });
   }
 }
 
