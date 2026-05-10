@@ -462,8 +462,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     if (aviso) {
       linhasConfirmacao.push("", aviso);
     } else {
-      const micro = await contextualMicroInsight(user.id, parsed.categoria);
-      if (micro) linhasConfirmacao.push("", micro);
+      try {
+        const micro = await contextualMicroInsight(user.id, parsed.categoria);
+        if (micro) linhasConfirmacao.push("", micro);
+      } catch (err) {
+        log.error("falha micro insight, ignorando", err, { userId: user.id });
+      }
     }
   }
 
