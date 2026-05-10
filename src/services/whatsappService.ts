@@ -566,8 +566,7 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
       }
       linhasParcial.push("", `Total: ${fmtValor(metrics.total_saidas)}`);
     }
-    linhasParcial.push("", "Para ver o que sobrou, me conta sua renda:");
-    linhasParcial.push("Ex: 3000");
+    linhasParcial.push("", "Quanto você recebe por mês?", "", "Ex:", "• 3000", "• 4500 salário + 500 freelance");
 
     await pool.query(
       `INSERT INTO pending_actions (user_id, action, step, tx_ids)
@@ -2067,21 +2066,32 @@ function isCuriosityPhrase(texto: string): boolean {
 
 function buildFeaturesMenuText(): string {
   return [
-    "Além de registrar gastos, também consigo:",
+    "O que consigo fazer:",
     "",
-    "📊 Mostrar quanto sobrou no mês",
-    "🧾 Organizar seus gastos por categoria",
-    "📈 Mostrar onde você mais gastou",
-    "🔁 Acompanhar contas recorrentes",
-    "📅 Prever como o mês pode terminar",
-    "🎯 Ajudar com metas e limites de gasto",
-    "🏆 Mostrar ranking de categorias",
-    "📚 Guardar histórico dos seus gastos",
-    "💡 Trazer insights automáticos sobre seus hábitos",
+    "📊 Saldo do mês",
+    "  saldo  •  quanto sobrou?",
     "",
-    "Pode falar naturalmente comigo 🙂",
+    "🧾 Gastos por categoria",
+    "  resumo  •  me mostra os gastos",
     "",
-    "Ex:",
+    "📈 Análise",
+    "  ranking  •  top gastos  •  previsão",
+    "",
+    "✏️ Corrigir ou apagar",
+    "  corrigir  •  apagar  •  editei errado",
+    "",
+    "🔁 Contas fixas",
+    "  recorrentes  •  próximas",
+    "",
+    "🎯 Metas e limites",
+    "  meta viagem 5000  •  limite alimentação 800",
+    "",
+    "📚 Histórico",
+    "  buscar mercado  •  extrato janeiro",
+    "",
+    "💡 Insights chegam automaticamente",
+    "",
+    "Pode falar naturalmente 🙂",
     "• como tá meu mês?",
     "• quanto gastei hoje?",
     "• me mostra meus gastos",
