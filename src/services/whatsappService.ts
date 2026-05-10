@@ -1713,8 +1713,8 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
 
 const ONBOARDING_TIPS: Record<number, string> = {
   10: `Para guardar na meta: guardar 200 viagem 🎯`,
-  11: `"previsão" agora consegue mostrar como o mês vai fechar.`,
-  12: `"próximas" lista tudo que vence em breve.`,
+  11: `A previsão mostra como o mês vai fechar.`,
+  12: `As próximas listam tudo que vence em breve.`,
 };
 
 async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<boolean> {
@@ -2756,10 +2756,10 @@ function buildContextualHint(texto: string): string {
   const t = texto.toLowerCase();
   const ehPergunta = t.includes("?") || /^(quanto|como|qual|onde|quando|o\s+que|tem\s+algo)\b/.test(t);
 
-  if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))         return '"saldo" mostra como o mês tá ficando. 💰';
-  if (/onde\s+gasto|mais\s+caro|\branking\b/.test(t))                  return '"ranking" mostra onde vai mais. 📊';
-  if (/meus?\s+gastos?|\bresumo\b|\bm[eê]s\b/.test(t))                return '"resumo" mostra por categoria.';
-  if (/\bcontas?\b|recorrente|vencimento|pr[oó]ximas?/.test(t))        return '"próximas" lista as contas fixas.';
+  if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))         return 'O saldo mostra o que sobrou do mês 💰';
+  if (/onde\s+gasto|mais\s+caro|\branking\b/.test(t))                  return 'O ranking mostra onde vai mais o dinheiro 📊';
+  if (/meus?\s+gastos?|\bresumo\b|\bm[eê]s\b/.test(t))                return 'O resumo mostra seus gastos por categoria 🧾';
+  if (/\bcontas?\b|recorrente|vencimento|pr[oó]ximas?/.test(t))        return 'Os recorrentes listam suas contas fixas do mês 🔁';
   if (/guardar|juntar|economiz|\bmeta\b|objetivo|poupan/.test(t))      return 'Para criar uma meta:\nguardar 200 viagem 🎯';
   if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return 'Para registrar renda:\n+3000 salário';
   // Só sugere registro se claramente não for uma pergunta

@@ -153,27 +153,27 @@ export function recordInsightSent(userId: number): void {
 const FEATURE_POOL: Array<{ guard: string; text: string }> = [
   {
     guard: "queried_balance",
-    text: "\"saldo\" mostra renda, gastos e o que sobrou 💰",
+    text: "O saldo mostra o que sobrou do mês 💰",
   },
   {
     guard: "queried_summary",
-    text: "\"resumo\" lista tudo por categoria 🧾",
+    text: "O resumo mostra seus gastos organizados por categoria 🧾",
   },
   {
     guard: "created_goal",
-    text: "Pode criar metas para objetivos 🎯\nEx: meta viagem 3000",
+    text: "Dá pra criar metas de poupança 🎯\nEx: meta viagem 3000",
   },
   {
     guard: "set_limit",
-    text: "Pode definir limites por categoria e eu aviso quando passar 🔔\nEx: limite alimentação 500",
+    text: "Dá pra definir um limite por categoria — eu aviso quando passar 🔔\nEx: limite alimentação 500",
   },
   {
     guard: "created_recurring",
-    text: "\"recorrentes\" organiza suas contas fixas automaticamente 🔁",
+    text: "Os recorrentes organizam suas contas fixas automaticamente 🔁",
   },
   {
     guard: "queried_other",
-    text: "\"ranking\" mostra onde vai mais o seu dinheiro no mês 📊",
+    text: "O ranking mostra onde vai mais o seu dinheiro 📊",
   },
 ];
 
@@ -187,7 +187,7 @@ export function getContextualNextStep(session: SessionCtx, txCountDb: number): s
 
   // Very early user who hasn't queried yet → nudge toward first useful view
   if (totalTx <= 3 && !session.recentActions.includes("queried_balance")) {
-    return "\"saldo\" mostra o que sobrou do mês 💰";
+    return "O saldo mostra o que sobrou do mês 💰";
   }
 
   // Active user: suggest the first feature they haven't used in this session
