@@ -48,6 +48,9 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
       "bolo", "torta", "doce", "sobremesa",
       // Bebidas não alcoólicas
       "suco", "vitamina", "smoothie", "refrigerante", "água mineral",
+      // Refeição informal
+      "marmita", "marmitex", "quentinha", "prato feito", "self service",
+      "buffet", "rodízio", "rodizio",
       // Genérico
       "delivery", "comida", "café", "cafe", "burger", "burguer",
     ],
@@ -75,6 +78,8 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
       "lava rápido", "lava rapido", "lavagem",
       "seguro veicular", "seguro do carro",
       "ipva", "multa", "despachante",
+      // Veículos
+      "carro", "detran",
       // Outros
       "táxi", "taxi", "van", "moto", "lotação",
       "patinete", "bicicleta", "posto",
@@ -109,6 +114,10 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
       // Manutenção
       "manutenção", "manutencao", "reparo", "reforma",
       "encanador", "eletricista", "pintura", "marido de aluguel",
+      // Construção e reforma
+      "sofá", "sofa", "cama", "colchão", "colchao",
+      "pedreiro", "madeira", "tinta", "construção", "construcao",
+      "material de construção", "material de construcao",
       // Mobília
       "móveis", "moveis", "mobília", "mobilia",
       "decoração", "decoracao",
@@ -122,12 +131,13 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
       // Streaming vídeo
       "netflix", "disney plus", "disney+", "disney",
       "hbo max", "hbomax", "hbo",
-      "amazon prime", "prime video",
+      "amazon prime", "prime video", "prime",
       "globoplay", "telecine",
       "star plus", "star+",
       "paramount plus", "paramount+",
       "crunchyroll", "apple tv",
-      "youtube premium",
+      "youtube premium", "youtube",
+      "chatgpt", "openai", "anthropic", "canva",
       "xbox game pass", "playstation plus", "ps plus",
       // Streaming música
       "spotify", "deezer", "tidal", "apple music",
@@ -208,6 +218,8 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
       "curso", "mensalidade", "matrícula", "matricula",
       "livro", "livros", "apostila",
       "material escolar", "papelaria", "caderno",
+      // Cursos intensivos
+      "treinamento", "workshop", "bootcamp",
       // Concursos
       "vestibular", "enem", "concurso público", "concurso",
     ],
