@@ -459,14 +459,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   if (parsed.tipo === "saida") {
     const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
-    if (aviso) linhasConfirmacao.push("", aviso);
-
-    const nRow = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
-      [user.id]
-    );
-    const hint = nextStepHint(Number(nRow.rows[0].count));
-    if (hint) linhasConfirmacao.push("", hint);
+    if (aviso) {
+      linhasConfirmacao.push("", aviso);
+    } else {
+      const micro = await contextualMicroInsight(user.id, parsed.categoria);
+      if (micro) linhasConfirmacao.push("", micro);
+    }
   }
 
   const confirmacao = linhasConfirmacao.join("\n");
@@ -630,11 +628,67 @@ function fmtValor(valor: number): string {
   return valor % 1 === 0 ? `R$ ${valor.toFixed(0)}` : `R$ ${valor.toFixed(2)}`;
 }
 
-// Dica contextual inline: só em contagens estratégicas, para não poluir toda confirmação
-function nextStepHint(n: number): string | null {
-  if (n === 2) return "Continue assim! 👌";
-  if (n === 7) return 'Envie "resumo" para ver por categoria.';
-  if (n === 10) return 'Use "previsão" para estimar o fechamento.';
+// Micro insight contextual: raramente, só quando há algo real a observar
+async function contextualMicroInsight(userId: number, categoria: string): Promise<string | null> {
+  const now         = new Date();
+  const todayUTC    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const tomorrowUTC = new Date(todayUTC.getTime() + 86400000);
+  const twoHoursAgo = new Date(now.getTime() - 7200000);
+  const oneMinAgo   = new Date(now.getTime() - 60000);
+
+  // Modo registro rápido: outra transação nos últimos 60s → silêncio total
+  const rapidRow = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM transactions
+     WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2`,
+    [userId, oneMinAgo]
+  );
+  if (Number(rapidRow.rows[0].count) > 1) return null;
+
+  // Máx 1 micro insight por dia por usuário
+  const alreadySent = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM sent_insights
+     WHERE user_id = $1 AND categoria = 'micro_dia' AND mes_referencia = $2`,
+    [userId, todayUTC]
+  );
+  if (Number(alreadySent.rows[0].count) > 0) return null;
+
+  // Condição 1: 3+ gastos na mesma categoria hoje
+  const catRow = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM transactions
+     WHERE user_id = $1 AND LOWER(categoria) = LOWER($2)
+       AND tipo = 'saida' AND criado_em >= $3 AND criado_em < $4`,
+    [userId, categoria, todayUTC, tomorrowUTC]
+  );
+  if (Number(catRow.rows[0].count) >= 3) {
+    const ins = await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, 'micro_dia', 1, $2)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, todayUTC]
+    );
+    if ((ins.rowCount ?? 0) > 0) {
+      const cat = categoria.charAt(0).toUpperCase() + categoria.slice(1).toLowerCase();
+      return `${cat} aparecendo bastante hoje 😅`;
+    }
+    return null;
+  }
+
+  // Condição 2: 4+ gastos nas últimas 2h (ritmo acelerado)
+  const paceRow = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM transactions
+     WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2`,
+    [userId, twoHoursAgo]
+  );
+  if (Number(paceRow.rows[0].count) >= 4) {
+    const ins = await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, 'micro_dia', 1, $2)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, todayUTC]
+    );
+    if ((ins.rowCount ?? 0) > 0) return "Bastante saída em pouco tempo 👀";
+  }
+
   return null;
 }
 
@@ -1834,19 +1888,15 @@ async function handleSpendingConcern(user: UserRow, telefone: string): Promise<P
   if (metrics.total_saidas === 0) {
     await whatsapp.sendText({
       to:   telefone,
-      text: "Ainda não há gastos registrados este mês.\n\nMe conta um:\nEx: 50 mercado",
+      text: "Ainda não tem gastos registrados este mês.",
     });
     return { success: false, userId: user.id, erro: "spending_concern sem dados" };
   }
 
-  const top   = metrics.gastos_por_categoria[0];
+  const top    = metrics.gastos_por_categoria[0];
   const linhas = [
-    "Vamos ver.",
-    "",
-    `📊 Maior gasto este mês: ${top.categoria} — ${fmtValor(top.total)}`,
-    `Total gasto: ${fmtValor(metrics.total_saidas)}`,
-    "",
-    'Envie "resumo" para o detalhamento.',
+    `📊 ${fmtValor(metrics.total_saidas)} gastos este mês.`,
+    `Maior: ${top.categoria} — ${fmtValor(top.total)}`,
   ];
 
   try {
@@ -1858,7 +1908,7 @@ async function handleSpendingConcern(user: UserRow, telefone: string): Promise<P
   return { success: false, userId: user.id, erro: "spending_concern tratado" };
 }
 
-// Responde "e agora?" com próximo passo útil baseado no contexto atual
+// Responde "e agora?" com dado real ou orientação mínima
 async function handleNextStepSuggestion(user: UserRow, telefone: string): Promise<ProcessResult> {
   const countRow = await pool.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
@@ -1866,11 +1916,23 @@ async function handleNextStepSuggestion(user: UserRow, telefone: string): Promis
   );
   const count = Number(countRow.rows[0].count);
 
-  const text = count === 0
-    ? "Vamos começar!\n\nMe conta sua renda mensal:\nEx: 3000 salário"
-    : count <= 3
-    ? "Continue registrando seus gastos.\n\nEx: 50 mercado"
-    : 'Envie "saldo" para ver como está o mês, ou "resumo" para ver por categoria.';
+  let text: string;
+  if (count === 0) {
+    text = "Começa mandando um gasto:\n35 uber, 50 mercado 📝";
+  } else if (count <= 3) {
+    text = 'Continue registrando. Use "saldo" quando quiser ver o mês.';
+  } else {
+    const now       = new Date();
+    const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const metrics   = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
+    if (metrics.total_saidas > 0) {
+      const top = metrics.gastos_por_categoria[0];
+      text = `${fmtValor(metrics.total_saidas)} gastos este mês. Maior: ${top.categoria}. 📊`;
+    } else {
+      text = 'Use "saldo" para ver como está o mês.';
+    }
+  }
 
   try {
     await whatsapp.sendText({ to: telefone, text });
@@ -1923,13 +1985,47 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     return await handleNextStepSuggestion(user, telefone);
   }
 
+  // Intenção de melhora financeira → contexto real sem julgamento
+  if (
+    !temNumero &&
+    /preciso\s+(economizar|cortar|reduzir|gastar\s+menos)|quero\s+(economizar|cortar|gastar\s+menos|melhorar)|como\s+(melhoro|corto|reduzo|controlo\s+melhor|gastar\s+menos)|quero\s+melhorar(\s+meus\s+gastos|\s+minhas\s+finan[çc]as|\s+isso)?/.test(t)
+  ) {
+    return await handleSpendingConcern(user, telefone);
+  }
+
+  // Pressão financeira / desabafo → mostra dado, sem sermão
+  if (
+    !temNumero &&
+    /t[oô]\s+(no\s+limite|apertad[ao]|tenso|no\s+fim|zerado|pelado)|est[aá]\s+(apertad[ao]|dif[ií]cil|pesad[ao])|(m[eê]s|semana)\s+(dif[ií]cil|pesad[ao]|complicad[ao])|pouco\s+dinheiro|sem\s+dinheiro|dinheiro\s+(curto|apertad[ao])|t[oô]\s+endividad[ao]/.test(t)
+  ) {
+    return await handleSpendingConcern(user, telefone);
+  }
+
+  // Reconhecimento positivo → ack leve, sem exagero
+  if (
+    !temNumero &&
+    /hoje\s+(foi\s+)?(bom|tranquilo|leve|econ[oô]mico)|gastei\s+(pouco|bem\s+pouco|quase\s+nada)|economizei\s+(hoje|bastante)|sa[ií]da\s+(leve|pequena)\s*hoje/.test(t)
+  ) {
+    const acks = ["Bom sinal. 👍", "Isso. Vai acumulando.", "Dias assim fazem diferença."];
+    const pick = acks[new Date().getHours() % acks.length];
+    try {
+      await whatsapp.sendText({ to: telefone, text: pick });
+      log.whatsapp("positive_ack enviado", { to: telefone, userId: user.id });
+    } catch (err) {
+      log.error("falha positive_ack", err, { userId: user.id });
+    }
+    return { success: false, userId: user.id, erro: "positive_ack tratado" };
+  }
+
   // Recusa / agradecimento → encerra naturalmente sem insistir
   if (
     !temNumero &&
     /^(n[aã]o\s+quero(\s+ver\s+\S+)?|n[aã]o\s+agora|depois|por\s+enquanto\s+n[aã]o|obrigad[ao]|brigad[ao]|valeu|tudo\s+bem|td\s+bem|blz)[\?!.]*$/.test(t)
   ) {
+    const acks = ["Tudo bem! 😊", "Ok. 👋", "Tranquilo."];
+    const pick = acks[new Date().getHours() % acks.length];
     try {
-      await whatsapp.sendText({ to: telefone, text: "Tudo bem! 😊" });
+      await whatsapp.sendText({ to: telefone, text: pick });
       log.whatsapp("ack conversacional enviado", { to: telefone, userId: user.id });
     } catch (err) {
       log.error("falha ack conversacional", err, { userId: user.id });
@@ -1949,20 +2045,14 @@ function isAmbiguousIntent(texto: string): boolean {
 
 function buildContextualHint(texto: string): string {
   const t = texto.toLowerCase();
-  // Contexto de consulta → sugere comando diretamente
-  if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))         return 'Use "saldo" para ver o mês.';
-  if (/onde\s+gasto|mais\s+caro|\branking\b/.test(t))                  return 'Use "ranking" para ver as categorias.';
-  if (/meus?\s+gastos?|\bresumo\b/.test(t))                            return 'Use "resumo" para ver por categoria.';
-  if (/\bcontas?\b|recorrente|vencimento|pr[oó]ximas?/.test(t))        return 'Use "próximas" para ver contas recorrentes.';
-  // Contexto de movimentação
-  if (/guardar|juntar|economiz|\bmeta\b|objetivo|poupan/.test(t))      return "Para guardar para uma meta:\nguardar 200 viagem";
-  if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return "Para registrar uma entrada:\n+3000 salário";
-  // Parece pergunta ou confusão
-  if (/\?|como|o\s+que|n[aã]o\s+(sei|entend)/.test(t))                return "Não entendi. Quer ver seus gastos (resumo) ou registrar algo novo?";
-  // Parece sobre dinheiro mas não é transação
-  if (/dinheiro|gast|paguei|comprei|gastei/.test(t))                   return "Para registrar um gasto:\n50 mercado";
-  // Genérico — convite, não muro
-  return "Posso ajudar com seus gastos. Me manda um:\n50 mercado";
+  if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))         return 'Envia "saldo" para ver o mês. 💰';
+  if (/onde\s+gasto|mais\s+caro|\branking\b/.test(t))                  return '"ranking" mostra onde vai mais. 📊';
+  if (/meus?\s+gastos?|\bresumo\b/.test(t))                            return '"resumo" mostra por categoria.';
+  if (/\bcontas?\b|recorrente|vencimento|pr[oó]ximas?/.test(t))        return '"próximas" lista as contas fixas.';
+  if (/guardar|juntar|economiz|\bmeta\b|objetivo|poupan/.test(t))      return 'Para criar uma meta:\nguardar 200 viagem 🎯';
+  if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return 'Para registrar renda:\n+3000 salário';
+  if (/dinheiro|gast|paguei|comprei|gastei/.test(t))                   return 'Me manda o valor e o que foi:\n50 mercado';
+  return 'Não entendi. Me manda um gasto ou um comando. 🤔';
 }
 
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
