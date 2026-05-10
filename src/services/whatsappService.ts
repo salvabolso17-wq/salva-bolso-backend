@@ -5,7 +5,7 @@ import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
-import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep } from "./conversationEngine";
+import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep, canSendInsight, recordInsightSent } from "./conversationEngine";
 
 function firstNameOf(rawName?: string | null): string | null {
   if (!rawName) return null;
@@ -592,13 +592,26 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (parsed.tipo === "saida") {
     // Cadeia sequencial com exclusão mútua: só 1 mensagem secundária por gasto.
     // Cada função retorna true se enviou algo — a cadeia para na primeira que disparar.
+    // Session cooldown: no máximo 1 mensagem secundária a cada 10 minutos por sessão.
     setTimeout(async () => {
       try {
-        if (await checkAndSendOnboardingTip(user.id, message.telefone, "saida")) return;
-        if (await checkAndSendInsights(user.id, message.telefone, parsed.categoria)) return;
-        if (await sendContextualMicroInsight(user.id, message.telefone, parsed.categoria)) return;
-        if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao, parsed.valor)) return;
-        await checkAndDetectInstallment(user.id, message.telefone, parsed.descricao, message.texto, parsed.valor);
+        if (!canSendInsight(user.id)) return;
+
+        if (await checkAndSendOnboardingTip(user.id, message.telefone, "saida")) {
+          recordInsightSent(user.id); return;
+        }
+        if (await checkAndSendInsights(user.id, message.telefone, parsed.categoria)) {
+          recordInsightSent(user.id); return;
+        }
+        if (await sendContextualMicroInsight(user.id, message.telefone, parsed.categoria)) {
+          recordInsightSent(user.id); return;
+        }
+        if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao, parsed.valor)) {
+          recordInsightSent(user.id); return;
+        }
+        if (await checkAndDetectInstallment(user.id, message.telefone, parsed.descricao, message.texto, parsed.valor)) {
+          recordInsightSent(user.id);
+        }
       } catch (err) {
         log.error("falha na cadeia de insights pos-gasto", err, { userId: user.id });
       }
@@ -961,23 +974,23 @@ async function sendContextualMicroInsight(userId: number, telefone: string, cate
          AND criado_em >= $3 AND criado_em < $4`,
       [userId, categoria, todayUTC, tomorrowUTC]
     );
-    if (Number(catRow.rows[0].count) >= 3) {
+    if (Number(catRow.rows[0].count) >= 4) {
       insight = pick([
-        `${categoria} apareceu bastante hoje 😅`,
-        `Hoje teve bastante ${categoria.toLowerCase()} 😅`,
+        `${categoria} apareceu bastante hoje.`,
+        `Bastante ${categoria.toLowerCase()} hoje.`,
       ]);
     }
 
-    // Condição 2: 4+ gastos nas últimas 2h (ritmo acelerado)
+    // Condição 2: 5+ gastos nas últimas 2h (ritmo acelerado)
     if (!insight) {
       const paceRow = await pool.query<{ count: string }>(
         `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2`,
         [userId, twoHoursAgo]
       );
-      if (Number(paceRow.rows[0].count) >= 4) {
+      if (Number(paceRow.rows[0].count) >= 5) {
         insight = pick([
-          "Hoje teve bastante saída em pouco tempo 👀",
           "Bastante saída concentrada hoje 👀",
+          "Hoje teve bastante movimento.",
         ]);
       }
     }
@@ -1673,9 +1686,9 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
 }
 
 const ONBOARDING_TIPS: Record<number, string> = {
-  10: `Para depositar na meta, manda: guardar 200 viagem 🎯`,
-  11: `Com isso definido, "previsão" mostra como o mês vai fechar.`,
-  12: `Para ver todas as contas fixas, manda "próximas".`,
+  10: `Para guardar na meta: guardar 200 viagem 🎯`,
+  11: `"previsão" agora consegue mostrar como o mês vai fechar.`,
+  12: `"próximas" lista tudo que vence em breve.`,
 };
 
 async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<boolean> {
@@ -1716,10 +1729,7 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
       if ((inserted.rowCount ?? 0) === 0) return false;
 
       const top   = metrics.gastos_por_categoria[0];
-      const texto = [
-        `Você já registrou ${fmtValor(metrics.total_saidas)} esse mês.`,
-        `${capitalizeFirst(top.categoria)} apareceu bastante até agora.`,
-      ].join("\n");
+      const texto = `${capitalizeFirst(top.categoria)} liderou o mês até agora 🙂`;
       await whatsapp.sendText({ to: telefone, text: texto });
       log.whatsapp("aha moment enviado", { to: telefone, userId, totalSaidas: metrics.total_saidas });
       return true;
@@ -1786,11 +1796,11 @@ async function checkAndSendInsights(userId: number, telefone: string, categoria:
 
   if ((inserted.rowCount ?? 0) === 0) return false;
 
-  await whatsapp.sendText({
-    to:   telefone,
-    text: `📊 ${categoria} representa ${percentual}% dos seus gastos do mês.`,
-  });
+  const insightTexto = percentual >= 65
+    ? `${categoria} tá puxando bastante esse mês 👀`
+    : `${categoria} tá acima da metade dos gastos este mês.`;
 
+  await whatsapp.sendText({ to: telefone, text: insightTexto });
   log.whatsapp("insight enviado", { to: telefone, categoria, percentual, marco });
   return true;
 }

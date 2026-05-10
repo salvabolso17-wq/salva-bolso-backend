@@ -32,6 +32,7 @@ export interface SessionCtx {
   userId: number;
   txCount: number;            // transactions registered this session
   seenMenuAt: Date | null;
+  lastInsightAt: Date | null; // last time we sent a secondary message
   lastAction: string;
   recentActions: string[];    // last 10 distinct actions, most recent first
   phase: ConversationPhase;
@@ -62,6 +63,7 @@ export function initSession(userId: number): SessionCtx {
     userId,
     txCount: 0,
     seenMenuAt: null,
+    lastInsightAt: null,
     lastAction: "",
     recentActions: [],
     phase: "onboarding",
@@ -121,6 +123,24 @@ export function recordAction(userId: number, action: string): void {
       session.phase = "querying";
       break;
   }
+}
+
+// ── Insight cooldown ──────────────────────────────────────────────────────────
+// Prevents secondary messages from stacking in rapid-fire or short sessions.
+// Default: 10 min — at most ~3 secondary messages in a 30-min session.
+
+export function canSendInsight(userId: number, cooldownMs = 10 * 60 * 1000): boolean {
+  const session = SESSIONS.get(userId);
+  if (!session || isExpired(session)) return true;
+  if (!session.lastInsightAt) return true;
+  return Date.now() - session.lastInsightAt.getTime() > cooldownMs;
+}
+
+export function recordInsightSent(userId: number): void {
+  const session = SESSIONS.get(userId);
+  if (!session || isExpired(session)) return;
+  session.lastInsightAt = new Date();
+  session.updatedAt = new Date();
 }
 
 // ── Contextual next-step suggestion ──────────────────────────────────────────
