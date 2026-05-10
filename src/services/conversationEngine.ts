@@ -34,6 +34,7 @@ export interface SessionCtx {
   seenMenuAt: Date | null;
   lastInsightAt: Date | null; // last time we sent a secondary message
   lastAction: string;
+  lastCommand: string;        // last command/view shown, for follow-up disambiguation
   recentActions: string[];    // last 10 distinct actions, most recent first
   phase: ConversationPhase;
   sessionStart: Date;
@@ -65,6 +66,7 @@ export function initSession(userId: number): SessionCtx {
     seenMenuAt: null,
     lastInsightAt: null,
     lastAction: "",
+    lastCommand: "",
     recentActions: [],
     phase: "onboarding",
     sessionStart: new Date(),
@@ -197,6 +199,16 @@ export function getContextualNextStep(session: SessionCtx, txCountDb: number): s
 
   // Used everything → open invitation
   return "Pode continuar registrando ou perguntar qualquer coisa 🙂";
+}
+
+// ── Last command tracking ─────────────────────────────────────────────────────
+// Records which view/command was last shown so follow-up messages can be context-aware.
+
+export function setLastCommand(userId: number, command: string): void {
+  const session = SESSIONS.get(userId);
+  if (!session || isExpired(session)) return;
+  session.lastCommand = command;
+  session.updatedAt   = new Date();
 }
 
 // ── Intent classifier ─────────────────────────────────────────────────────────

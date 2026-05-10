@@ -5,7 +5,7 @@ import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
-import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep, canSendInsight, recordInsightSent } from "./conversationEngine";
+import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep, canSendInsight, recordInsightSent, setLastCommand } from "./conversationEngine";
 
 function firstNameOf(rawName?: string | null): string | null {
   if (!rawName) return null;
@@ -399,12 +399,15 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Comandos de consulta ──────────────────────────────────────────────────
   if (/^saldo$/i.test(message.texto.trim())) {
+    setLastCommand(user.id, "saldo");
     return await handleSaldoCommand(user, message.telefone);
   }
   if (/^resumo$/i.test(message.texto.trim())) {
+    setLastCommand(user.id, "resumo");
     return await handleResumoCommand(user, message.telefone);
   }
   if (/^top(\s*gastos)?$/i.test(message.texto.trim())) {
+    setLastCommand(user.id, "top_gastos");
     return await handleTopGastosCommand(user, message.telefone);
   }
   if (/^parcelas?$|^parcelamentos?$/i.test(message.texto.trim())) {
@@ -427,9 +430,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handleLimiteCommand(user, message.telefone, message.texto.trim());
   }
   if (/^hoje$/i.test(message.texto.trim())) {
+    setLastCommand(user.id, "hoje");
     return await handleHojeCommand(user, message.telefone);
   }
   if (/^semana$/i.test(message.texto.trim())) {
+    setLastCommand(user.id, "semana");
     return await handleSemanaCommand(user, message.telefone);
   }
   if (/^categorias$/i.test(message.texto.trim())) {
@@ -442,12 +447,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handleMetaCommand(user, message.telefone, message.texto.trim());
   }
   if (/^metas$/i.test(message.texto.trim())) {
+    setLastCommand(user.id, "metas");
     return await handleMetasCommand(user, message.telefone);
   }
   if (/^guardar\s+[\d,.]+\s+.+$/i.test(message.texto.trim())) {
     return await handleGuardarCommand(user, message.telefone, message.texto.trim());
   }
   if (/^ranking$/i.test(message.texto.trim())) {
+    setLastCommand(user.id, "ranking");
     return await handleRankingCommand(user, message.telefone);
   }
   if (/^comparar$/i.test(message.texto.trim())) {
@@ -460,9 +467,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handlePrevisaoCommand(user, message.telefone);
   }
   if (/^recorrentes$/i.test(message.texto.trim())) {
+    setLastCommand(user.id, "recorrentes");
     return await handleRecorrentesCommand(user, message.telefone);
   }
   if (/^pr[oó]ximas$/i.test(message.texto.trim())) {
+    setLastCommand(user.id, "proximas");
     return await handleProximasCommand(user, message.telefone);
   }
   if (/^buscar\s+.+$/i.test(message.texto.trim())) {
@@ -2681,6 +2690,56 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     /(como\s+(t[aá]|est[aá]|anda)\s+o\s+(saldo|dinheiro|que\s+sobrou)|quanto\s+sobrou\s+(esse|este|no)\s+m[eê]s)/i.test(t)
   ) {
     return await handleSaldoCommand(user, telefone);
+  }
+
+  // ── Follow-up contextual ──────────────────────────────────────────────────
+  // Interpreta frases curtas/ambíguas com base no último comando mostrado.
+
+  const _sessCtx = getSession(user.id);
+  const _lastCmd = _sessCtx?.lastCommand ?? "";
+
+  // "quais eu tenho?" / "o que eu tenho?" / "quantos tenho?" → contexto do último comando
+  if (
+    !temNumero &&
+    /^(quais?\s+(eu\s+)?tenho|o\s+que\s+eu\s+tenho|quantos?\s+(eu\s+)?tenho|tenho\s+algum[ao]?)[\?!.]*$/i.test(t)
+  ) {
+    if (/recorrente|proxima/.test(_lastCmd)) {
+      setLastCommand(user.id, "recorrentes");
+      return await handleRecorrentesCommand(user, telefone);
+    }
+    if (/meta/.test(_lastCmd)) {
+      setLastCommand(user.id, "metas");
+      return await handleMetasCommand(user, telefone);
+    }
+    // Default: recorrentes (pergunta mais comum fora de contexto)
+    setLastCommand(user.id, "recorrentes");
+    return await handleRecorrentesCommand(user, telefone);
+  }
+
+  // "meus gastos" / "minha situação" → resumo do mês
+  if (
+    !temNumero &&
+    /^(meus?\s+gastos?|minha\s+situa[çc][aã]o|meu\s+financeiro|como\s+t[aá]\s+meu\s+dinheiro)[\?!.]*$/i.test(t)
+  ) {
+    setLastCommand(user.id, "resumo");
+    return await handleResumoCommand(user, telefone);
+  }
+
+  // "meus recorrentes" / "minhas metas" → shortcuts naturais
+  if (
+    !temNumero &&
+    /^(meus?\s+recorrentes?|minhas?\s+recorrentes?|recorrentes?\s+que\s+eu\s+tenho)[\?!.]*$/i.test(t)
+  ) {
+    setLastCommand(user.id, "recorrentes");
+    return await handleRecorrentesCommand(user, telefone);
+  }
+
+  if (
+    !temNumero &&
+    /^(minhas?\s+metas?|meus?\s+objetivos?|metas?\s+que\s+eu\s+tenho)[\?!.]*$/i.test(t)
+  ) {
+    setLastCommand(user.id, "metas");
+    return await handleMetasCommand(user, telefone);
   }
 
   return null;
