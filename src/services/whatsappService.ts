@@ -746,13 +746,14 @@ async function sendContextualMicroInsight(userId: number, telefone: string, cate
     const now         = new Date();
     const todayUTC    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const tomorrowUTC = new Date(todayUTC.getTime() + 86400000);
+    const inicioMes   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const twoMinsAgo  = new Date(now.getTime() - 120000);
     const twoHoursAgo = new Date(now.getTime() - 7200000);
-    const oneMinAgo   = new Date(now.getTime() - 60000);
 
-    // Registro rápido: tx anterior < 60s → silêncio total
+    // Rapid-fire: 2+ tx nos últimos 2 min → silêncio total
     const rapidRow = await pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2`,
-      [userId, oneMinAgo]
+      [userId, twoMinsAgo]
     );
     if (Number(rapidRow.rows[0].count) > 1) return;
 
@@ -762,6 +763,8 @@ async function sendContextualMicroInsight(userId: number, telefone: string, cate
       [userId, todayUTC]
     );
     if (Number(alreadySent.rows[0].count) > 0) return;
+
+    function pick(opts: string[]): string { return opts[Math.floor(Math.random() * opts.length)]; }
 
     let insight: string | null = null;
 
@@ -773,23 +776,54 @@ async function sendContextualMicroInsight(userId: number, telefone: string, cate
       [userId, categoria, todayUTC, tomorrowUTC]
     );
     if (Number(catRow.rows[0].count) >= 3) {
-      insight = `${categoria} aparecendo bastante hoje 😅`;
+      insight = pick([
+        `${categoria} apareceu bastante hoje 😅`,
+        `Hoje teve bastante ${categoria.toLowerCase()} 😅`,
+      ]);
     }
 
-    // Condição 2: 4+ gastos nas últimas 2h (ritmo acelerado de saída)
+    // Condição 2: 4+ gastos nas últimas 2h (ritmo acelerado)
     if (!insight) {
       const paceRow = await pool.query<{ count: string }>(
         `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2`,
         [userId, twoHoursAgo]
       );
       if (Number(paceRow.rows[0].count) >= 4) {
-        insight = "Bastante saída em pouco tempo 👀";
+        insight = pick([
+          "Hoje teve bastante saída em pouco tempo 👀",
+          "Bastante saída concentrada hoje 👀",
+        ]);
+      }
+    }
+
+    // Condição 3: categoria atual domina >40% do total mensal (mín R$300 no mês)
+    if (!insight) {
+      const monthRow = await pool.query<{ categoria: string; total: string; geral: string }>(
+        `SELECT categoria,
+                SUM(valor) AS total,
+                SUM(SUM(valor)) OVER () AS geral
+           FROM transactions
+          WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2
+          GROUP BY categoria
+          ORDER BY total DESC
+          LIMIT 1`,
+        [userId, inicioMes]
+      );
+      if (monthRow.rows.length > 0) {
+        const { categoria: topCat, total, geral } = monthRow.rows[0];
+        const pct = Number(total) / Number(geral);
+        if (topCat.toLowerCase() === categoria.toLowerCase() && pct > 0.40 && Number(geral) >= 300) {
+          insight = pick([
+            `Esse mês ${topCat.toLowerCase()} tá puxando bastante.`,
+            `${topCat} subiu bem esse mês.`,
+          ]);
+        }
       }
     }
 
     if (!insight) return;
 
-    // Registra dedup e só envia se foi o primeiro a inserir
+    // Registra dedup — só envia se foi o primeiro a inserir
     const ins = await pool.query(
       `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
        VALUES ($1, 'micro_dia', 1, $2)
