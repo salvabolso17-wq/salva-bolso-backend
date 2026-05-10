@@ -1070,7 +1070,7 @@ async function checkLimiteCategoria(userId: number, categoria: string): Promise<
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
       [userId, categoria, inicioMes]
     );
-    return `🚨 Você ultrapassou o limite mensal de ${categoria}.`;
+    return `${categoria} passou do limite esse mês. ${fmtValor(totalGasto)} de ${fmtValor(valorLimite)}.`;
   }
 
   if (percentual >= 80 && !marcosSent.has(80)) {
@@ -1080,7 +1080,7 @@ async function checkLimiteCategoria(userId: number, categoria: string): Promise<
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
       [userId, categoria, inicioMes]
     );
-    return `⚠️ Limite ${categoria}: ${fmtValor(totalGasto)} / ${fmtValor(valorLimite)} (${percentual}%)`;
+    return `${categoria} está em ${percentual}% do limite esse mês. ${fmtValor(totalGasto)} de ${fmtValor(valorLimite)}.`;
   }
 
   return null;
@@ -1191,31 +1191,31 @@ const CATEGORIA_EMOJI: Record<string, string> = {
 
 const DESAFIOS: Record<string, string[]> = {
   "Alimentação":  [
-    "Cozinhe em casa pelo menos 3 vezes esta semana.",
-    "Evite delivery por 5 dias seguidos.",
-    "Planeje as refeições antes de ir ao mercado.",
+    "Cozinhar mais em casa costuma ser o maior corte por aqui.",
+    "Delivery acumula rápido — pode valer reduzir.",
+    "Planejar o mercado antes evita compras por impulso.",
   ],
   "Transporte":   [
-    "Use transporte público 2 dias esta semana.",
-    "Combine caronas com alguém no trabalho.",
-    "Evite Uber em distâncias curtas por 5 dias.",
+    "Transporte público em alguns dias da semana faz diferença aqui.",
+    "Caronas combinadas podem ajudar a reduzir esse gasto.",
+    "Distâncias curtas de Uber acumulam mais do que parece.",
   ],
   "Lazer":        [
-    "Escolha uma opção gratuita de lazer este fim de semana.",
-    "Cancele uma assinatura que você usa pouco.",
-    "Reduza saídas pagas pela metade esta semana.",
+    "Opções gratuitas de lazer costumam ser mais do que imaginamos.",
+    "Às vezes tem assinatura esquecida por aqui — vale checar.",
+    "Saídas pagas têm um peso grande no mês.",
   ],
   "Saúde":        [
-    "Pesquise genéricos antes da próxima compra na farmácia.",
-    "Use o plano de saúde para evitar consultas avulsas.",
+    "Genéricos podem custar menos sem perder qualidade.",
+    "O plano de saúde cobre mais do que parece às vezes.",
   ],
   "Educação":     [
-    "Aproveite o conteúdo gratuito antes de comprar novos cursos.",
-    "Finalize um curso que já começou antes de comprar outro.",
+    "Antes de um novo curso, vale terminar os que já começou.",
+    "Tem muito conteúdo gratuito de qualidade por aí.",
   ],
   "Moradia":      [
-    "Reduza o consumo de energia desligando aparelhos em standby.",
-    "Revise assinaturas de streaming e cancele as menos usadas.",
+    "Aparelhos em standby consomem mais energia do que parece.",
+    "Assinaturas que você menos usa podem estar pesando por aqui.",
   ],
 };
 
@@ -1248,12 +1248,10 @@ async function handleDesafioCommand(user: UserRow, telefone: string): Promise<Pr
   const dica = templates[now.getUTCDate() % templates.length];
 
   const linhas = [
-    "🎯 Desafio da semana",
+    `${emoji} ${top.categoria} — ${fmtValor(top.total)} esse mês`,
     "",
-    `${emoji} ${dica}`,
+    dica,
     "",
-    `Categoria em foco: ${top.categoria}`,
-    `Gasto atual: ${fmtValor(top.total)}`,
     `Economia possível: ${fmtValor(economia)}`,
   ];
 
@@ -2339,8 +2337,8 @@ async function sendExpirationBlock(userId: number, telefone: string, eraTrialUse
 
   if (fullNovo) {
     const intro = eraTrialUser
-      ? "Seu período gratuito terminou 🙂"
-      : "Sua assinatura expirou 🙂";
+      ? "Seu período gratuito chegou ao fim."
+      : "Sua assinatura chegou ao fim.";
     const linhas = [
       intro,
       "",
@@ -2416,11 +2414,8 @@ async function handleSpendingConcern(user: UserRow, telefone: string): Promise<P
   }
 
   const top = metrics.gastos_por_categoria[0];
-  const acks = ["Olha como tá o mês:", "Aqui tá o que foi registrado:", "Veja o que tá até agora:"];
   const linhas = [
-    acks[new Date().getHours() % acks.length],
-    "",
-    `${fmtValor(metrics.total_saidas)} gastos esse mês.`,
+    `${fmtValor(metrics.total_saidas)} em gastos esse mês.`,
     `Mais em: ${capitalizeFirst(top?.categoria ?? "—")} — ${fmtValor(top?.total ?? 0)}`,
   ];
 
@@ -2551,7 +2546,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     !temNumero &&
     /hoje\s+(foi\s+)?(bom|tranquilo|leve|econ[oô]mico)|gastei\s+(pouco|bem\s+pouco|quase\s+nada)|economizei\s+(hoje|bastante)/.test(t)
   ) {
-    const acks = ["Bom sinal.", "Isso. Vai acumulando.", "Dias assim fazem diferença."];
+    const acks = ["Bom sinal.", "Vai acumulando.", "Dias leves também contam."];
     const pick  = acks[new Date().getHours() % acks.length];
     try {
       await whatsapp.sendText({ to: telefone, text: pick });
