@@ -21,6 +21,7 @@ interface UserRow {
   subscription_status: string;
   trial_ends_at: Date | null;
   subscription_expires_at: Date | null;
+  criado_em: Date | null;
 }
 
 type ProcessResult =
@@ -33,7 +34,7 @@ async function findUserByTelefone(telefone: string): Promise<UserRow | null> {
   log.user("buscando", { telefone: normalized });
 
   const result = await pool.query<UserRow>(
-    `SELECT id, telefone, nome, renda, renda_extra, subscription_status, trial_ends_at, subscription_expires_at FROM users
+    `SELECT id, telefone, nome, renda, renda_extra, subscription_status, trial_ends_at, subscription_expires_at, criado_em FROM users
      WHERE REGEXP_REPLACE(telefone, '[^0-9]', '', 'g') = $1
         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 11) = RIGHT($1, 11)
         OR RIGHT(REGEXP_REPLACE(telefone, '[^0-9]', '', 'g'), 8)  = RIGHT($1, 8)
@@ -283,6 +284,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const count = Number(countRow.rows[0].count);
 
     if (count === 0) {
+      // Onboarding enviado há menos de 5 min → silêncio (evita spam de boas-vindas repetidas)
+      const criadoHaPouco = user.criado_em
+        && (Date.now() - new Date(user.criado_em).getTime()) < 5 * 60 * 1000;
+      if (criadoHaPouco) {
+        return { success: false, userId: user.id, erro: "Onboarding recente — silencio" };
+      }
       const boas_vindas = [
         "Olá! Me manda um gasto:",
         "35 uber  •  50 mercado  •  120 farmácia 📝",
@@ -1509,7 +1516,6 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
 }
 
 const ONBOARDING_TIPS: Record<number, string> = {
-  1:  `Perfeito. Vou organizando tudo por aqui pra você 👌`,
   10: `Para depositar na meta, manda: guardar 200 viagem 🎯`,
   11: `Com isso definido, "previsão" mostra como o mês vai fechar.`,
   12: `Para ver todas as contas fixas, manda "próximas".`,
@@ -2068,32 +2074,17 @@ function buildFeaturesMenuText(): string {
   return [
     "O que consigo fazer:",
     "",
-    "📊 Saldo do mês",
-    "  saldo  •  quanto sobrou?",
+    "📊 saldo  •  resumo  •  hoje  •  semana",
+    "📈 ranking  •  top gastos  •  previsão",
+    "✏️ corrigir  •  apagar",
+    "🔁 recorrentes  •  próximas",
+    "🎯 meta viagem 5000  •  limite alimentação 800",
+    "📚 buscar mercado  •  extrato janeiro",
+    "💡 insights chegam sozinhos",
     "",
-    "🧾 Gastos por categoria",
-    "  resumo  •  me mostra os gastos",
-    "",
-    "📈 Análise",
-    "  ranking  •  top gastos  •  previsão",
-    "",
-    "✏️ Corrigir ou apagar",
-    "  corrigir  •  apagar  •  editei errado",
-    "",
-    "🔁 Contas fixas",
-    "  recorrentes  •  próximas",
-    "",
-    "🎯 Metas e limites",
-    "  meta viagem 5000  •  limite alimentação 800",
-    "",
-    "📚 Histórico",
-    "  buscar mercado  •  extrato janeiro",
-    "",
-    "💡 Insights chegam automaticamente",
-    "",
-    "Pode falar naturalmente 🙂",
-    "• como tá meu mês?",
+    "Fala naturalmente 🙂",
     "• quanto gastei hoje?",
+    "• como tá meu mês?",
     "• me mostra meus gastos",
   ].join("\n");
 }
