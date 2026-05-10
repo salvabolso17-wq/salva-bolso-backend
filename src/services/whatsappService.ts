@@ -1996,10 +1996,13 @@ async function handleSpendingConcern(user: UserRow, telefone: string): Promise<P
     return { success: false, userId: user.id, erro: "spending_concern sem dados" };
   }
 
-  const top    = metrics.gastos_por_categoria[0];
+  const top = metrics.gastos_por_categoria[0];
+  const acks = ["Olha como tá o mês:", "Aqui tá o que foi registrado:", "Veja o que tá até agora:"];
   const linhas = [
-    `📊 ${fmtValor(metrics.total_saidas)} gastos este mês.`,
-    `Maior: ${top?.categoria ?? "—"} — ${fmtValor(top?.total ?? 0)}`,
+    acks[new Date().getHours() % acks.length],
+    "",
+    `${fmtValor(metrics.total_saidas)} gastos esse mês.`,
+    `Mais em: ${capitalizeFirst(top?.categoria ?? "—")} — ${fmtValor(top?.total ?? 0)}`,
   ];
 
   try {
@@ -2023,7 +2026,7 @@ async function handleNextStepSuggestion(user: UserRow, telefone: string): Promis
   if (count === 0) {
     text = "Começa mandando um gasto:\n35 uber, 50 mercado 📝";
   } else if (count <= 3) {
-    text = 'Continue registrando. Use "saldo" quando quiser ver o mês.';
+    text = 'Continue registrando. Quando quiser ver o mês, manda "saldo".';
   } else {
     const now       = new Date();
     const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -2033,7 +2036,7 @@ async function handleNextStepSuggestion(user: UserRow, telefone: string): Promis
       const top = metrics.gastos_por_categoria[0];
       text = `${fmtValor(metrics.total_saidas)} gastos este mês. Maior: ${top.categoria}. 📊`;
     } else {
-      text = 'Use "saldo" para ver como está o mês.';
+      text = '"saldo" mostra como o mês tá ficando.';
     }
   }
 
@@ -2056,12 +2059,27 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     return await handleNextStepSuggestion(user, telefone);
   }
 
-  // Confusão / não entendeu → explica como usar
+  // "o que é isso?" → explica o bot
+  if (!temNumero && /^(que\s+[eéè]\s+isso|o\s+que\s+[eéè]\s+isso)[\?!.]*$/.test(t)) {
+    return await handleAjudaCommand(user, telefone);
+  }
+
+  // Confusão leve → resposta curta, sem menu
   if (
     !temNumero &&
-    /n[aã]o\s+(estou?|t[oô]|to)\s+entendendo|n[aã]o\s+entendi|entendi\s+foi\s+nada|que\s+[eéè]\s+isso|o\s+que\s+[eéè]\s+isso|n[aã]o\s+(sei|entendo)\s+(nada|nada\s+disso)|como\s+assim/.test(t)
+    /n[aã]o\s+(estou?|t[oô]|to)\s+entendendo|n[aã]o\s+entendi|entendi\s+foi\s+nada|n[aã]o\s+(sei|entendo)\s+(nada|nada\s+disso)|como\s+assim|n[aã]o\s+peguei/.test(t)
   ) {
-    return await handleAjudaCommand(user, telefone);
+    const respostas = [
+      "Não peguei muito bem 😅 Me manda um gasto ou diz o que quer ver.",
+      "Hmm, não entendi. Manda um gasto ou me faz uma pergunta.",
+      "Não captei. Manda um gasto — 35 uber, ou diz o que precisa.",
+    ];
+    try {
+      await whatsapp.sendText({ to: telefone, text: respostas[new Date().getHours() % respostas.length] });
+    } catch (err) {
+      log.error("falha light_confusion", err, { userId: user.id });
+    }
+    return { success: false, userId: user.id, erro: "light_confusion tratada" };
   }
 
   // Intenção de ajuda
@@ -2102,6 +2120,22 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     /t[oô]\s+(no\s+limite|apertad[ao]|tenso|zerado|pelado)|(m[eê]s|semana)\s+(dif[ií]cil|pesad[ao]|complicad[ao])|pouco\s+dinheiro|sem\s+dinheiro|t[oô]\s+endividad[ao]/.test(t)
   ) {
     return await handleSpendingConcern(user, telefone);
+  }
+
+  // Exagero emocional / perda de controle → dados sem julgamento
+  if (
+    !temNumero &&
+    /acho\s+que\s+(exagerei|exager[ao]|foi\s+demais)|perdi\s+(o\s+)?controle|(saiu|t[aá])\s+(fora|do)\s+controle|t[oô]\s+preocupado\s+(com\s+os?\s+gastos?|com\s+dinheiro)/.test(t)
+  ) {
+    return await handleSpendingConcern(user, telefone);
+  }
+
+  // Continuidade: quer continuar, ver mais ou registrar outro
+  if (
+    !temNumero &&
+    /mais\s+alguma\s+coisa|tem\s+mais|algo\s+mais|quero\s+(registrar|ver|fazer)\s+(outro|mais|algo)|o\s+que\s+(mais\s+)?(posso|d[aá])\s+(ver|consultar|fazer)/.test(t)
+  ) {
+    return await handleNextStepSuggestion(user, telefone);
   }
 
   // Dia positivo / gastou pouco → ack leve, sem exagero
@@ -2202,7 +2236,7 @@ function isAmbiguousIntent(texto: string): boolean {
 
 function buildContextualHint(texto: string): string {
   const t = texto.toLowerCase();
-  if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))         return 'Envia "saldo" para ver o mês. 💰';
+  if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))         return '"saldo" mostra como o mês tá ficando. 💰';
   if (/onde\s+gasto|mais\s+caro|\branking\b/.test(t))                  return '"ranking" mostra onde vai mais. 📊';
   if (/meus?\s+gastos?|\bresumo\b/.test(t))                            return '"resumo" mostra por categoria.';
   if (/\bcontas?\b|recorrente|vencimento|pr[oó]ximas?/.test(t))        return '"próximas" lista as contas fixas.';
