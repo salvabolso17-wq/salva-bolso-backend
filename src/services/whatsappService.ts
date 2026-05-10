@@ -273,7 +273,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   // ── Onboarding: boas-vindas para usuário novo ────────────────────────────
-  const ehSaudacaoOuAjuda = /^(oi|ol[aá]|ola|começar|comecar|menu|ajuda|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)$/i
+  const ehSaudacaoOuAjuda = /^(oi+|op+a|ol[aá]|ola|e\s*a[ií]|tudo\s*(bem|bom|ok|certo)?|como\s+(tá|vai)|fala|fala\s+(aí|a[ií]|cmg|comigo)|começar|comecar|menu|ajuda|hi|hello|hey|bom\s*dia|boa\s*tarde|boa\s*noite|start)[\?!.]*$/i
     .test(message.texto.trim());
 
   if (ehSaudacaoOuAjuda) {
@@ -310,9 +310,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
     // Saudação social de usuário ativo → resposta natural, sem listar comandos
     const saudacoes = [
-      "Olá! Me manda um gasto ou fala 'saldo'.",
-      "Oi! Manda um gasto ou 'saldo' pra ver o mês.",
-      "Olá! Estou aqui. Manda um gasto ou 'saldo'.",
+      "Oi 🙂 Pode mandar um gasto ou perguntar sobre o mês.",
+      "Olá 👋 Me manda um gasto ou fala o que quer ver.",
+      "Oi! Pode registrar um gasto ou pedir o resumo do mês.",
     ];
     await whatsapp.sendText({
       to:   message.telefone,
@@ -2089,19 +2089,25 @@ async function checkOnboardingWindowSilence(user: UserRow): Promise<boolean> {
 }
 
 function isCuriosityPhrase(texto: string): boolean {
-  return /quero\s+ver|me\s+mostra|como\s+funciona|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|o\s+que\s+d[aá]\s+pra\s+fa[çz]|tem\s+mais\s+coisa|quero\s+entender|me\s+explica|o\s+que\s+[eéè]\s+isso|como\s+(uso|usar|fa[çc]o)\b|o\s+que\s+tem\s+aqui|conta\s+mais|o\s+que\s+voc[eê]\s+conseg/i.test(texto);
+  const t = texto.trim();
+  if (/^(mostra|mostra\s+a[ií]|explica|me\s+conta|pode\s+falar)[\?!.]*$/i.test(t)) return true;
+  return /quero\s+ver|me\s+mostra|como\s+funciona|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|o\s+que\s+d[aá]\s+pra\s+fa[çz]|tem\s+mais\s+coisa|quero\s+entender|me\s+explica|o\s+que\s+[eéè]\s+isso|como\s+(uso|usar|fa[çc]o)\b|o\s+que\s+tem\s+(aqui|nesse?\s+bot)?|conta\s+mais|o\s+que\s+voc[eê]\s+conseg/i.test(t);
 }
 
 function buildFeaturesMenuText(): string {
   return [
     "O que consigo fazer:",
     "",
-    "📊 saldo · resumo · ranking · previsão",
-    "📅 hoje · semana · extrato",
-    "✏️ corrigir · apagar · buscar",
-    "🔁 recorrentes · próximas · metas",
+    "📊 saldo",
+    "🧾 resumo",
+    "📈 ranking",
+    "📅 previsão",
+    "🔁 recorrentes",
+    "✏️ corrigir · apagar",
+    "📚 buscar · extrato",
+    "🎯 metas",
     "",
-    "Fala naturalmente 🙂",
+    "Pode me perguntar do seu jeito 🙂",
   ].join("\n");
 }
 
@@ -2198,13 +2204,17 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     !temNumero &&
     /n[aã]o\s+(estou?|t[oô]|to)\s+entendendo|n[aã]o\s+entendi|entendi\s+foi\s+nada|n[aã]o\s+(sei|entendo)\s+(nada|nada\s+disso)|como\s+assim|n[aã]o\s+peguei/.test(t)
   ) {
-    const respostas = [
-      "Não peguei muito bem. Me fala um gasto ou o que quer ver.",
-      "Não entendi bem. Pode me perguntar sobre o mês ou mandar um gasto.",
-      "Não captei. Me manda um gasto ou uma pergunta.",
-    ];
+    const guia = [
+      "Pode usar o SalvaBolso de forma bem simples 🙂",
+      "",
+      "Ex:",
+      "• 50 mercado",
+      "• quanto sobrou?",
+      "• resumo",
+      "• ranking",
+    ].join("\n");
     try {
-      await whatsapp.sendText({ to: telefone, text: respostas[new Date().getHours() % respostas.length] });
+      await whatsapp.sendText({ to: telefone, text: guia });
     } catch (err) {
       log.error("falha light_confusion", err, { userId: user.id });
     }
