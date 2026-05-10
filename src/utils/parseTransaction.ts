@@ -278,6 +278,39 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
   },
 };
 
+const NOME_CORRECTIONS: [RegExp, string][] = [
+  [/^i\s*food$/i,           "iFood"],
+  [/^spotif[yi]$/i,         "Spotify"],
+  [/^net[if]lix$/i,         "Netflix"],
+  [/^netiflix$/i,           "Netflix"],
+  [/^netfix$/i,             "Netflix"],
+  [/^disney(\+|plus)?$/i,   "Disney+"],
+  [/^amazon\s*prime$/i,     "Amazon Prime"],
+  [/^prime\s*video$/i,      "Prime Video"],
+  [/^uber\s*eats$/i,        "Uber Eats"],
+  [/^alguel?$/i,            "Aluguel"],
+  [/^alugel$/i,             "Aluguel"],
+  [/^mercdo$/i,             "Mercado"],
+  [/^mercaddo$/i,           "Mercado"],
+  [/^nubank$/i,             "Nubank"],
+  [/^academia$/i,           "Academia"],
+  [/^internet$/i,           "Internet"],
+  [/^celular$/i,            "Celular"],
+  [/^energia$/i,            "Energia"],
+  [/^luz$/i,                "Conta de Luz"],
+  [/^agua$/i,               "Conta de Água"],
+  [/^gas$/i,                "Gás"],
+  [/^condomin?io$/i,        "Condomínio"],
+];
+
+function normalizeDescricao(descricao: string): string {
+  const trimmed = descricao.trim();
+  for (const [pattern, normalized] of NOME_CORRECTIONS) {
+    if (pattern.test(trimmed)) return normalized;
+  }
+  return trimmed;
+}
+
 export function parseTransaction(texto: string): ParsedTransaction | null {
   const textoNorm  = texto.trim();
   const isEntrada  = textoNorm.startsWith("+");
@@ -290,7 +323,9 @@ export function parseTransaction(texto: string): ParsedTransaction | null {
   const valor = parseFloat(valorMatch[1].replace(",", "."));
   if (isNaN(valor) || valor <= 0) return null;
 
-  const descricao  = textoParse.replace(valorMatch[0], "").replace(/\+/g, "").trim() || "Sem descrição";
+  const descricao  = normalizeDescricao(
+    textoParse.replace(valorMatch[0], "").replace(/\+/g, "").trim() || "Sem descrição"
+  );
 
   // Texto normalizado (sem acentos, minúsculo) para matching consistente
   const textoLower = removerAcentos(textoParse.toLowerCase());

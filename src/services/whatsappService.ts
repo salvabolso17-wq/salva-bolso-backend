@@ -395,6 +395,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Proteção contra mensagens ambíguas ───────────────────────────────────
   if (isAmbiguousIntent(message.texto)) {
+    if (await checkOnboardingWindowSilence(user)) {
+      log.webhook("janela onboarding — silencio (ambiguo)", { userId: user.id });
+      return { success: false, userId: user.id, erro: "Janela onboarding — silencio" };
+    }
     await whatsapp.sendText({
       to:   message.telefone,
       text: buildContextualHint(message.texto),
@@ -423,6 +427,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   if (!parsed) {
     log.parser("nao reconhecido", { texto: message.texto });
+
+    if (await checkOnboardingWindowSilence(user)) {
+      log.webhook("janela onboarding — silencio (parser falhou)", { userId: user.id });
+      return { success: false, userId: user.id, erro: "Janela onboarding — silencio" };
+    }
 
     try {
       const sendResult = await whatsapp.sendText({
@@ -2066,6 +2075,19 @@ function isSubscriptionActive(user: UserRow): boolean {
 }
 
 
+async function checkOnboardingWindowSilence(user: UserRow): Promise<boolean> {
+  if (!user.criado_em) return false;
+  if (Date.now() - new Date(user.criado_em).getTime() >= 10 * 60 * 1000) return false;
+  try {
+    const cRow = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`, [user.id]
+    );
+    return Number(cRow.rows[0].count) === 0;
+  } catch {
+    return false;
+  }
+}
+
 function isCuriosityPhrase(texto: string): boolean {
   return /quero\s+ver|me\s+mostra|como\s+funciona|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|o\s+que\s+d[aá]\s+pra\s+fa[çz]|tem\s+mais\s+coisa|quero\s+entender|me\s+explica|o\s+que\s+[eéè]\s+isso|como\s+(uso|usar|fa[çc]o)\b|o\s+que\s+tem\s+aqui|conta\s+mais|o\s+que\s+voc[eê]\s+conseg/i.test(texto);
 }
@@ -2074,18 +2096,12 @@ function buildFeaturesMenuText(): string {
   return [
     "O que consigo fazer:",
     "",
-    "📊 saldo  •  resumo  •  hoje  •  semana",
-    "📈 ranking  •  top gastos  •  previsão",
-    "✏️ corrigir  •  apagar",
-    "🔁 recorrentes  •  próximas",
-    "🎯 meta viagem 5000  •  limite alimentação 800",
-    "📚 buscar mercado  •  extrato janeiro",
-    "💡 insights chegam sozinhos",
+    "📊 saldo · resumo · ranking · previsão",
+    "📅 hoje · semana · extrato",
+    "✏️ corrigir · apagar · buscar",
+    "🔁 recorrentes · próximas · metas",
     "",
     "Fala naturalmente 🙂",
-    "• quanto gastei hoje?",
-    "• como tá meu mês?",
-    "• me mostra meus gastos",
   ].join("\n");
 }
 
@@ -2183,9 +2199,9 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     /n[aã]o\s+(estou?|t[oô]|to)\s+entendendo|n[aã]o\s+entendi|entendi\s+foi\s+nada|n[aã]o\s+(sei|entendo)\s+(nada|nada\s+disso)|como\s+assim|n[aã]o\s+peguei/.test(t)
   ) {
     const respostas = [
-      "Não peguei muito bem 😅 Me manda um gasto ou diz o que quer ver.",
-      "Hmm, não entendi. Manda um gasto ou me faz uma pergunta.",
-      "Não captei. Manda um gasto — 35 uber, ou diz o que precisa.",
+      "Não peguei muito bem. Me fala um gasto ou o que quer ver.",
+      "Não entendi bem. Pode me perguntar sobre o mês ou mandar um gasto.",
+      "Não captei. Me manda um gasto ou uma pergunta.",
     ];
     try {
       await whatsapp.sendText({ to: telefone, text: respostas[new Date().getHours() % respostas.length] });
@@ -2357,9 +2373,9 @@ function buildContextualHint(texto: string): string {
   if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return 'Para registrar renda:\n+3000 salário';
   if (/dinheiro|gast|paguei|comprei|gastei/.test(t))                   return 'Me manda o valor e o que foi:\n50 mercado';
   const fallbacks = [
-    "Não peguei bem. Manda um gasto ou um comando.",
-    "Não entendi 😅 Me manda: 50 mercado",
-    "Não reconheci. Me manda um gasto: 50 mercado",
+    "Me fala o que quer acompanhar.",
+    "Pode me mandar um gasto ou perguntar sobre o mês.",
+    "Me manda um gasto ou fala o que quer ver 🙂",
   ];
   return fallbacks[new Date().getHours() % fallbacks.length];
 }
