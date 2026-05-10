@@ -304,15 +304,23 @@ const NOME_CORRECTIONS: [RegExp, string][] = [
 ];
 
 // Strip verbo + preposição de frases naturais: "gastei 60 com uber" → "uber"
-const VERB_PREFIX_RE    = /^(gastei|gastou|gastamos|gasto|gasta|paguei|pagou|pagamos|pago|paga|foi|fui|saiu|custou|custa|comprei|comprou|compramos|tomei|tomou|tomamos|usei|usou|usamos|rodei|tirei|tirou|tiramos|fiz|fez|fizemos|botei|botou|botamos)\s+/i;
-const PREP_PREFIX_RE    = /^(com|no|na|nos|nas|de|da|do|em|pro|pra|pras|pros|para|num|numa|ao|aos|pelo|pela|pelos|pelas|um|uma|o|a)\s+/i;
-const MODIFIER_PREP_RE  = /^(comida|refeição|refeicao|bebida|lanche|produto|serviço|servico|gasto|compra|conta)\s+(no|na|nos|nas|de|da|do|em|pro|pra|para|com|ao)\s+/i;
+const VERB_PREFIX_RE   = /^(gastei|gastou|gastamos|gasto|gasta|paguei|pagou|pagamos|pago|paga|foi|fui|saiu|custou|custa|comprei|comprou|compramos|tomei|tomou|tomamos|usei|usou|usamos|rodei|tirei|tirou|tiramos|fiz|fez|fizemos|botei|botou|botamos|coloquei|devolvi|transferi)\s+/i;
+const PREP_PREFIX_RE   = /^(com|no|na|nos|nas|de|da|do|em|pro|pra|pras|pros|para|num|numa|ao|aos|pelo|pela|pelos|pelas|um|uma|o|a)\s+/i;
+const MODIFIER_PREP_RE = /^(comida|refeição|refeicao|bebida|lanche|produto|serviço|servico|gasto|compra|conta|coisa)\s+(no|na|nos|nas|de|da|do|em|pro|pra|para|com|ao)\s+/i;
+
+// Strip marcadores temporais no final da frase: "Uber ontem", "Mercado hoje de manhã"
+const TEMPORAL_SUFFIX_RE = /\s+(ontem|hoje|agora|agora\s+pouco|a\s+pouco|essa\s+semana|esta\s+semana|nessa\s+semana|no\s+fim\s+de\s+semana|fim\s+de\s+semana|de\s+manh[aã]|de\s+tarde|de\s+noite|[àa]\s+noite|cedo|tarde|semana\s+passada|m[eê]s\s+passado|mais\s+cedo|mais\s+tarde|agora\s+mesmo|hoje\s+cedo|hoje\s+de\s+manh[aã]|hoje\s+de\s+tarde|ontem\s+[àa]\s+noite|hoje\s+[àa]\s+noite)$/i;
+
+// Strip sufixos de canal irrelevantes: "pelo app", "no site", "online"
+const CHANNEL_SUFFIX_RE = /\s+(pelo\s+app|no\s+app|via\s+app|pelo\s+celular|no\s+celular|online|pelo\s+site|no\s+site|via\s+site|pelo\s+whatsapp)$/i;
 
 function cleanDescricao(raw: string): string {
   let d = raw.trim();
-  d = d.replace(VERB_PREFIX_RE, "").trim();    // remove verbo inicial
-  d = d.replace(PREP_PREFIX_RE, "").trim();    // remove preposição/artigo inicial
-  d = d.replace(MODIFIER_PREP_RE, "").trim();  // "comida no X" → "X"
+  d = d.replace(VERB_PREFIX_RE, "").trim();
+  d = d.replace(PREP_PREFIX_RE, "").trim();
+  d = d.replace(MODIFIER_PREP_RE, "").trim();
+  d = d.replace(TEMPORAL_SUFFIX_RE, "").trim();
+  d = d.replace(CHANNEL_SUFFIX_RE, "").trim();
   return d || raw.trim();
 }
 

@@ -2484,6 +2484,46 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     return { success: false, userId: user.id, erro: "positive_eco_ack" };
   }
 
+  // "como tá meu mês?" / "como está o mês?" / "como anda a situação?" → resumo
+  if (
+    !temNumero &&
+    /como\s+(t[aá]|est[aá]|anda|foi|ficou)\s+(meu|o|a\s+minha\s+)?(m[eê]s|financ|conta|situac|semana)/i.test(t)
+  ) {
+    return await handleResumoCommand(user, telefone);
+  }
+
+  // "quanto gastei hoje?" → hoje
+  if (
+    !temNumero &&
+    /quanto\s+(gastei|gasto|saiu|foi)\s+(hoje|de\s+hoje|nesse?\s+dia)/i.test(t)
+  ) {
+    return await handleHojeCommand(user, telefone);
+  }
+
+  // "qual meu maior gasto?" / "onde gastei mais?" / "onde vai meu dinheiro?" → ranking
+  if (
+    !temNumero &&
+    /(qual\s+(é\s+o\s+)?meu\s+maior\s+gasto|onde\s+gastei\s+mais|onde\s+vai\s+(meu\s+)?dinheiro|maior\s+gasto\s+do\s+m[eê]s|onde\s+(gasto|t[oô])\s+gastando\s+mais|cat[eé]goria\s+mais\s+(cara|alta|pesada))/i.test(t)
+  ) {
+    return await handleRankingCommand(user, telefone);
+  }
+
+  // "tem algo pesado esse mês?" / "tem algo caro?" → spending concern
+  if (
+    !temNumero &&
+    /(tem\s+algo\s+(pesado|caro|alto|excessivo|demais)|o\s+que\s+(t[aá]|est[aá])\s+(pesando|alto|caro|pesad[ao])|t[aá]\s+(pesado|caro|alto)|o\s+que\s+t[aá]\s+pesando)/i.test(t)
+  ) {
+    return await handleSpendingConcern(user, telefone);
+  }
+
+  // "quanto sobrou esse mês?" / "como tá o saldo?" → saldo
+  if (
+    !temNumero &&
+    /(como\s+(t[aá]|est[aá]|anda)\s+o\s+(saldo|dinheiro|que\s+sobrou)|quanto\s+sobrou\s+(esse|este|no)\s+m[eê]s)/i.test(t)
+  ) {
+    return await handleSaldoCommand(user, telefone);
+  }
+
   return null;
 }
 
@@ -2496,13 +2536,16 @@ function isAmbiguousIntent(texto: string): boolean {
 
 function buildContextualHint(texto: string): string {
   const t = texto.toLowerCase();
+  const ehPergunta = t.includes("?") || /^(quanto|como|qual|onde|quando|o\s+que|tem\s+algo)\b/.test(t);
+
   if (/quanto|sobrou|restou|dispon[ií]vel|\bsaldo\b/.test(t))         return '"saldo" mostra como o mês tá ficando. 💰';
   if (/onde\s+gasto|mais\s+caro|\branking\b/.test(t))                  return '"ranking" mostra onde vai mais. 📊';
-  if (/meus?\s+gastos?|\bresumo\b/.test(t))                            return '"resumo" mostra por categoria.';
+  if (/meus?\s+gastos?|\bresumo\b|\bm[eê]s\b/.test(t))                return '"resumo" mostra por categoria.';
   if (/\bcontas?\b|recorrente|vencimento|pr[oó]ximas?/.test(t))        return '"próximas" lista as contas fixas.';
   if (/guardar|juntar|economiz|\bmeta\b|objetivo|poupan/.test(t))      return 'Para criar uma meta:\nguardar 200 viagem 🎯';
   if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return 'Para registrar renda:\n+3000 salário';
-  if (/dinheiro|gast|paguei|comprei|gastei/.test(t))                   return 'Me manda o valor e o que foi:\n50 mercado';
+  // Só sugere registro se claramente não for uma pergunta
+  if (!ehPergunta && /dinheiro|gast|paguei|comprei|gastei/.test(t))    return 'Me manda o valor e o que foi:\n50 mercado';
   const fallbacks = [
     "Me fala o que quer acompanhar.",
     "Pode me mandar um gasto ou perguntar sobre o mês.",
