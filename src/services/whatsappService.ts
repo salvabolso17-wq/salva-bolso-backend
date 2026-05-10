@@ -6,6 +6,11 @@ import { log } from "../utils/logger";
 import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
 
+function firstNameOf(nome: string | null | undefined): string | null {
+  if (!nome || !/[a-zA-ZÀ-ú]/.test(nome)) return null;
+  return nome.trim().split(/\s+/)[0];
+}
+
 interface UserRow {
   id: number;
   telefone: string;
@@ -89,12 +94,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       return { success: false, erro: `Nenhum usuário com telefone ${message.telefone}` };
     }
 
+    const newNome = firstNameOf(message.pushName);
     try {
       await pool.query(
-        `INSERT INTO users (telefone, trial_ends_at)
-         VALUES ($1, NOW() + INTERVAL '7 days')
+        `INSERT INTO users (telefone, nome, trial_ends_at)
+         VALUES ($1, $2, NOW() + INTERVAL '7 days')
          ON CONFLICT (telefone) DO NOTHING`,
-        [message.telefone]
+        [message.telefone, newNome]
       );
     } catch (err) {
       log.error("falha ao criar usuario no onboarding", err, { telefone: message.telefone });
@@ -113,9 +119,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       // Continua no fluxo normal abaixo
     } else {
       // Guided: usuário chegou perdido ou curioso → welcome adaptado
+      const saudacao = newNome ? `Olá, ${newNome}!` : "Olá!";
       const boas_vindas = ehPergunta
         ? [
-            "Sou o Salva Bolso — registro seus gastos e te mostro para onde o dinheiro vai.",
+            `${saudacao} Sou o Salva Bolso — registro seus gastos e te mostro para onde o dinheiro vai.`,
             "",
             "Para registrar um gasto:",
             "35 uber  •  50 mercado  •  120 farmácia",
@@ -126,7 +133,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
             "Começa me mandando um gasto:",
           ].join("\n")
         : [
-            "Olá! Controlo seus gastos direto no WhatsApp.",
+            `${saudacao} Controlo seus gastos direto no WhatsApp.`,
             "",
             "Me manda um gasto para começar:",
             "Ex: 35 uber, 50 mercado",
@@ -140,6 +147,15 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
 
       return { success: false, userId: undefined, erro: "Onboarding iniciado" };
+    }
+  }
+
+  // ── Atualiza nome via pushName se mudou ──────────────────────────────────
+  if (message.pushName) {
+    const fn = firstNameOf(message.pushName);
+    if (fn && fn !== user.nome) {
+      await pool.query(`UPDATE users SET nome = $1 WHERE id = $2`, [fn, user.id]);
+      user = { ...user, nome: fn };
     }
   }
 
@@ -238,8 +254,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const count = Number(countRow.rows[0].count);
 
     if (count === 0) {
+      const fn = firstNameOf(user.nome);
       const boas_vindas = [
-        "Olá! Me manda um gasto para começar:",
+        fn ? `Olá, ${fn}! Me manda um gasto para começar:` : "Olá! Me manda um gasto para começar:",
         "Ex: 35 uber, 50 mercado, 120 farmácia",
       ].join("\n");
       try {
@@ -257,9 +274,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
 
     // Saudação social de usuário ativo → resposta natural, sem listar comandos
+    const fnAtivo = firstNameOf(user.nome);
     await whatsapp.sendText({
       to:   message.telefone,
-      text: "Olá! 👋 Me manda um gasto ou envie \"saldo\" para ver o mês.",
+      text: fnAtivo ? `Olá, ${fnAtivo}! Me manda um gasto ou envie "saldo" para ver o mês.` : `Olá! 👋 Me manda um gasto ou envie "saldo" para ver o mês.`,
     });
     return { success: false, userId: user.id, erro: "Saudacao de usuario ativo" };
   }
@@ -472,7 +490,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       log.error("falha ao verificar insights", err, { userId: user.id })
     );
     setTimeout(() => {
-      checkAndSendOnboardingTip(user.id, message.telefone, "saida").catch(err =>
+      checkAndSendOnboardingTip(user.id, message.telefone, "saida", user.nome).catch(err =>
         log.error("falha ao verificar onboarding tip", err, { userId: user.id })
       );
     }, 800);
@@ -1297,7 +1315,7 @@ const ONBOARDING_TIPS: Record<number, string> = {
   12: `📅 Use "próximas" para ver suas contas recorrentes.`,
 };
 
-async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<void> {
+async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string, nome?: string | null): Promise<void> {
   // mes_referencia fixo como sentinel de lifetime (não se repete mensalmente)
   const LIFETIME = new Date("2000-01-01");
 
@@ -1327,8 +1345,11 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
         );
         if ((inserted.rowCount ?? 0) > 0) {
           const top    = metrics.gastos_por_categoria[0];
+          const fn     = firstNameOf(nome);
           const linhas = [
-            `Você já registrou ${fmtValor(metrics.total_saidas)} este mês.`,
+            fn
+              ? `${fn}, você já registrou ${fmtValor(metrics.total_saidas)} este mês.`
+              : `Você já registrou ${fmtValor(metrics.total_saidas)} este mês.`,
             `Maior gasto: ${top.categoria}.`,
             "",
             'Envie "resumo" para ver o detalhamento.',
