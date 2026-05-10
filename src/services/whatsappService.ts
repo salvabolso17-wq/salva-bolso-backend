@@ -474,29 +474,19 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   if (parsed.tipo === "saida") {
-    checkAndSendInsights(user.id, message.telefone, parsed.categoria).catch(err =>
-      log.error("falha ao verificar insights", err, { userId: user.id })
-    );
-    setTimeout(() => {
-      checkAndSendOnboardingTip(user.id, message.telefone, "saida").catch(err =>
-        log.error("falha ao verificar onboarding tip", err, { userId: user.id })
-      );
-    }, 800);
-    setTimeout(() => {
-      sendContextualMicroInsight(user.id, message.telefone, parsed.categoria).catch(err =>
-        log.error("falha micro insight", err, { userId: user.id })
-      );
-    }, 1500);
-    setTimeout(() => {
-      checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao).catch(err =>
-        log.error("falha sugestao recorrente", err, { userId: user.id })
-      );
-    }, 2500);
-    setTimeout(() => {
-      checkAndDetectInstallment(user.id, message.telefone, parsed.descricao, message.texto, parsed.valor).catch(err =>
-        log.error("falha deteccao parcelamento", err, { userId: user.id })
-      );
-    }, 3200);
+    // Cadeia sequencial com exclusão mútua: só 1 mensagem secundária por gasto.
+    // Cada função retorna true se enviou algo — a cadeia para na primeira que disparar.
+    setTimeout(async () => {
+      try {
+        if (await checkAndSendOnboardingTip(user.id, message.telefone, "saida")) return;
+        if (await checkAndSendInsights(user.id, message.telefone, parsed.categoria)) return;
+        if (await sendContextualMicroInsight(user.id, message.telefone, parsed.categoria)) return;
+        if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao)) return;
+        await checkAndDetectInstallment(user.id, message.telefone, parsed.descricao, message.texto, parsed.valor);
+      } catch (err) {
+        log.error("falha na cadeia de insights pos-gasto", err, { userId: user.id });
+      }
+    }, 1200);
   }
 
   return {
@@ -650,11 +640,11 @@ const RECURRING_KEYWORDS = [
 ];
 
 // Detecta serviços recorrentes conhecidos na 2ª ocorrência — pergunta natural, 1x na vida
-async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string): Promise<void> {
+async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string): Promise<boolean> {
   try {
     const descLower = descricao.toLowerCase();
     const isKnown   = RECURRING_KEYWORDS.some(kw => descLower.includes(kw));
-    if (!isKnown) return;
+    if (!isKnown) return false;
 
     const now       = new Date();
     const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -666,7 +656,7 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
        AND criado_em >= $3 AND criado_em < $4`,
       [userId, descricao, inicioMes, fimMes]
     );
-    if (Number(countRow.rows[0].count) < 2) return;
+    if (Number(countRow.rows[0].count) < 2) return false;
 
     const sentinel = `rec_${descLower.replace(/\s+/g, "_").slice(0, 45)}`;
     const LIFETIME = new Date("2000-01-01");
@@ -676,15 +666,17 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
       [userId, sentinel, LIFETIME]
     );
-    if ((inserted.rowCount ?? 0) === 0) return;
+    if ((inserted.rowCount ?? 0) === 0) return false;
 
     await whatsapp.sendText({
       to:   telefone,
       text: `${capitalizeFirst(descricao)} costuma aparecer todo mês?`,
     });
     log.whatsapp("sugestao recorrente enviada", { to: telefone, userId, descricao });
+    return true;
   } catch (err) {
     log.error("falha sugestao recorrente", err, { userId });
+    return false;
   }
 }
 
@@ -701,7 +693,7 @@ const INSTALLMENT_KEYWORDS = [
 // Detecta parcelamentos explícitos (6x, parcelado, 2/10) ou compras típicas de alto valor
 async function checkAndDetectInstallment(
   userId: number, telefone: string, descricao: string, textoOriginal: string, valor: number
-): Promise<void> {
+): Promise<boolean> {
   try {
     const textoLower = textoOriginal.toLowerCase();
     const descLower  = descricao.toLowerCase();
@@ -715,7 +707,7 @@ async function checkAndDetectInstallment(
     // Sinal implícito: keyword conhecida + valor relevante
     const hasImplicit = valor > 200 && INSTALLMENT_KEYWORDS.some(kw => descLower.includes(kw));
 
-    if (!hasExplicit && !hasImplicit) return;
+    if (!hasExplicit && !hasImplicit) return false;
 
     const sentinel = `inst_${descLower.replace(/\s+/g, "_").slice(0, 45)}`;
     const LIFETIME = new Date("2000-01-01");
@@ -725,7 +717,7 @@ async function checkAndDetectInstallment(
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
       [userId, sentinel, LIFETIME]
     );
-    if ((inserted.rowCount ?? 0) === 0) return;
+    if ((inserted.rowCount ?? 0) === 0) return false;
 
     // Mensagem: ecoa número de parcelas se detectado, senão pergunta genérica
     const numParcelas = matchX ? Number(matchX[1]) : null;
@@ -735,18 +727,19 @@ async function checkAndDetectInstallment(
 
     await whatsapp.sendText({ to: telefone, text: texto });
     log.whatsapp("deteccao parcelamento enviada", { to: telefone, userId, descricao, numParcelas });
+    return true;
   } catch (err) {
     log.error("falha deteccao parcelamento", err, { userId });
+    return false;
   }
 }
 
-// Micro insight contextual — raro, leve, 100% detached do fluxo principal
-async function sendContextualMicroInsight(userId: number, telefone: string, categoria: string): Promise<void> {
+// Micro insight contextual — raro, leve, observações de hoje apenas
+async function sendContextualMicroInsight(userId: number, telefone: string, categoria: string): Promise<boolean> {
   try {
     const now         = new Date();
     const todayUTC    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const tomorrowUTC = new Date(todayUTC.getTime() + 86400000);
-    const inicioMes   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const twoMinsAgo  = new Date(now.getTime() - 120000);
     const twoHoursAgo = new Date(now.getTime() - 7200000);
 
@@ -755,14 +748,14 @@ async function sendContextualMicroInsight(userId: number, telefone: string, cate
       `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2`,
       [userId, twoMinsAgo]
     );
-    if (Number(rapidRow.rows[0].count) > 1) return;
+    if (Number(rapidRow.rows[0].count) > 1) return false;
 
     // Máx 1 micro insight por dia por usuário
     const alreadySent = await pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM sent_insights WHERE user_id = $1 AND categoria = 'micro_dia' AND mes_referencia = $2`,
       [userId, todayUTC]
     );
-    if (Number(alreadySent.rows[0].count) > 0) return;
+    if (Number(alreadySent.rows[0].count) > 0) return false;
 
     function pick(opts: string[]): string { return opts[Math.floor(Math.random() * opts.length)]; }
 
@@ -796,32 +789,7 @@ async function sendContextualMicroInsight(userId: number, telefone: string, cate
       }
     }
 
-    // Condição 3: categoria atual domina >40% do total mensal (mín R$300 no mês)
-    if (!insight) {
-      const monthRow = await pool.query<{ categoria: string; total: string; geral: string }>(
-        `SELECT categoria,
-                SUM(valor) AS total,
-                SUM(SUM(valor)) OVER () AS geral
-           FROM transactions
-          WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2
-          GROUP BY categoria
-          ORDER BY total DESC
-          LIMIT 1`,
-        [userId, inicioMes]
-      );
-      if (monthRow.rows.length > 0) {
-        const { categoria: topCat, total, geral } = monthRow.rows[0];
-        const pct = Number(total) / Number(geral);
-        if (topCat.toLowerCase() === categoria.toLowerCase() && pct > 0.40 && Number(geral) >= 300) {
-          insight = pick([
-            `Esse mês ${topCat.toLowerCase()} tá puxando bastante.`,
-            `${topCat} subiu bem esse mês.`,
-          ]);
-        }
-      }
-    }
-
-    if (!insight) return;
+    if (!insight) return false;
 
     // Registra dedup — só envia se foi o primeiro a inserir
     const ins = await pool.query(
@@ -830,12 +798,14 @@ async function sendContextualMicroInsight(userId: number, telefone: string, cate
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
       [userId, todayUTC]
     );
-    if ((ins.rowCount ?? 0) === 0) return;
+    if ((ins.rowCount ?? 0) === 0) return false;
 
     await whatsapp.sendText({ to: telefone, text: insight });
     log.whatsapp("micro insight enviado", { to: telefone, userId, insight });
+    return true;
   } catch (err) {
     log.error("falha micro insight", err, { userId });
+    return false;
   }
 }
 
@@ -1511,7 +1481,7 @@ const ONBOARDING_TIPS: Record<number, string> = {
   12: `Para ver todas as contas fixas, manda "próximas".`,
 };
 
-async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<void> {
+async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<boolean> {
   // mes_referencia fixo como sentinel de lifetime (não se repete mensalmente)
   const LIFETIME = new Date("2000-01-01");
 
@@ -1531,14 +1501,14 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
         `SELECT COUNT(DISTINCT categoria) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
         [userId]
       );
-      if (Number(catRow.rows[0].count) < 3) return; // contexto fraco → silêncio
+      if (Number(catRow.rows[0].count) < 3) return false; // contexto fraco → silêncio
 
       const now       = new Date();
       const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
       const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
       const metrics   = await fetchPeriodMetrics(userId, inicioMes, fimMes);
 
-      if (!metrics.total_saidas || !metrics.gastos_por_categoria[0]) return;
+      if (!metrics.total_saidas || !metrics.gastos_por_categoria[0]) return false;
 
       const inserted = await pool.query(
         `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
@@ -1546,7 +1516,7 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
          ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
         [userId, LIFETIME]
       );
-      if ((inserted.rowCount ?? 0) === 0) return;
+      if ((inserted.rowCount ?? 0) === 0) return false;
 
       const top   = metrics.gastos_por_categoria[0];
       const texto = [
@@ -1555,7 +1525,7 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
       ].join("\n");
       await whatsapp.sendText({ to: telefone, text: texto });
       log.whatsapp("aha moment enviado", { to: telefone, userId, totalSaidas: metrics.total_saidas });
-      return;
+      return true;
     }
   } else if (evento === "recorrente_criado") {
     tipId = 12;                    // criou recorrente → próximas
@@ -1565,10 +1535,10 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
     tipId = 11;
   }
 
-  if (tipId === null) return;
+  if (tipId === null) return false;
 
   const tipText = ONBOARDING_TIPS[tipId];
-  if (!tipText) return;
+  if (!tipText) return false;
 
   const inserted = await pool.query(
     `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
@@ -1577,34 +1547,35 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
     [userId, tipId, LIFETIME]
   );
 
-  if ((inserted.rowCount ?? 0) === 0) return;
+  if ((inserted.rowCount ?? 0) === 0) return false;
 
   await whatsapp.sendText({ to: telefone, text: tipText });
   log.whatsapp("onboarding tip enviado", { to: telefone, tipId });
+  return true;
 }
 
-async function checkAndSendInsights(userId: number, telefone: string, categoria: string): Promise<void> {
+async function checkAndSendInsights(userId: number, telefone: string, categoria: string): Promise<boolean> {
   const countRow = await pool.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
     [userId]
   );
   const insightThreshold = 10;
-  if (Number(countRow.rows[0].count) < insightThreshold) return;
+  if (Number(countRow.rows[0].count) < insightThreshold) return false;
 
   const now       = new Date();
   const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
   const metrics = await fetchPeriodMetrics(userId, inicioMes, fimMes);
-  if (metrics.total_saidas === 0) return;
+  if (metrics.total_saidas === 0) return false;
 
   const catRow = metrics.gastos_por_categoria.find(
     c => c.categoria.toLowerCase() === categoria.toLowerCase()
   );
-  if (!catRow) return;
+  if (!catRow) return false;
 
   const percentual = Math.round((catRow.total / metrics.total_saidas) * 100);
-  if (percentual < 50) return;
+  if (percentual < 50) return false;
 
   const marco  = 50;
   const mesRef = inicioMes;
@@ -1616,7 +1587,7 @@ async function checkAndSendInsights(userId: number, telefone: string, categoria:
     [userId, categoria, marco, mesRef]
   );
 
-  if ((inserted.rowCount ?? 0) === 0) return;
+  if ((inserted.rowCount ?? 0) === 0) return false;
 
   await whatsapp.sendText({
     to:   telefone,
@@ -1624,6 +1595,7 @@ async function checkAndSendInsights(userId: number, telefone: string, categoria:
   });
 
   log.whatsapp("insight enviado", { to: telefone, categoria, percentual, marco });
+  return true;
 }
 
 async function handlePrevisaoCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
