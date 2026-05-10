@@ -5,7 +5,7 @@ import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
-import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep, canSendInsight, recordInsightSent, setLastCommand } from "./conversationEngine";
+import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep, canSendInsight, recordInsightSent, setLastCommand, setLastInstallment, getLastInstallment } from "./conversationEngine";
 
 function firstNameOf(rawName?: string | null): string | null {
   if (!rawName) return null;
@@ -415,10 +415,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       await whatsapp.sendText({
         to:   message.telefone,
         text: [
-          "Registre cada parcela assim:",
-          "120 parcela tv  •  80 parcela notebook",
+          "Pode registrar assim:",
           "",
-          "\"buscar parcela\" mostra tudo registrado 🔍",
+          "iphone 12x de 755",
+          "tv 6x 300",
+          "notebook 24 parcelas de 450",
+          "",
+          "Eu organizo o resto 🙂",
         ].join("\n"),
       });
     } catch (err) {
@@ -490,6 +493,34 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handleExtratoCommand(user, message.telefone, message.texto.trim());
   }
 
+  // ── Progresso de parcela: "já paguei 4 de 12" ────────────────────────────
+  {
+    const pm = message.texto.trim().match(/^(?:j[aá]\s+)?paguei\s+(\d+)\s+de\s+(\d+)[\?!.]*$/i);
+    if (pm) {
+      const pago  = parseInt(pm[1], 10);
+      const total = parseInt(pm[2], 10);
+      const inst  = getLastInstallment(user.id);
+      let txt: string;
+
+      if (inst && inst.totalParcelas === total) {
+        const faltam = total - pago;
+        txt = faltam > 0
+          ? `Certo 🙂\n${inst.item} — ${pago} de ${total} pagas.\nFaltam ${faltam} parcelas de ${fmtValor(inst.valor)}.`
+          : `Ótimo 🙂\n${inst.item} — quitado!`;
+        setLastInstallment(user.id, { ...inst, parcelaAtual: pago + 1 });
+      } else {
+        txt = `Certo 🙂\n${pago} de ${total} pagas.`;
+      }
+
+      try {
+        await whatsapp.sendText({ to: message.telefone, text: txt });
+      } catch (err) {
+        log.error("falha ao enviar progresso parcela", err, { to: message.telefone });
+      }
+      return { success: false, userId: user.id, erro: "progresso parcela" };
+    }
+  }
+
   // ── Interpretação conversacional ─────────────────────────────────────────
   const intentResult = await tryHandleIntent(user, message.telefone, message.texto);
   if (intentResult !== null) return intentResult;
@@ -519,6 +550,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   log.parser("analisando", { texto: textoParsear });
+
+  // Installment pattern takes priority over generic parser
+  const installment = detectInstallment(textoParsear);
+  if (installment) {
+    return await handleInstallmentRegistration(user, message.telefone, installment);
+  }
 
   const parsed = parseTransaction(textoParsear);
 
@@ -2743,6 +2780,114 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   }
 
   return null;
+}
+
+// ── Installment parser ────────────────────────────────────────────────────────
+
+interface InstallmentInfo {
+  item:          string;
+  valor:         number;
+  totalParcelas: number;
+}
+
+function detectInstallment(texto: string): InstallmentInfo | null {
+  const t = texto.trim();
+
+  // "iphone 12x de 755" or "tv 10x 230" (with optional "de")
+  let m = t.match(/^(.+?)\s+(\d{1,2})\s*[xX]\s+(?:de\s+)?([\d,.]+)$/i);
+  if (m) {
+    const item          = m[1].trim();
+    const totalParcelas = parseInt(m[2], 10);
+    const valor         = parseFloat(m[3].replace(",", "."));
+    if (!(/^\d/.test(item)) && item.length >= 2 && totalParcelas >= 2 && totalParcelas <= 72 && valor > 0) {
+      return { item, valor, totalParcelas };
+    }
+  }
+
+  // "celular 12 parcelas de 300"
+  m = t.match(/^(.+?)\s+(\d{1,2})\s+parcelas?\s+de\s+([\d,.]+)$/i);
+  if (m) {
+    const item          = m[1].trim();
+    const totalParcelas = parseInt(m[2], 10);
+    const valor         = parseFloat(m[3].replace(",", "."));
+    if (!(/^\d/.test(item)) && item.length >= 2 && totalParcelas >= 2 && totalParcelas <= 72 && valor > 0) {
+      return { item, valor, totalParcelas };
+    }
+  }
+
+  return null;
+}
+
+async function handleInstallmentRegistration(
+  user: UserRow,
+  telefone: string,
+  info: InstallmentInfo,
+): Promise<ProcessResult> {
+  const { item, valor, totalParcelas } = info;
+
+  // Infer category by re-using existing parser on "valor item"
+  const tempParsed = parseTransaction(`${valor} ${item}`);
+  const categoria  = tempParsed?.categoria ?? "Outros";
+  const descricao  = capitalizeFirst(item);
+
+  log.parser("parcela detectada", { item, valor, totalParcelas, categoria });
+
+  // Save as expense transaction
+  let transacaoRow: Record<string, unknown>;
+  try {
+    const result = await pool.query(
+      `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+       VALUES ($1, 'saida', $2, $3, $4)
+       RETURNING *`,
+      [user.id, valor, categoria, descricao]
+    );
+    transacaoRow = result.rows[0] as Record<string, unknown>;
+    recordAction(user.id, "registered_transaction");
+    setLastInstallment(user.id, { item: descricao, valor, totalParcelas, parcelaAtual: 1 });
+    log.db("parcela salva", { id: transacaoRow.id, user_id: user.id });
+  } catch (err) {
+    log.error("falha ao salvar parcela", err, { user_id: user.id });
+    return { success: false, userId: user.id, erro: "Erro ao salvar parcela" };
+  }
+
+  // Check limit alert
+  const aviso = await checkLimiteCategoria(user.id, categoria).catch(() => null);
+
+  // Natural confirmation with installment context
+  const total  = valor * totalParcelas;
+  const linhas = [
+    `✅ ${fmtValor(valor)} — ${descricao}`,
+    ``,
+    `${totalParcelas} parcelas de ${fmtValor(valor)}`,
+    `Total: ${fmtValor(total)}`,
+  ];
+  if (aviso) linhas.push("", aviso);
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("parcela confirmada", { to: telefone, userId: user.id, item, valor, totalParcelas });
+  } catch (err) {
+    log.error("falha ao confirmar parcela", err, { to: telefone });
+  }
+
+  // Insight chain (same gates as regular expenses)
+  setTimeout(async () => {
+    try {
+      if (!canSendInsight(user.id)) return;
+      if (await checkAndSendOnboardingTip(user.id, telefone, "saida")) { recordInsightSent(user.id); return; }
+      if (await checkAndSendInsights(user.id, telefone, categoria))    { recordInsightSent(user.id); return; }
+      if (await checkAndSendSmartInsights(user.id, telefone, descricao, categoria)) { recordInsightSent(user.id); return; }
+    } catch (err) {
+      log.error("falha no insight chain (parcela)", err, { userId: user.id });
+    }
+  }, 1200);
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    transacaoRow,
+    interpretado: { tipo: "parcela", item: descricao, valor, totalParcelas },
+  };
 }
 
 // Detecta frases conversacionais/de intenção que NÃO devem virar lançamento automático

@@ -28,6 +28,13 @@ export type ConversationPhase =
 
 // ── Session context ───────────────────────────────────────────────────────────
 
+export interface InstallmentCtx {
+  item: string;
+  valor: number;
+  totalParcelas: number;
+  parcelaAtual: number;
+}
+
 export interface SessionCtx {
   userId: number;
   txCount: number;            // transactions registered this session
@@ -35,6 +42,7 @@ export interface SessionCtx {
   lastInsightAt: Date | null; // last time we sent a secondary message
   lastAction: string;
   lastCommand: string;        // last command/view shown, for follow-up disambiguation
+  lastInstallment: InstallmentCtx | null; // last installment registered, for "já paguei X de Y"
   recentActions: string[];    // last 10 distinct actions, most recent first
   phase: ConversationPhase;
   sessionStart: Date;
@@ -67,6 +75,7 @@ export function initSession(userId: number): SessionCtx {
     lastInsightAt: null,
     lastAction: "",
     lastCommand: "",
+    lastInstallment: null,
     recentActions: [],
     phase: "onboarding",
     sessionStart: new Date(),
@@ -209,6 +218,19 @@ export function setLastCommand(userId: number, command: string): void {
   if (!session || isExpired(session)) return;
   session.lastCommand = command;
   session.updatedAt   = new Date();
+}
+
+export function setLastInstallment(userId: number, info: InstallmentCtx): void {
+  const session = SESSIONS.get(userId);
+  if (!session || isExpired(session)) return;
+  session.lastInstallment = info;
+  session.updatedAt       = new Date();
+}
+
+export function getLastInstallment(userId: number): InstallmentCtx | null {
+  const session = SESSIONS.get(userId);
+  if (!session || isExpired(session)) return null;
+  return session.lastInstallment;
 }
 
 // ── Intent classifier ─────────────────────────────────────────────────────────
