@@ -304,13 +304,15 @@ const NOME_CORRECTIONS: [RegExp, string][] = [
 ];
 
 // Strip verbo + preposição de frases naturais: "gastei 60 com uber" → "uber"
-const VERB_PREFIX_RE  = /^(gastei|gastou|gastamos|gasto|gasta|paguei|pagou|pagamos|pago|paga|foi|fui|saiu|custou|custa|comprei|comprou|compramos|tomei|tomou|tomamos|usei|usou|usamos|rodei|tirei|tirou|tiramos|fiz|fez|fizemos|botei|botou|botamos)\s+/i;
-const PREP_PREFIX_RE  = /^(com|no|na|nos|nas|de|da|do|em|pro|pra|pras|pros|para|num|numa|ao|aos|pelo|pela|pelos|pelas|um|uma|o|a)\s+/i;
+const VERB_PREFIX_RE    = /^(gastei|gastou|gastamos|gasto|gasta|paguei|pagou|pagamos|pago|paga|foi|fui|saiu|custou|custa|comprei|comprou|compramos|tomei|tomou|tomamos|usei|usou|usamos|rodei|tirei|tirou|tiramos|fiz|fez|fizemos|botei|botou|botamos)\s+/i;
+const PREP_PREFIX_RE    = /^(com|no|na|nos|nas|de|da|do|em|pro|pra|pras|pros|para|num|numa|ao|aos|pelo|pela|pelos|pelas|um|uma|o|a)\s+/i;
+const MODIFIER_PREP_RE  = /^(comida|refeição|refeicao|bebida|lanche|produto|serviço|servico|gasto|compra|conta)\s+(no|na|nos|nas|de|da|do|em|pro|pra|para|com|ao)\s+/i;
 
 function cleanDescricao(raw: string): string {
   let d = raw.trim();
-  d = d.replace(VERB_PREFIX_RE, "").trim();   // remove verbo inicial
-  d = d.replace(PREP_PREFIX_RE, "").trim();   // remove preposição/artigo inicial
+  d = d.replace(VERB_PREFIX_RE, "").trim();    // remove verbo inicial
+  d = d.replace(PREP_PREFIX_RE, "").trim();    // remove preposição/artigo inicial
+  d = d.replace(MODIFIER_PREP_RE, "").trim();  // "comida no X" → "X"
   return d || raw.trim();
 }
 

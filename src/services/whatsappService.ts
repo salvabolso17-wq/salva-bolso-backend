@@ -518,12 +518,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
-  const PREFIXOS_CONFIRMACAO = ["Anotado", "Registrado", "Salvo", "Organizado"];
-  const prefixo = PREFIXOS_CONFIRMACAO[Math.floor(Math.random() * PREFIXOS_CONFIRMACAO.length)];
-
   const linhasConfirmacao = parsed.tipo === "entrada"
-    ? [`💰 ${fmtValor(parsed.valor)} registrado`]
-    : [`✅ ${prefixo}: ${fmtValor(parsed.valor)} — ${capitalizeFirst(parsed.descricao)}`];
+    ? [`💰 ${fmtValor(parsed.valor)} — ${capitalizeFirst(parsed.descricao)}`]
+    : [`✅ ${fmtValor(parsed.valor)} — ${capitalizeFirst(parsed.descricao)}`];
 
   if (parsed.tipo === "saida") {
     const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
@@ -747,7 +744,7 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
 
       await whatsapp.sendText({
         to:   telefone,
-        text: `Esse gasto costuma ser mensal? Posso acompanhar automaticamente 🔁`,
+        text: `Isso acontece todo mês? 🔁`,
       });
       await pool.query(
         `INSERT INTO pending_actions (user_id, action, step, tx_ids)
@@ -785,7 +782,7 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
     const nome = capitalizeFirst(descricao);
     await whatsapp.sendText({
       to:   telefone,
-      text: `Percebi que ${nome} aparece todo mês 🙂 Quer acompanhar automaticamente?`,
+      text: `Percebi que ${nome} aparece todo mês. Isso é recorrente? 🔁`,
     });
     await pool.query(
       `INSERT INTO pending_actions (user_id, action, step, tx_ids)
@@ -817,7 +814,7 @@ async function handleConfirmarRecorrente(user: UserRow, telefone: string, txIds:
     const nome = capitalizeFirst(data.nome);
     await whatsapp.sendText({
       to:   telefone,
-      text: `Beleza 🙂\n\n${nome} foi adicionado aos seus recorrentes.\nTodo mês eu acompanho automaticamente.`,
+      text: `Perfeito 🙂\nVou acompanhar ${nome} automaticamente.`,
     });
     log.whatsapp("recorrente confirmado pelo usuario", { to: telefone, userId: user.id, nome: data.nome });
     return { success: false, userId: user.id, erro: "Recorrente confirmado" };
@@ -1325,7 +1322,7 @@ async function handleGuardarCommand(user: UserRow, telefone: string, texto: stri
 
   const match = texto.match(/^guardar\s+([\d,.]+)\s+(.+)$/i);
   if (!match) {
-    await whatsapp.sendText({ to: telefone, text: "💡 Ex:\nguardar 200 viagem" });
+    await whatsapp.sendText({ to: telefone, text: "Quando quiser adicionar dinheiro, pode falar algo como:\nguardar 200 na meta viagem 🎯" });
     return { success: false, userId: user.id, erro: "Formato inválido" };
   }
 
@@ -2197,12 +2194,13 @@ function buildFeaturesMenuText(): string {
     "",
     "📊 saldo",
     "🧾 resumo",
-    "📈 ranking",
-    "📅 previsão",
+    "📈 ranking · previsão",
+    "",
     "🔁 recorrentes",
+    "🎯 metas",
+    "",
     "✏️ corrigir · apagar",
     "📚 buscar · extrato",
-    "🎯 metas",
     "",
     "Pode me perguntar do seu jeito 🙂",
   ].join("\n");
@@ -2246,7 +2244,7 @@ async function handleSpendingConcern(user: UserRow, telefone: string): Promise<P
   return { success: false, userId: user.id, erro: "spending_concern tratado" };
 }
 
-// Responde "e agora?" com dado real ou orientação mínima
+// Responde "e agora?" / "o que mais posso fazer?" com contexto real do usuário
 async function handleNextStepSuggestion(user: UserRow, telefone: string): Promise<ProcessResult> {
   const countRow = await pool.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
@@ -2256,20 +2254,20 @@ async function handleNextStepSuggestion(user: UserRow, telefone: string): Promis
 
   let text: string;
   if (count === 0) {
-    text = "Começa mandando um gasto:\n35 uber, 50 mercado 📝";
-  } else if (count <= 3) {
-    text = 'Continue registrando. Quando quiser ver o mês, manda "saldo".';
+    text = "Me manda um gasto para começar 📝\nEx: 50 mercado";
+  } else if (count <= 4) {
+    text = "Continue registrando 🙂 Com mais gastos, consigo mostrar padrões e insights.";
   } else {
-    const now       = new Date();
-    const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-    const metrics   = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
-    if (metrics.total_saidas > 0 && metrics.gastos_por_categoria.length > 0) {
-      const top = metrics.gastos_por_categoria[0];
-      text = `${fmtValor(metrics.total_saidas)} gastos esse mês. Maior: ${top.categoria}.`;
-    } else {
-      text = '"saldo" mostra como o mês tá ficando.';
-    }
+    // Usuário ativo: mostra funcionalidades que pode não ter descoberto ainda
+    const dicas = [
+      "Você pode criar metas para objetivos 🎯\nEx: meta viagem 3000",
+      "\"ranking\" mostra onde vai mais o seu dinheiro no mês 📊",
+      "\"previsão\" estima como o mês vai fechar com base no ritmo atual 📈",
+      "Pode definir limites por categoria e eu aviso quando passar 🔔\nEx: limite alimentação 500",
+      "\"recorrentes\" organiza suas contas fixas automaticamente 🔁",
+      "\"semana\" mostra os gastos dos últimos 7 dias por categoria 📅",
+    ];
+    text = dicas[user.id % dicas.length];
   }
 
   try {
