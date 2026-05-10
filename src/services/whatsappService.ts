@@ -493,23 +493,50 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handleExtratoCommand(user, message.telefone, message.texto.trim());
   }
 
-  // ── Progresso de parcela: "já paguei 4 de 12" ────────────────────────────
+  // ── Progresso de parcela ─────────────────────────────────────────────────
+  // "já paguei 4 de 12"  — pago + total explícitos
+  // "já paguei 5 parcelas" — pago explícito, total vem do lastInstallment
   {
-    const pm = message.texto.trim().match(/^(?:j[aá]\s+)?paguei\s+(\d+)\s+de\s+(\d+)[\?!.]*$/i);
-    if (pm) {
-      const pago  = parseInt(pm[1], 10);
-      const total = parseInt(pm[2], 10);
-      const inst  = getLastInstallment(user.id);
+    const t = message.texto.trim();
+
+    // Padrão 1: "já paguei X de Y"
+    const pmFull = t.match(/^(?:j[aá]\s+)?paguei\s+(\d+)\s+de\s+(\d+)[\?!.]*$/i);
+
+    // Padrão 2: "já paguei X parcela(s)" — usa lastInstallment para o total
+    const pmCount = !pmFull
+      ? t.match(/^(?:j[aá]\s+)?paguei\s+(\d+)\s+parcelas?[\?!.]*$/i)
+      : null;
+
+    if (pmFull || pmCount) {
+      const inst = getLastInstallment(user.id);
       let txt: string;
 
-      if (inst && inst.totalParcelas === total) {
-        const faltam = total - pago;
-        txt = faltam > 0
-          ? `Certo 🙂\n${inst.item} — ${pago} de ${total} pagas.\nFaltam ${faltam} parcelas de ${fmtValor(inst.valor)}.`
-          : `Ótimo 🙂\n${inst.item} — quitado!`;
-        setLastInstallment(user.id, { ...inst, parcelaAtual: pago + 1 });
+      if (pmFull) {
+        const pago  = parseInt(pmFull[1], 10);
+        const total = parseInt(pmFull[2], 10);
+
+        if (inst && inst.totalParcelas === total) {
+          const faltam = total - pago;
+          txt = faltam > 0
+            ? `Perfeito 🙂\nFaltam ${faltam} parcelas da ${inst.item}.`
+            : `Ótimo 🙂\n${inst.item} — quitado!`;
+          setLastInstallment(user.id, { ...inst, parcelaAtual: pago + 1 });
+        } else {
+          txt = `Certo 🙂\n${pago} de ${total} pagas.`;
+        }
       } else {
-        txt = `Certo 🙂\n${pago} de ${total} pagas.`;
+        // pmCount: total vem do lastInstallment
+        const pago = parseInt(pmCount![1], 10);
+
+        if (inst) {
+          const faltam = inst.totalParcelas - pago;
+          txt = faltam > 0
+            ? `Perfeito 🙂\nFaltam ${faltam} parcelas da ${inst.item}.`
+            : `Ótimo 🙂\n${inst.item} — quitado!`;
+          setLastInstallment(user.id, { ...inst, parcelaAtual: pago + 1 });
+        } else {
+          txt = `De qual compra? Me manda assim:\ntv 12x de 230`;
+        }
       }
 
       try {
