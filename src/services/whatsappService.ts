@@ -3020,32 +3020,24 @@ async function handleAddToGoal(
       return { success: false, userId: user.id, erro: "Meta não encontrada" };
     }
   } else {
-    // Try lastGoal first
-    const last = getLastGoal(user.id);
-    if (last) {
-      const r = await pool.query<GoalRow>(
-        `SELECT nome, valor_meta, valor_atual FROM user_goals WHERE user_id = $1 AND LOWER(nome) = LOWER($2) LIMIT 1`,
-        [user.id, last.nome]
-      );
-      goalRow = r.rows[0] ?? null;
+    // No name given — check how many goals the user has before assuming anything
+    const r = await pool.query<GoalRow>(
+      `SELECT nome, valor_meta, valor_atual FROM user_goals WHERE user_id = $1 ORDER BY criado_em ASC`,
+      [user.id]
+    );
+
+    if (r.rows.length === 0) {
+      await whatsapp.sendText({ to: telefone, text: `Você não tem metas ainda.\nCrie assim: meta viagem 5000 🎯` });
+      return { success: false, userId: user.id, erro: "Sem metas" };
     }
 
-    if (!goalRow) {
-      const r = await pool.query<GoalRow>(
-        `SELECT nome, valor_meta, valor_atual FROM user_goals WHERE user_id = $1 ORDER BY criado_em ASC`,
-        [user.id]
-      );
-      if (r.rows.length === 0) {
-        await whatsapp.sendText({ to: telefone, text: `Você não tem metas ainda.\nCrie assim: meta viagem 5000 🎯` });
-        return { success: false, userId: user.id, erro: "Sem metas" };
-      }
-      if (r.rows.length === 1) {
-        goalRow = r.rows[0];
-      } else {
-        const lista = r.rows.map(row => `• ${row.nome}`).join("\n");
-        await whatsapp.sendText({ to: telefone, text: `Para qual meta?\n${lista}\n\nEx: guardar ${Math.round(valor)} ${r.rows[0].nome.toLowerCase()}` });
-        return { success: false, userId: user.id, erro: "ambiguous goal" };
-      }
+    if (r.rows.length === 1) {
+      goalRow = r.rows[0];
+    } else {
+      // Multiple goals — always ask to avoid adding to the wrong one
+      const lista = r.rows.map(row => `• ${row.nome}`).join("\n");
+      await whatsapp.sendText({ to: telefone, text: `Para qual meta?\n${lista}\n\nEx: guardar ${Math.round(valor)} ${r.rows[0].nome.toLowerCase()}` });
+      return { success: false, userId: user.id, erro: "ambiguous goal" };
     }
   }
 
