@@ -603,6 +603,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         if (await checkAndSendInsights(user.id, message.telefone, parsed.categoria)) {
           recordInsightSent(user.id); return;
         }
+        if (await checkAndSendSmartInsights(user.id, message.telefone, parsed.descricao, parsed.categoria)) {
+          recordInsightSent(user.id); return;
+        }
         if (await sendContextualMicroInsight(user.id, message.telefone, parsed.categoria)) {
           recordInsightSent(user.id); return;
         }
@@ -1803,6 +1806,141 @@ async function checkAndSendInsights(userId: number, telefone: string, categoria:
   await whatsapp.sendText({ to: telefone, text: insightTexto });
   log.whatsapp("insight enviado", { to: telefone, categoria, percentual, marco });
   return true;
+}
+
+// Insights inteligentes baseados em comparação de períodos e padrões de frequência
+async function checkAndSendSmartInsights(
+  userId: number,
+  telefone: string,
+  descricao: string,
+  categoria: string,
+): Promise<boolean> {
+  try {
+    const now     = new Date();
+    const ano     = now.getUTCFullYear();
+    const mes     = now.getUTCMonth();
+    const dia     = now.getUTCDate();
+    const LIFETIME = new Date("2000-01-01");
+
+    const inicioMesAtual       = new Date(Date.UTC(ano, mes, 1));
+    const inicioMesAnterior    = new Date(Date.UTC(ano, mes - 1, 1));
+    const mesmoPeriodoAnterior = new Date(Date.UTC(ano, mes - 1, dia));
+
+    // Precisa de ao menos 5 saídas para comparações fazerem sentido
+    const totalRow = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+      [userId]
+    );
+    if (Number(totalRow.rows[0].count) < 5) return false;
+
+    function pick(arr: string[]): string { return arr[Math.floor(Math.random() * arr.length)]; }
+
+    async function tryInsight(sentinel: string, mesRef: Date, texto: string): Promise<boolean> {
+      const ins = await pool.query(
+        `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+         VALUES ($1, $2, 1, $3)
+         ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+        [userId, sentinel, mesRef]
+      );
+      if ((ins.rowCount ?? 0) === 0) return false;
+      await whatsapp.sendText({ to: telefone, text: texto });
+      log.whatsapp("smart insight enviado", { to: telefone, userId, sentinel });
+      return true;
+    }
+
+    // ── 1. Frequência: mesma descrição 3+ vezes nos últimos 30 dias ──────────
+    const descNorm = descricao.toLowerCase().trim();
+    const freqRow  = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions
+       WHERE user_id = $1 AND tipo = 'saida' AND LOWER(descricao) = $2
+         AND criado_em >= NOW() - INTERVAL '30 days'`,
+      [userId, descNorm]
+    );
+    if (Number(freqRow.rows[0].count) >= 3) {
+      const jaRec = await pool.query(
+        `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(nome) = $2 AND ativo = TRUE LIMIT 1`,
+        [userId, descNorm]
+      );
+      if (jaRec.rows.length === 0) {
+        const sentinel = `smart_freq_${descNorm.replace(/\W+/g, "_").slice(0, 40)}`;
+        const texto = `${capitalizeFirst(descricao)} aparece bastante nos seus gastos recentes.`;
+        if (await tryInsight(sentinel, inicioMesAtual, texto)) return true;
+      }
+    }
+
+    // ── 2–5. Comparação de períodos — só a partir do dia 5 do mês ────────────
+    if (dia < 5) return false;
+
+    const [curRow, prevRow, catCurRow, catPrevRow] = await Promise.all([
+      pool.query<{ total: string }>(
+        `SELECT COALESCE(SUM(valor), 0) AS total FROM transactions
+         WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2`,
+        [userId, inicioMesAtual]
+      ),
+      pool.query<{ total: string }>(
+        `SELECT COALESCE(SUM(valor), 0) AS total FROM transactions
+         WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2 AND criado_em < $3`,
+        [userId, inicioMesAnterior, mesmoPeriodoAnterior]
+      ),
+      pool.query<{ total: string }>(
+        `SELECT COALESCE(SUM(valor), 0) AS total FROM transactions
+         WHERE user_id = $1 AND tipo = 'saida' AND LOWER(categoria) = LOWER($2) AND criado_em >= $3`,
+        [userId, categoria, inicioMesAtual]
+      ),
+      pool.query<{ total: string }>(
+        `SELECT COALESCE(SUM(valor), 0) AS total FROM transactions
+         WHERE user_id = $1 AND tipo = 'saida' AND LOWER(categoria) = LOWER($2)
+           AND criado_em >= $3 AND criado_em < $4`,
+        [userId, categoria, inicioMesAnterior, mesmoPeriodoAnterior]
+      ),
+    ]);
+
+    const spendAtual    = Number(curRow.rows[0].total);
+    const spendAnterior = Number(prevRow.rows[0].total);
+    const catAtual      = Number(catCurRow.rows[0].total);
+    const catAnterior   = Number(catPrevRow.rows[0].total);
+
+    // ── 2. Mês mais pesado ────────────────────────────────────────────────────
+    if (spendAnterior > 80 && spendAtual > spendAnterior * 1.25) {
+      const sentinel = `smart_mes_alto_${mes}_${ano}`;
+      const texto = pick([
+        "Esse mês está mais pesado que o anterior até aqui.",
+        "Esse mês está mais apertado que o anterior.",
+      ]);
+      if (await tryInsight(sentinel, inicioMesAtual, texto)) return true;
+    }
+
+    // ── 3. Mês mais leve ──────────────────────────────────────────────────────
+    if (spendAnterior > 80 && spendAtual > 20 && spendAtual < spendAnterior * 0.75) {
+      const sentinel = `smart_mes_baixo_${mes}_${ano}`;
+      const texto = "Esse mês você está gastando menos que no anterior 🙂";
+      if (await tryInsight(sentinel, inicioMesAtual, texto)) return true;
+    }
+
+    // ── 4. Categoria subindo ──────────────────────────────────────────────────
+    if (catAnterior > 40 && catAtual > catAnterior * 1.35) {
+      const catKey   = categoria.replace(/\s+/g, "_").toLowerCase().slice(0, 30);
+      const sentinel = `smart_cat_alta_${catKey}_${mes}_${ano}`;
+      const texto    = `${categoria} está mais alto esse mês em comparação ao anterior.`;
+      if (await tryInsight(sentinel, inicioMesAtual, texto)) return true;
+    }
+
+    // ── 5. Categoria melhorando ───────────────────────────────────────────────
+    if (catAnterior > 40 && catAtual > 0 && catAtual < catAnterior * 0.65) {
+      const catKey   = categoria.replace(/\s+/g, "_").toLowerCase().slice(0, 30);
+      const sentinel = `smart_cat_baixa_${catKey}_${mes}_${ano}`;
+      const texto    = pick([
+        `Esse mês você gastou menos com ${categoria.toLowerCase()} 🙂`,
+        `${categoria} mais controlado esse mês 🙂`,
+      ]);
+      if (await tryInsight(sentinel, inicioMesAtual, texto)) return true;
+    }
+
+    return false;
+  } catch (err) {
+    log.error("falha smart insights", err, { userId });
+    return false;
+  }
 }
 
 async function handlePrevisaoCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
