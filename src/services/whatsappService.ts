@@ -6,6 +6,12 @@ import { log } from "../utils/logger";
 import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
 
+function firstNameOf(rawName?: string | null): string | null {
+  if (!rawName) return null;
+  const token = rawName.trim().split(/\s+/)[0];
+  return /[a-zA-ZÀ-ÿ]/.test(token) ? token : null;
+}
+
 interface UserRow {
   id: number;
   telefone: string;
@@ -90,12 +96,22 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
 
     try {
-      await pool.query(
-        `INSERT INTO users (telefone, trial_ends_at)
-         VALUES ($1, NOW() + INTERVAL '7 days')
-         ON CONFLICT (telefone) DO NOTHING`,
-        [message.telefone]
-      );
+      const nomeNovo = firstNameOf(message.pushName);
+      if (nomeNovo) {
+        await pool.query(
+          `INSERT INTO users (telefone, nome, trial_ends_at)
+           VALUES ($1, $2, NOW() + INTERVAL '7 days')
+           ON CONFLICT (telefone) DO UPDATE SET nome = $2 WHERE users.nome IS DISTINCT FROM $2`,
+          [message.telefone, nomeNovo]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO users (telefone, trial_ends_at)
+           VALUES ($1, NOW() + INTERVAL '7 days')
+           ON CONFLICT (telefone) DO NOTHING`,
+          [message.telefone]
+        );
+      }
     } catch (err) {
       log.error("falha ao criar usuario no onboarding", err, { telefone: message.telefone });
       return { success: false, erro: "Erro ao criar usuário" };
@@ -113,16 +129,21 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       // Continua no fluxo normal abaixo
     } else {
       // Guided: usuário chegou perdido ou curioso → welcome adaptado
-      const boas_vindas = ehPergunta
-        ? [
-            "Registro seus gastos e te mostro para onde o dinheiro vai.",
-            "Me manda um valor: 35 uber, 50 mercado",
-            "Para consultar: saldo ou resumo",
-          ].join("\n")
-        : [
-            "Olá! Me manda um gasto para começar — eu categorizo e registro.",
-            "35 uber  •  50 mercado  •  120 farmácia",
-          ].join("\n");
+      const nome       = firstNameOf(message.pushName);
+      const saudacao   = nome ? `Olá, ${nome} 👋` : `Olá 👋`;
+      const corpoLinha = ehPergunta
+        ? "Registro seus gastos aqui e organizo tudo — sem app, sem planilha."
+        : "Pode me mandar seus gastos por aqui mesmo.";
+      const boas_vindas = [
+        saudacao,
+        "",
+        corpoLinha,
+        "Tipo:",
+        "",
+        "35 uber  •  50 mercado  •  120 farmácia",
+        "",
+        "Que eu vou organizando tudo pra você 📝",
+      ].join("\n");
 
       try {
         await whatsapp.sendText({ to: message.telefone, text: boas_vindas });

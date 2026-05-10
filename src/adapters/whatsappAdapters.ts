@@ -3,6 +3,7 @@ export interface NormalizedMessage {
   texto: string;
   messageId: string;
   provider: string;
+  pushName?: string;
 }
 
 // Meta WhatsApp Cloud API
@@ -53,7 +54,10 @@ function parseEvolution(body: Record<string, unknown>): NormalizedMessage | null
 
     if (!telefone || !texto) return null;
 
-    return { telefone, texto, messageId: key?.id ?? "", provider: "evolution" };
+    const rawPushName = data?.pushName as string | undefined;
+    const pushName = rawPushName && /[a-zA-ZÀ-ÿ]/.test(rawPushName) ? rawPushName.trim() : undefined;
+
+    return { telefone, texto, messageId: key?.id ?? "", provider: "evolution", pushName };
   } catch {
     return null;
   }
