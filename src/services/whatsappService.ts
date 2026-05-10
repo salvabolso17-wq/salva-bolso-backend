@@ -677,39 +677,73 @@ function capitalizeFirst(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-const RECURRING_KEYWORDS = [
-  "netflix", "spotify", "disney", "prime", "youtube", "globoplay", "hbo",
-  "paramount", "deezer", "apple", "icloud",
-  "academia", "gym", "pilates", "natacao",
-  "aluguel", "condominio", "internet", "banda larga",
-  "luz", "energia", "água", "agua", "gas",
+// Serviços de alta confiança: pergunta na 1ª ocorrência ─────────────────────
+const RECURRING_OBVIOUS_KEYWORDS = [
+  // Streaming e assinaturas digitais
+  "netflix", "spotify", "disney", "amazon prime", "prime video", "hbo",
+  "globoplay", "paramount", "crunchyroll", "apple tv", "youtube premium",
+  "deezer", "apple music", "chatgpt", "canva", "dropbox", "icloud",
+  // Fitness
+  "academia", "pilates", "natação", "natacao", "yoga", "crossfit",
+  // Moradia
+  "aluguel", "condomínio", "condominio",
+  // Serviços fixos
+  "internet", "banda larga",
+  "energia", "conta de luz", "conta de água",
+  "gás", "gas encanado",
+  // Educação
   "faculdade", "escola", "mensalidade",
-  "seguro", "financiamento",
-  "assinatura", "plano",
-  "canva", "chatgpt", "openai", "dropbox", "amazon",
+  // Financeiro
+  "financiamento", "seguro", "plano de saúde", "plano de saude",
 ];
 
-// Detecta serviços recorrentes conhecidos na 2ª ocorrência — pergunta natural, 1x na vida
+// Detecta recorrentes por alta confiança (1ª ocorrência) ou por padrão histórico (2+ meses)
 async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string): Promise<boolean> {
   try {
-    const descLower = descricao.toLowerCase();
-    const isKnown   = RECURRING_KEYWORDS.some(kw => descLower.includes(kw));
-    if (!isKnown) return false;
-
-    const now       = new Date();
-    const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-
-    const countRow = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM transactions
-       WHERE user_id = $1 AND tipo = 'saida' AND LOWER(descricao) = LOWER($2)
-       AND criado_em >= $3 AND criado_em < $4`,
-      [userId, descricao, inicioMes, fimMes]
-    );
-    if (Number(countRow.rows[0].count) < 2) return false;
-
-    const sentinel = `rec_${descLower.replace(/\s+/g, "_").slice(0, 45)}`;
+    const descNorm = descricao.toLowerCase().trim();
     const LIFETIME = new Date("2000-01-01");
+    const sentinel = `rec_suggest_${descNorm.replace(/\s+/g, "_").slice(0, 40)}`;
+
+    // Não sugerir se já é recorrente cadastrado
+    const jaRecorrente = await pool.query(
+      `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(nome) = $2 LIMIT 1`,
+      [userId, descNorm]
+    );
+    if (jaRecorrente.rows.length > 0) return false;
+
+    // ── Strategy A: serviço óbvio → pergunta na 1ª ocorrência ────────────────
+    const isObvious = RECURRING_OBVIOUS_KEYWORDS.some(kw => descNorm.includes(kw));
+
+    if (isObvious) {
+      const inserted = await pool.query(
+        `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+         VALUES ($1, $2, 1, $3)
+         ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+        [userId, sentinel, LIFETIME]
+      );
+      if ((inserted.rowCount ?? 0) === 0) return false;
+
+      await whatsapp.sendText({
+        to:   telefone,
+        text: `Esse gasto costuma ser mensal? Posso acompanhar automaticamente 🔁`,
+      });
+      log.whatsapp("sugestao recorrente (obvio) enviada", { to: telefone, userId, descricao });
+      return true;
+    }
+
+    // ── Strategy B: padrão histórico → mesmo nome em 2+ meses diferentes ─────
+    const patternRow = await pool.query<{ meses: string }>(
+      `SELECT COUNT(DISTINCT DATE_TRUNC('month', criado_em)) AS meses
+       FROM transactions
+       WHERE user_id = $1
+         AND tipo = 'saida'
+         AND LOWER(descricao) = $2
+         AND criado_em >= NOW() - INTERVAL '4 months'`,
+      [userId, descNorm]
+    );
+    const mesesDistintos = Number(patternRow.rows[0]?.meses ?? 0);
+    if (mesesDistintos < 2) return false;
+
     const inserted = await pool.query(
       `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
        VALUES ($1, $2, 1, $3)
@@ -718,11 +752,12 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
     );
     if ((inserted.rowCount ?? 0) === 0) return false;
 
+    const nome = capitalizeFirst(descricao);
     await whatsapp.sendText({
       to:   telefone,
-      text: `${capitalizeFirst(descricao)} costuma aparecer todo mês?`,
+      text: `Percebi que ${nome} aparece todo mês 🙂 Quer acompanhar automaticamente?`,
     });
-    log.whatsapp("sugestao recorrente enviada", { to: telefone, userId, descricao });
+    log.whatsapp("sugestao recorrente (padrao) enviada", { to: telefone, userId, descricao });
     return true;
   } catch (err) {
     log.error("falha sugestao recorrente", err, { userId });
