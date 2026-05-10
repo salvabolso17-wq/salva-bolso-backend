@@ -1380,31 +1380,37 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
     );
     const n = Number(countRow.rows[0].count);
     if (n === 1) {
-      tipId = 1;   // 1º gasto → saldo
-    } else if (n === 4) {
-      // Aha moment — mostra dados reais do mês, uma vez por lifetime
+      tipId = 1;
+    } else if (n >= 7) {
+      // Aha moment: só dispara com contexto real (3+ categorias distintas)
+      const catRow = await pool.query<{ count: string }>(
+        `SELECT COUNT(DISTINCT categoria) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+        [userId]
+      );
+      if (Number(catRow.rows[0].count) < 3) return; // contexto fraco → silêncio
+
       const now       = new Date();
       const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
       const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
       const metrics   = await fetchPeriodMetrics(userId, inicioMes, fimMes);
 
-      if (metrics.total_saidas > 0) {
-        const inserted = await pool.query(
-          `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
-           VALUES ($1, 'aha_moment', 4, $2)
-           ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
-          [userId, LIFETIME]
-        );
-        if ((inserted.rowCount ?? 0) > 0) {
-          const top    = metrics.gastos_por_categoria[0];
-          const linhas = [
-            `Você já registrou ${fmtValor(metrics.total_saidas)} este mês.`,
-            `Maior gasto: ${top.categoria}.`,
-          ];
-          await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-          log.whatsapp("aha moment enviado", { to: telefone, userId, totalSaidas: metrics.total_saidas });
-        }
-      }
+      if (!metrics.total_saidas || !metrics.gastos_por_categoria[0]) return;
+
+      const inserted = await pool.query(
+        `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+         VALUES ($1, 'aha_moment', 4, $2)
+         ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+        [userId, LIFETIME]
+      );
+      if ((inserted.rowCount ?? 0) === 0) return;
+
+      const top   = metrics.gastos_por_categoria[0];
+      const texto = [
+        `Você já registrou ${fmtValor(metrics.total_saidas)} esse mês.`,
+        `${capitalizeFirst(top.categoria)} apareceu bastante até agora.`,
+      ].join("\n");
+      await whatsapp.sendText({ to: telefone, text: texto });
+      log.whatsapp("aha moment enviado", { to: telefone, userId, totalSaidas: metrics.total_saidas });
       return;
     }
   } else if (evento === "recorrente_criado") {
