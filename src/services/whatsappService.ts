@@ -487,6 +487,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         log.error("falha micro insight", err, { userId: user.id })
       );
     }, 1500);
+    setTimeout(() => {
+      checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao).catch(err =>
+        log.error("falha sugestao recorrente", err, { userId: user.id })
+      );
+    }, 2500);
   }
 
   return {
@@ -625,6 +630,41 @@ function fmtValor(valor: number): string {
 
 function capitalizeFirst(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+// Detecta quando a mesma descrição aparece 2x no mês → sugere recorrente 1x na vida
+async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string): Promise<void> {
+  try {
+    const now       = new Date();
+    const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+    const countRow = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions
+       WHERE user_id = $1 AND tipo = 'saida' AND LOWER(descricao) = LOWER($2)
+       AND criado_em >= $3 AND criado_em < $4`,
+      [userId, descricao, inicioMes, fimMes]
+    );
+    if (Number(countRow.rows[0].count) < 2) return;
+
+    const sentinel = `rec_${descricao.toLowerCase().replace(/\s+/g, "_").slice(0, 45)}`;
+    const LIFETIME = new Date("2000-01-01");
+    const inserted = await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, $2, 1, $3)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, sentinel, LIFETIME]
+    );
+    if ((inserted.rowCount ?? 0) === 0) return;
+
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `${capitalizeFirst(descricao)} apareceu mais de uma vez esse mês — parece conta fixa.`,
+    });
+    log.whatsapp("sugestao recorrente enviada", { to: telefone, userId, descricao });
+  } catch (err) {
+    log.error("falha sugestao recorrente", err, { userId });
+  }
 }
 
 // Micro insight contextual — raro, leve, 100% detached do fluxo principal
@@ -1362,9 +1402,9 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
 
 const ONBOARDING_TIPS: Record<number, string> = {
   1:  `Perfeito. Vou organizando tudo por aqui pra você 👌`,
-  10: `💡 Use "guardar 200 <nome da meta>" para registrar seu progresso.`,
-  11: `📈 Use "previsão" para estimar o fechamento do mês.`,
-  12: `📅 Use "próximas" para ver suas contas recorrentes.`,
+  10: `Para depositar na meta, manda: guardar 200 viagem 🎯`,
+  11: `Com isso definido, "previsão" mostra como o mês vai fechar.`,
+  12: `Para ver todas as contas fixas, manda "próximas".`,
 };
 
 async function checkAndSendOnboardingTip(userId: number, telefone: string, evento: string): Promise<void> {
