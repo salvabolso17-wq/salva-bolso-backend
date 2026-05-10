@@ -199,8 +199,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes";
-    step: "waiting_selection" | "waiting_new_value" | "waiting_renda" | "waiting_carryover";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente";
+    step: "waiting_selection" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -258,6 +258,28 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         return { success: false, userId: user.id, erro: "Aguardando escolha carryover" };
       }
       await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    } else if (pending.action === "confirmar_recorrente" && pending.step === "waiting_confirmation") {
+      const isAffirmative = /^(sim|s|yes|pode|quero|claro|ótimo|otimo|isso|exato|afirm|ok|beleza|bora|vai|certo|perfeito|tá|ta)[\?!.]*$/i.test(textoTrim);
+      const isNegative    = /^(não|nao|n|no|agora\s*não|agora\s*nao|depois|por\s+enquanto|dispenso|obrigad[ao])[\?!.]*$/i.test(textoTrim);
+
+      if (isAffirmative) {
+        return await handleConfirmarRecorrente(user, message.telefone, pending.tx_ids);
+      }
+      if (isNegative || isKnownCommand(textoTrim)) {
+        await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+        if (isNegative) {
+          await whatsapp.sendText({ to: message.telefone, text: "Tudo bem 🙂" });
+          return { success: false, userId: user.id, erro: "Recorrente rejeitado" };
+        }
+        // Comando reconhecido → cancela pending e continua abaixo
+      } else {
+        // Nem sim nem não nem comando → reitera a pergunta
+        await whatsapp.sendText({
+          to:   message.telefone,
+          text: "Responde com sim ou não 🙂",
+        });
+        return { success: false, userId: user.id, erro: "Aguardando confirmação recorrente" };
+      }
     }
   }
 
@@ -532,7 +554,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         if (await checkAndSendOnboardingTip(user.id, message.telefone, "saida")) return;
         if (await checkAndSendInsights(user.id, message.telefone, parsed.categoria)) return;
         if (await sendContextualMicroInsight(user.id, message.telefone, parsed.categoria)) return;
-        if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao)) return;
+        if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao, parsed.valor)) return;
         await checkAndDetectInstallment(user.id, message.telefone, parsed.descricao, message.texto, parsed.valor);
       } catch (err) {
         log.error("falha na cadeia de insights pos-gasto", err, { userId: user.id });
@@ -698,7 +720,7 @@ const RECURRING_OBVIOUS_KEYWORDS = [
 ];
 
 // Detecta recorrentes por alta confiança (1ª ocorrência) ou por padrão histórico (2+ meses)
-async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string): Promise<boolean> {
+async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string, valor: number): Promise<boolean> {
   try {
     const descNorm = descricao.toLowerCase().trim();
     const LIFETIME = new Date("2000-01-01");
@@ -727,6 +749,14 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
         to:   telefone,
         text: `Esse gasto costuma ser mensal? Posso acompanhar automaticamente 🔁`,
       });
+      await pool.query(
+        `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+         VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
+         ON CONFLICT (user_id) DO UPDATE
+           SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+               selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
+        [userId, JSON.stringify({ nome: descricao, valor, frequencia: "mensal" })]
+      );
       log.whatsapp("sugestao recorrente (obvio) enviada", { to: telefone, userId, descricao });
       return true;
     }
@@ -757,11 +787,43 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
       to:   telefone,
       text: `Percebi que ${nome} aparece todo mês 🙂 Quer acompanhar automaticamente?`,
     });
+    await pool.query(
+      `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+       VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
+       ON CONFLICT (user_id) DO UPDATE
+         SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
+      [userId, JSON.stringify({ nome: descricao, valor, frequencia: "mensal" })]
+    );
     log.whatsapp("sugestao recorrente (padrao) enviada", { to: telefone, userId, descricao });
     return true;
   } catch (err) {
     log.error("falha sugestao recorrente", err, { userId });
     return false;
+  }
+}
+
+async function handleConfirmarRecorrente(user: UserRow, telefone: string, txIds: unknown): Promise<ProcessResult> {
+  try {
+    const data = txIds as { nome: string; valor: number; frequencia: string };
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    await pool.query(
+      `INSERT INTO recurring_expenses (user_id, nome, valor, frequencia)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, nome)
+       DO UPDATE SET valor = $3, frequencia = $4, ativo = TRUE`,
+      [user.id, data.nome, data.valor, data.frequencia]
+    );
+    const nome = capitalizeFirst(data.nome);
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `Beleza 🙂\n\n${nome} foi adicionado aos seus recorrentes.\nTodo mês eu acompanho automaticamente.`,
+    });
+    log.whatsapp("recorrente confirmado pelo usuario", { to: telefone, userId: user.id, nome: data.nome });
+    return { success: false, userId: user.id, erro: "Recorrente confirmado" };
+  } catch (err) {
+    log.error("falha ao confirmar recorrente", err, { userId: user.id });
+    return { success: false, userId: user.id, erro: "Erro ao criar recorrente" };
   }
 }
 

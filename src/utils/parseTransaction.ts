@@ -303,6 +303,17 @@ const NOME_CORRECTIONS: [RegExp, string][] = [
   [/^condomin?io$/i,        "Condomínio"],
 ];
 
+// Strip verbo + preposição de frases naturais: "gastei 60 com uber" → "uber"
+const VERB_PREFIX_RE  = /^(gastei|gastou|gastamos|gasto|gasta|paguei|pagou|pagamos|pago|paga|foi|fui|saiu|custou|custa|comprei|comprou|compramos|tomei|tomou|tomamos|usei|usou|usamos|rodei|tirei|tirou|tiramos|fiz|fez|fizemos|botei|botou|botamos)\s+/i;
+const PREP_PREFIX_RE  = /^(com|no|na|nos|nas|de|da|do|em|pro|pra|pras|pros|para|num|numa|ao|aos|pelo|pela|pelos|pelas|um|uma|o|a)\s+/i;
+
+function cleanDescricao(raw: string): string {
+  let d = raw.trim();
+  d = d.replace(VERB_PREFIX_RE, "").trim();   // remove verbo inicial
+  d = d.replace(PREP_PREFIX_RE, "").trim();   // remove preposição/artigo inicial
+  return d || raw.trim();
+}
+
 function normalizeDescricao(descricao: string): string {
   const trimmed = descricao.trim();
   for (const [pattern, normalized] of NOME_CORRECTIONS) {
@@ -323,9 +334,9 @@ export function parseTransaction(texto: string): ParsedTransaction | null {
   const valor = parseFloat(valorMatch[1].replace(",", "."));
   if (isNaN(valor) || valor <= 0) return null;
 
-  const descricao  = normalizeDescricao(
+  const descricao  = normalizeDescricao(cleanDescricao(
     textoParse.replace(valorMatch[0], "").replace(/\+/g, "").trim() || "Sem descrição"
-  );
+  ));
 
   // Texto normalizado (sem acentos, minúsculo) para matching consistente
   const textoLower = removerAcentos(textoParse.toLowerCase());
