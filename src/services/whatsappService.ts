@@ -1016,7 +1016,7 @@ async function handleDesafioCommand(user: UserRow, telefone: string): Promise<Pr
   if (metrics.gastos_por_categoria.length === 0) {
     await whatsapp.sendText({
       to:   telefone,
-      text: "🎯 Desafio do dia\n\nRegistre todos os seus gastos de hoje.\nConhecimento é o primeiro passo!",
+      text: "Registre todos os gastos de hoje e veja para onde o dinheiro vai.",
     });
     return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "desafio" } };
   }
@@ -1223,12 +1223,9 @@ async function handleGuardarCommand(user: UserRow, telefone: string, texto: stri
     setTimeout(async () => {
       try {
         const celebracao = [
-          `🏆 META CONCLUÍDA!`,
+          `🏆 Meta "${row.nome}" concluída!`,
           "",
-          `Você atingiu sua meta "${row.nome}"!`,
-          `${fmtValor(meta)} guardados com sucesso. 🎉`,
-          "",
-          "Disciplina financeira é o caminho. Continue assim!",
+          `${fmtValor(meta)} guardados.`,
         ].join("\n");
         await whatsapp.sendText({ to: telefone, text: celebracao });
         log.whatsapp("celebracao meta enviada", { to: telefone, nome: row.nome, meta });
@@ -2034,7 +2031,7 @@ async function handleNextStepSuggestion(user: UserRow, telefone: string): Promis
     const metrics   = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
     if (metrics.total_saidas > 0 && metrics.gastos_por_categoria.length > 0) {
       const top = metrics.gastos_por_categoria[0];
-      text = `${fmtValor(metrics.total_saidas)} gastos este mês. Maior: ${top.categoria}. 📊`;
+      text = `${fmtValor(metrics.total_saidas)} gastos esse mês. Maior: ${top.categoria}.`;
     } else {
       text = '"saldo" mostra como o mês tá ficando.';
     }
@@ -2143,7 +2140,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     !temNumero &&
     /hoje\s+(foi\s+)?(bom|tranquilo|leve|econ[oô]mico)|gastei\s+(pouco|bem\s+pouco|quase\s+nada)|economizei\s+(hoje|bastante)/.test(t)
   ) {
-    const acks = ["Bom sinal. 👍", "Isso. Vai acumulando.", "Dias assim fazem diferença."];
+    const acks = ["Bom sinal.", "Isso. Vai acumulando.", "Dias assim fazem diferença."];
     const pick  = acks[new Date().getHours() % acks.length];
     try {
       await whatsapp.sendText({ to: telefone, text: pick });
@@ -2159,7 +2156,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     !temNumero &&
     /^(n[aã]o\s+quero(\s+ver\s+\S+)?|n[aã]o\s+agora|depois|por\s+enquanto\s+n[aã]o|obrigad[ao]|brigad[ao]|valeu|tudo\s+bem|td\s+bem|blz)[\?!.]*$/.test(t)
   ) {
-    const acks = ["Tudo bem! 😊", "Ok. 👋", "Tranquilo."];
+    const acks = ["Tudo bem.", "Ok. 👋", "Tranquilo."];
     const pick  = acks[new Date().getHours() % acks.length];
     try {
       await whatsapp.sendText({ to: telefone, text: pick });
@@ -2213,7 +2210,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     !temNumero &&
     /t[oô]\s+economizando|estou?\s+economizando|consegui\s+economizar|economizei\s+(bem|bastante|muito)/.test(t)
   ) {
-    const acks = ["Ótimo! Continue assim. 💪", "Isso! Cada real conta.", "Excelente. Vai acumulando. 🎯"];
+    const acks = ["Bom. Vai acumulando.", "Cada real conta.", "Vai acumulando."];
     const pick  = acks[new Date().getHours() % acks.length];
     try {
       await whatsapp.sendText({ to: telefone, text: pick });
@@ -2516,8 +2513,8 @@ async function handleNovoMesRenda(user: UserRow, telefone: string, texto: string
   } else {
     await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     resposta = saldoPrev < -0.01
-      ? `💰 Renda registrada.\n\n${mesPrev.charAt(0).toUpperCase() + mesPrev.slice(1)} encerrou no vermelho. Bora virar o jogo! 💪`
-      : `💰 Renda registrada. Bom ${mesAtual}! 🚀`;
+      ? `💰 Renda registrada.\n\n${mesPrev.charAt(0).toUpperCase() + mesPrev.slice(1)} fechou no vermelho.`
+      : `💰 Renda registrada.`;
   }
 
   await whatsapp.sendText({ to: telefone, text: resposta });
