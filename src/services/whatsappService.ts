@@ -5,7 +5,7 @@ import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
-import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep, canSendInsight, recordInsightSent, setLastCommand, setLastInstallment, getLastInstallment } from "./conversationEngine";
+import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep, canSendInsight, recordInsightSent, setLastCommand, setLastInstallment, getLastInstallment, setLastGoal, getLastGoal } from "./conversationEngine";
 
 function firstNameOf(rawName?: string | null): string | null {
   if (!rawName) return null;
@@ -546,6 +546,21 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           log.error("falha ao enviar progresso parcela", err, { to: message.telefone });
         }
         return { success: false, userId: user.id, erro: "progresso parcela" };
+      }
+    }
+  }
+
+  // ── Intent de meta ───────────────────────────────────────────────────────
+  // Intercepta linguagem natural sobre metas antes de chegar no parser de gastos
+  {
+    const goalIntent = detectGoalIntent(message.texto.trim());
+    if (goalIntent !== null) {
+      try {
+        if (goalIntent.type === "adicionar")       return await handleAddToGoal(user, message.telefone, goalIntent.valor, goalIntent.nome);
+        if (goalIntent.type === "criar_sem_valor") return await handleCreateGoalNoValue(user, message.telefone, goalIntent.nome);
+        if (goalIntent.type === "progresso")       return await handleGoalProgress(user, message.telefone, goalIntent.nome);
+      } catch (err) {
+        log.error("falha no goal intent", err, { userId: user.id });
       }
     }
   }
@@ -1479,12 +1494,13 @@ async function handleGuardarCommand(user: UserRow, telefone: string, texto: stri
 
   const match = texto.match(/^guardar\s+([\d,.]+)\s+(.+)$/i);
   if (!match) {
-    await whatsapp.sendText({ to: telefone, text: "Quando quiser adicionar dinheiro, pode falar algo como:\nguardar 200 na meta viagem 🎯" });
+    await whatsapp.sendText({ to: telefone, text: "Quando quiser adicionar dinheiro, pode falar algo como:\nguardar 200 viagem 🎯" });
     return { success: false, userId: user.id, erro: "Formato inválido" };
   }
 
-  const valor = parseFloat(match[1].replace(",", "."));
-  const nome  = match[2].charAt(0).toUpperCase() + match[2].slice(1).toLowerCase();
+  const valor   = parseFloat(match[1].replace(",", "."));
+  const rawNome = match[2].replace(/^(?:na?|no|em|pra?|para|pro?)\s+/i, "").trim();
+  const nome    = rawNome.charAt(0).toUpperCase() + rawNome.slice(1).toLowerCase();
 
   const result = await pool.query<{ nome: string; valor_meta: string; valor_atual: string }>(
     `UPDATE user_goals
@@ -1507,6 +1523,8 @@ async function handleGuardarCommand(user: UserRow, telefone: string, texto: stri
   const atual        = Number(row.valor_atual);
   const percent      = meta > 0 ? Math.round((atual / meta) * 100) : 0;
   const acabouAgora  = (atual - valor) < meta && atual >= meta;
+
+  setLastGoal(user.id, { nome: row.nome, valorMeta: meta });
 
   const linhas = [
     `🎯 ${fmtValor(valor)} adicionados à meta ${row.nome}`,
@@ -1573,6 +1591,7 @@ async function handleMetaCommand(user: UserRow, telefone: string, texto: string)
     text: `🎯 Meta criada: ${nome}\nObjetivo: ${fmtValor(valorMeta)}`,
   });
 
+  setLastGoal(user.id, { nome, valorMeta });
   recordAction(user.id, "created_goal");
 
   setTimeout(() => {
@@ -2928,6 +2947,214 @@ function buildInstallmentProgressText(result: ProgressResult, inst: { item: stri
       return `Certo 🙂\nParcela ${result.atual} de ${totalParcelas} — faltam ${faltam}.`;
     }
   }
+}
+
+// ── Goal intent detector ──────────────────────────────────────────────────────
+
+type GoalIntent =
+  | { type: "adicionar";      valor: number; nome?: string }
+  | { type: "criar_sem_valor"; nome: string }
+  | { type: "progresso";      nome?: string };
+
+function detectGoalIntent(texto: string): GoalIntent | null {
+  const t  = texto.trim();
+  const tl = t.toLowerCase();
+
+  // ── criar sem valor ────────────────────────────────────────────────────
+  // "guardar dinheiro pro carro", "juntar dinheiro pra viagem"
+  let m = tl.match(/^(?:quero\s+)?(?:guard|poup|junt)(?:ar|a)\s+dinheiro\s+(?:na?|no|pra?|para|pro?s?)\s+(.+)$/);
+  if (m) return { type: "criar_sem_valor", nome: m[1].trim() };
+
+  // "quero uma meta pro videogame", "criar meta pra carro"
+  m = tl.match(/^(?:quero\s+)?(?:criar\s+)?uma?\s+meta\s+(?:pra?|para|pro?)\s+(.+)$/);
+  if (m) return { type: "criar_sem_valor", nome: m[1].trim() };
+
+  // ── progresso ──────────────────────────────────────────────────────────
+  // "quanto falta?", "quanto falta pra viagem?"
+  m = tl.match(/^quanto\s+falta\s*(?:(?:pra?|para|pro?)\s+(.+?))?[?!.]*$/);
+  if (m) return { type: "progresso", nome: m[1]?.trim() || undefined };
+
+  // "como tá minha meta?", "como tá a meta de viagem?"
+  m = tl.match(/^como\s+t[aá]\s+(?:(?:a|minha?)\s+)?meta(?:\s+(?:de|do?a?)\s+(.+?))?[?!.]*$/);
+  if (m) return { type: "progresso", nome: m[1]?.trim() || undefined };
+
+  if (/^como\s+t[aá]\s+(?:o\s+)?meu?\s+objetivo[?!.]*$/.test(tl)) return { type: "progresso" };
+
+  // ── adicionar ─────────────────────────────────────────────────────────
+  // "consegui guardar mais 50 pra viagem"
+  m = t.match(/^consegui\s+(?:guard|poup|junt|separ|coloc)(?:ar|a)\s+(?:mais\s+)?([\d,.]+)\s*(?:(?:na?|no|pra?|para|pro?|em)\s+(.+))?$/i);
+  if (m) return { type: "adicionar", valor: parseFloat(m[1].replace(",", ".")), nome: m[2]?.trim() || undefined };
+
+  // "quero guardar 200", "separa 100 pra viagem", "poupa 150", "guardar 300 na meta viagem"
+  m = t.match(/^(?:quero\s+)?(?:guard|poup|junt|separ|coloc|bot|adicion)(?:ar|a)\s+([\d,.]+)\s*(?:(?:na?|no|pra?|para|pro?|em)\s+(.+))?$/i);
+  if (m) return { type: "adicionar", valor: parseFloat(m[1].replace(",", ".")), nome: m[2]?.trim() || undefined };
+
+  // "já juntei 300", "guardei 200", "juntei 150 pra viagem"
+  m = t.match(/^(?:j[aá]\s+)?(?:guard|poup|junt|separ|coloc)ei\s+([\d,.]+)\s*(?:(?:na?|no|pra?|para|em)\s+(.+))?$/i);
+  if (m) return { type: "adicionar", valor: parseFloat(m[1].replace(",", ".")), nome: m[2]?.trim() || undefined };
+
+  return null;
+}
+
+async function handleAddToGoal(
+  user: UserRow,
+  telefone: string,
+  valor: number,
+  nomeHint?: string,
+): Promise<ProcessResult> {
+  type GoalRow = { nome: string; valor_meta: string; valor_atual: string };
+
+  let goalRow: GoalRow | null = null;
+
+  if (nomeHint) {
+    const r = await pool.query<GoalRow>(
+      `SELECT nome, valor_meta, valor_atual FROM user_goals
+       WHERE user_id = $1 AND LOWER(nome) ILIKE '%' || LOWER($2) || '%'
+       ORDER BY criado_em ASC LIMIT 1`,
+      [user.id, nomeHint]
+    );
+    goalRow = r.rows[0] ?? null;
+
+    if (!goalRow) {
+      await whatsapp.sendText({ to: telefone, text: `Meta "${nomeHint}" não encontrada.\nCrie assim: meta ${nomeHint} 5000` });
+      return { success: false, userId: user.id, erro: "Meta não encontrada" };
+    }
+  } else {
+    // Try lastGoal first
+    const last = getLastGoal(user.id);
+    if (last) {
+      const r = await pool.query<GoalRow>(
+        `SELECT nome, valor_meta, valor_atual FROM user_goals WHERE user_id = $1 AND LOWER(nome) = LOWER($2) LIMIT 1`,
+        [user.id, last.nome]
+      );
+      goalRow = r.rows[0] ?? null;
+    }
+
+    if (!goalRow) {
+      const r = await pool.query<GoalRow>(
+        `SELECT nome, valor_meta, valor_atual FROM user_goals WHERE user_id = $1 ORDER BY criado_em ASC`,
+        [user.id]
+      );
+      if (r.rows.length === 0) {
+        await whatsapp.sendText({ to: telefone, text: `Você não tem metas ainda.\nCrie assim: meta viagem 5000 🎯` });
+        return { success: false, userId: user.id, erro: "Sem metas" };
+      }
+      if (r.rows.length === 1) {
+        goalRow = r.rows[0];
+      } else {
+        const lista = r.rows.map(row => `• ${row.nome}`).join("\n");
+        await whatsapp.sendText({ to: telefone, text: `Para qual meta?\n${lista}\n\nEx: guardar ${Math.round(valor)} ${r.rows[0].nome.toLowerCase()}` });
+        return { success: false, userId: user.id, erro: "ambiguous goal" };
+      }
+    }
+  }
+
+  const result = await pool.query<GoalRow>(
+    `UPDATE user_goals SET valor_atual = valor_atual + $1
+     WHERE user_id = $2 AND LOWER(nome) = LOWER($3)
+     RETURNING nome, valor_meta, valor_atual`,
+    [valor, user.id, goalRow.nome]
+  );
+
+  if (result.rows.length === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Algo deu errado. Tenta de novo?" });
+    return { success: false, userId: user.id, erro: "Goal update failed" };
+  }
+
+  const row    = result.rows[0];
+  const meta   = Number(row.valor_meta);
+  const atual  = Number(row.valor_atual);
+  const percent  = meta > 0 ? Math.round((atual / meta) * 100) : 0;
+  const concluiu = meta > 0 && (atual - valor) < meta && atual >= meta;
+
+  setLastGoal(user.id, { nome: row.nome, valorMeta: meta });
+  recordAction(user.id, "created_goal");
+
+  const linhas: string[] = [`✅ ${fmtValor(valor)} adicionados — ${row.nome}`];
+  if (meta > 0) {
+    linhas.push("", `${fmtValor(atual)} de ${fmtValor(meta)} (${percent}%)`);
+  } else {
+    linhas.push("", `Total guardado: ${fmtValor(atual)}`);
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+  } catch (err) {
+    log.error("falha ao enviar add to goal", err, { to: telefone });
+  }
+
+  if (concluiu) {
+    setTimeout(async () => {
+      try {
+        await whatsapp.sendText({ to: telefone, text: `🏆 Meta "${row.nome}" concluída!\n\n${fmtValor(meta)} guardados.` });
+      } catch (err) {
+        log.error("falha ao enviar celebracao meta", err, { to: telefone });
+      }
+    }, 1500);
+  }
+
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "adicionar_meta", nome: row.nome, valor, atual, meta } };
+}
+
+async function handleGoalProgress(
+  user: UserRow,
+  telefone: string,
+  nomeHint?: string,
+): Promise<ProcessResult> {
+  type GoalRow = { nome: string; valor_meta: string; valor_atual: string };
+
+  const showGoal = (row: GoalRow): string => {
+    const meta   = Number(row.valor_meta);
+    const atual  = Number(row.valor_atual);
+    const percent = meta > 0 ? Math.round((atual / meta) * 100) : 0;
+    const falta  = meta > atual ? meta - atual : 0;
+    if (meta > 0) {
+      return `${row.nome} — ${fmtValor(atual)} de ${fmtValor(meta)} (${percent}%)\n${falta > 0 ? `Faltam ${fmtValor(falta)}` : "Concluída ✅"}`;
+    }
+    return `${row.nome} — ${fmtValor(atual)} guardados`;
+  };
+
+  if (nomeHint) {
+    const r = await pool.query<GoalRow>(
+      `SELECT nome, valor_meta, valor_atual FROM user_goals
+       WHERE user_id = $1 AND LOWER(nome) ILIKE '%' || LOWER($2) || '%'
+       ORDER BY criado_em ASC LIMIT 1`,
+      [user.id, nomeHint]
+    );
+    if (!r.rows[0]) {
+      await whatsapp.sendText({ to: telefone, text: `Meta "${nomeHint}" não encontrada.` });
+      return { success: false, userId: user.id, erro: "Meta não encontrada" };
+    }
+    await whatsapp.sendText({ to: telefone, text: showGoal(r.rows[0]) });
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "progresso_meta", nome: r.rows[0].nome } };
+  }
+
+  // Try lastGoal in session
+  const last = getLastGoal(user.id);
+  if (last) {
+    const r = await pool.query<GoalRow>(
+      `SELECT nome, valor_meta, valor_atual FROM user_goals WHERE user_id = $1 AND LOWER(nome) = LOWER($2) LIMIT 1`,
+      [user.id, last.nome]
+    );
+    if (r.rows[0]) {
+      await whatsapp.sendText({ to: telefone, text: showGoal(r.rows[0]) });
+      return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "progresso_meta", nome: r.rows[0].nome } };
+    }
+  }
+
+  // Fallback: show all metas
+  return await handleMetasCommand(user, telefone);
+}
+
+async function handleCreateGoalNoValue(
+  user: UserRow,
+  telefone: string,
+  nome: string,
+): Promise<ProcessResult> {
+  const nomeFormatado = nome.charAt(0).toUpperCase() + nome.slice(1).toLowerCase();
+  const txt = `Perfeito 🙂\nQual o valor que quer guardar pro ${nomeFormatado}?\n\nEx: meta ${nome.toLowerCase()} 15000`;
+  await whatsapp.sendText({ to: telefone, text: txt });
+  return { success: false, userId: user.id, erro: "goal without value" };
 }
 
 async function handleInstallmentRegistration(
