@@ -300,13 +300,13 @@ async function sendSubscriptionReminders(): Promise<void> {
 
 // Lembretes de fim do trial: 3d e 0d antes de expirar (1x por marco, via sent_insights)
 const TRIAL_REMINDERS = [
-  { daysAhead: 3, marco: 103 },
+  { daysAhead: 2, marco: 102 },
   { daysAhead: 0, marco: 100 },
 ] as const;
 
 function buildTrialReminderText(daysAhead: number, plansBlock: string): string {
-  const intro = daysAhead === 3
-    ? "Seu período de teste termina em 3 dias.\n\nSe quiser continuar organizando seus gastos:"
+  const intro = daysAhead === 2
+    ? "Seu período de teste termina em 2 dias.\n\nSe quiser continuar organizando seus gastos:"
     : "Seu período de teste termina hoje.\n\nPara continuar usando o Salva Bolso:";
   return plansBlock ? `${intro}\n\n${plansBlock}` : intro;
 }

@@ -84,6 +84,20 @@ const PORT = Number(process.env.PORT ?? 3000);
         cronState.expiracao.erroUltimo = String(err);
         console.error("[CRON] falha na expiracao de assinaturas:", err);
       }
+      // Migra trial vencido para expired — mantém banco consistente
+      try {
+        const t = await pool.query(
+          `UPDATE users SET subscription_status = 'expired'
+           WHERE subscription_status = 'trial'
+             AND trial_ends_at IS NOT NULL
+             AND trial_ends_at < NOW()`
+        );
+        if ((t.rowCount ?? 0) > 0) {
+          console.log(`[CRON] ${t.rowCount} trial(s) expirado(s)`);
+        }
+      } catch (err) {
+        console.error("[CRON] falha na expiracao de trials:", err);
+      }
     });
 
     // Notificações de retenção — diariamente às 9h horário de Brasília

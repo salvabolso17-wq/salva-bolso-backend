@@ -214,10 +214,9 @@ router.post("/asaas", async (req, res) => {
     console.error("[ASAAS] usuario ativado:", user.id, user.telefone, isRenovacao ? "(renovacao)" : "(novo)");
     log.webhook("asaas: usuario ativado", { userId: user.id, telefone: user.telefone, paymentId: payment?.id, isRenovacao });
 
-    const planLabel = plan.nome === "anual" ? "anual" : "mensal";
     const texto = isRenovacao
-      ? `✅ Assinatura renovada!\n\nSeu plano *${planLabel}* está ativo por mais ${plan.duration_days} dias.\n\nBom controle financeiro! 💪`
-      : `✅ Assinatura ativada!\n\nBem-vindo ao Salva Bolso! Seu plano *${planLabel}* está pronto. 🚀`;
+      ? `Pronto 🙂\n\nSua assinatura foi renovada. Pode continuar por aqui.`
+      : `Pronto 🙂\n\nSeu acesso ao Salva Bolso está ativo. Pode começar a registrar seus gastos por aqui.`;
 
     try {
       await whatsapp.sendText({ to: user.telefone, text: texto });

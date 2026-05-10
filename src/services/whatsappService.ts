@@ -156,23 +156,22 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
-  // ── Controle de acesso (trial / active / expired) ────────────────────────
+  // ── Controle de acesso (trial / active / expired) — modo limitado ────────
   if (!isSubscriptionActive(user)) {
-    const ehTrialExpirado =
-      user.subscription_status === "trial" &&
-      !!user.trial_ends_at &&
-      new Date(user.trial_ends_at) <= new Date();
+    const textoTrim    = message.texto.trim();
+    const tentativaOp  = parseTransaction(textoTrim);
+    const apenasLeitura = isReadOnlyCommand(textoTrim);
 
-    const intro = ehTrialExpirado
-      ? "Seu período de teste encerrou.\n\nPara continuar organizando seus gastos, escolha um plano:"
-      : "Sua assinatura expirou.\n\nPara continuar usando o Salva Bolso, renove agora:";
-
-    const plansBlock = await buildPlansBlock();
-    const corpo = plansBlock || "Entre em contato para assinar.";
-    const rodape = "\n\nApós o pagamento, seu acesso é liberado automaticamente.";
-
-    await whatsapp.sendText({ to: message.telefone, text: `${intro}\n\n${corpo}${rodape}` });
-    return { success: false, userId: user.id, erro: "Assinatura expirada" };
+    if (tentativaOp || !apenasLeitura) {
+      // Operação de escrita bloqueada — modo limitado
+      const eraTrialUser =
+        user.subscription_status === "trial" ||
+        (user.subscription_status === "expired" && !user.subscription_expires_at);
+      const expirouEm = user.subscription_expires_at ?? user.trial_ends_at ?? new Date();
+      await sendExpirationBlock(user.id, message.telefone, eraTrialUser, expirouEm);
+      return { success: false, userId: user.id, erro: "Acesso limitado" };
+    }
+    // Comandos de leitura passam — o usuário continua vendo seus dados
   }
 
   // ── Pending action check ──────────────────────────────────────────────────
@@ -1968,6 +1967,66 @@ async function handleExtratoCommand(user: UserRow, telefone: string, texto: stri
     transacao:    {},
     interpretado: { comando: "extrato", ano, mes, transacoes: metrics.quantidade_transacoes },
   };
+}
+
+// Comandos de consulta permitidos em modo limitado (trial/assinatura expirados)
+function isReadOnlyCommand(texto: string): boolean {
+  return /^(saldo|resumo|hoje|semana|ranking|comparar|previs[aã]o|categorias|desafio|ajuda|metas|recorrentes|pr[oó]ximas|top\s*gastos)$/i.test(texto)
+      || /^(buscar|extrato)\s+/i.test(texto);
+}
+
+// Envia mensagem de expiração com dedup:
+//   marco 1 + mes_referencia = data de expiração → versão completa (1x por ciclo de expiração)
+//   marco 2 + mes_referencia = hoje             → versão curta (1x por dia)
+//   silent após isso
+async function sendExpirationBlock(userId: number, telefone: string, eraTrialUser: boolean, expirouEm: Date): Promise<void> {
+  const plansBlock = await buildPlansBlock();
+  const expirouEmDate = new Date(Date.UTC(expirouEm.getUTCFullYear(), expirouEm.getUTCMonth(), expirouEm.getUTCDate()));
+
+  let fullNovo = false;
+  try {
+    const ins = await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, 'expiracao_aviso', 1, $2::date)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, expirouEmDate]
+    );
+    fullNovo = (ins.rowCount ?? 0) > 0;
+  } catch { /* continua */ }
+
+  if (fullNovo) {
+    const intro = eraTrialUser
+      ? "Seu período gratuito terminou 🙂"
+      : "Sua assinatura expirou 🙂";
+    const linhas = [
+      intro,
+      "",
+      "Seus registros continuam salvos aqui.",
+      "",
+      "Pra continuar registrando novos gastos e acompanhando o mês, é só ativar um plano:",
+    ];
+    if (plansBlock) linhas.push("", plansBlock);
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    return;
+  }
+
+  // Versão curta — 1x por dia
+  const hoje = new Date();
+  const hojeUTC = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate()));
+  try {
+    const ins2 = await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, 'expiracao_aviso', 2, $2::date)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, hojeUTC]
+    );
+    if ((ins2.rowCount ?? 0) === 0) return; // já enviou hoje — silêncio
+  } catch { return; }
+
+  const curto = plansBlock
+    ? `Para registrar novos gastos, ative um plano:\n\n${plansBlock}`
+    : "Para registrar novos gastos, ative um plano.";
+  await whatsapp.sendText({ to: telefone, text: curto });
 }
 
 function isSubscriptionActive(user: UserRow): boolean {
