@@ -5,6 +5,7 @@ import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
+import { initSession, classifyIntent, recordAction } from "./conversationEngine";
 
 function firstNameOf(rawName?: string | null): string | null {
   if (!rawName) return null;
@@ -283,10 +284,63 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
+  // ── Conversation Engine — Intent + Context gates ─────────────────────────
+  {
+    const _session = initSession(user.id);
+    const _intent  = classifyIntent(message.texto.trim());
+    const _isNew   = !!user.criado_em
+      && Date.now() - new Date(user.criado_em).getTime() < 10 * 60 * 1000;
+
+    // Silence new users in onboarding window for casual/unknown messages
+    if (_isNew && _session.txCount === 0 && (_intent === "casual" || _intent === "unknown")) {
+      log.webhook("conv engine: silencio onboarding", { userId: user.id, intent: _intent });
+      return { success: false, userId: user.id, erro: "Conv engine: silencio onboarding" };
+    }
+
+    // Guide confused users — show menu or a lighter hint if menu was recent
+    if (_intent === "confused") {
+      const menuAge = _session.seenMenuAt
+        ? Date.now() - _session.seenMenuAt.getTime()
+        : Infinity;
+      if (menuAge > 3 * 60 * 1000) {
+        try {
+          await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText() });
+          recordAction(user.id, "showed_menu");
+          log.whatsapp("conv engine: menu para usuario confuso", { to: message.telefone, userId: user.id });
+        } catch (err) {
+          log.error("falha ao enviar menu (confuso)", err, { userId: user.id });
+        }
+      } else {
+        try {
+          await whatsapp.sendText({
+            to:   message.telefone,
+            text: "Pode usar naturalmente 🙂\n\nEx:\n• 50 mercado\n• quanto sobrou?\n• resumo\n• ranking",
+          });
+          log.whatsapp("conv engine: hint leve para usuario confuso", { to: message.telefone, userId: user.id });
+        } catch (err) {
+          log.error("falha ao enviar hint (confuso)", err, { userId: user.id });
+        }
+      }
+      return { success: false, userId: user.id, erro: "Conv engine: guiou confuso" };
+    }
+
+    // For explore intent with recent menu — show next-step suggestion instead of repeating menu
+    if (_intent === "explore") {
+      const menuAge = _session.seenMenuAt
+        ? Date.now() - _session.seenMenuAt.getTime()
+        : Infinity;
+      if (menuAge < 3 * 60 * 1000) {
+        return await handleNextStepSuggestion(user, message.telefone);
+      }
+      // Menu not recent → fall through to isCuriosityPhrase which will show the menu
+    }
+  }
+
   // ── Curiosidade sobre funcionalidades (linguagem natural) ────────────────
   if (isCuriosityPhrase(message.texto.trim())) {
     try {
       await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText() });
+      recordAction(user.id, "showed_menu");
       log.whatsapp("features menu enviado", { to: message.telefone, userId: user.id });
     } catch (err) {
       log.error("falha ao enviar features menu", err, { userId: user.id });
@@ -417,10 +471,6 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Proteção contra mensagens ambíguas ───────────────────────────────────
   if (isAmbiguousIntent(message.texto)) {
-    if (await checkOnboardingWindowSilence(user)) {
-      log.webhook("janela onboarding — silencio (ambiguo)", { userId: user.id });
-      return { success: false, userId: user.id, erro: "Janela onboarding — silencio" };
-    }
     await whatsapp.sendText({
       to:   message.telefone,
       text: buildContextualHint(message.texto),
@@ -449,11 +499,6 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   if (!parsed) {
     log.parser("nao reconhecido", { texto: message.texto });
-
-    if (await checkOnboardingWindowSilence(user)) {
-      log.webhook("janela onboarding — silencio (parser falhou)", { userId: user.id });
-      return { success: false, userId: user.id, erro: "Janela onboarding — silencio" };
-    }
 
     try {
       const sendResult = await whatsapp.sendText({
@@ -488,6 +533,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     );
     transacaoRow = result.rows[0] as Record<string, unknown>;
     log.db("transacao salva", { id: transacaoRow.id, user_id: user.id });
+    recordAction(user.id, "registered_transaction");
   } catch (err) {
     log.error("falha ao inserir transacao", err, { user_id: user.id });
     return { success: false, userId: user.id, erro: "Erro ao salvar transação no banco" };
@@ -2166,20 +2212,6 @@ function isSubscriptionActive(user: UserRow): boolean {
     return !user.trial_ends_at || new Date(user.trial_ends_at) > new Date();
   }
   return false;
-}
-
-
-async function checkOnboardingWindowSilence(user: UserRow): Promise<boolean> {
-  if (!user.criado_em) return false;
-  if (Date.now() - new Date(user.criado_em).getTime() >= 10 * 60 * 1000) return false;
-  try {
-    const cRow = await pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`, [user.id]
-    );
-    return Number(cRow.rows[0].count) === 0;
-  } catch {
-    return false;
-  }
 }
 
 function isCuriosityPhrase(texto: string): boolean {
