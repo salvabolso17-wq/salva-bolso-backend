@@ -494,49 +494,29 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   // ── Progresso de parcela ─────────────────────────────────────────────────
-  // "já paguei 4 de 12"  — pago + total explícitos
-  // "já paguei 5 parcelas" — pago explícito, total vem do lastInstallment
+  // Self-contained: "paguei N de M" / "já paguei N de M"
+  // Context-aware : all natural phrasings, require lastInstallment in session
   {
     const t = message.texto.trim();
 
-    // Padrão 1: "já paguei X de Y"
-    const pmFull = t.match(/^(?:j[aá]\s+)?paguei\s+(\d+)\s+de\s+(\d+)[\?!.]*$/i);
+    // Self-contained explicit form — no session needed
+    const pmExplicit = t.match(/^(?:j[aá]\s+)?(?:paguei|quitei)\s+(\d+)\s+de\s+(\d+)[\?!.]*$/i);
+    if (pmExplicit) {
+      const pago   = parseInt(pmExplicit[1], 10);
+      const total  = parseInt(pmExplicit[2], 10);
+      const inst   = getLastInstallment(user.id);
+      const faltam = total - pago;
 
-    // Padrão 2: "já paguei X parcela(s)" — usa lastInstallment para o total
-    const pmCount = !pmFull
-      ? t.match(/^(?:j[aá]\s+)?paguei\s+(\d+)\s+parcelas?[\?!.]*$/i)
-      : null;
-
-    if (pmFull || pmCount) {
-      const inst = getLastInstallment(user.id);
       let txt: string;
-
-      if (pmFull) {
-        const pago  = parseInt(pmFull[1], 10);
-        const total = parseInt(pmFull[2], 10);
-
-        if (inst && inst.totalParcelas === total) {
-          const faltam = total - pago;
-          txt = faltam > 0
-            ? `Perfeito 🙂\nFaltam ${faltam} parcelas da ${inst.item}.`
-            : `Ótimo 🙂\n${inst.item} — quitado!`;
-          setLastInstallment(user.id, { ...inst, parcelaAtual: pago + 1 });
-        } else {
-          txt = `Certo 🙂\n${pago} de ${total} pagas.`;
-        }
+      if (inst && inst.totalParcelas === total) {
+        txt = faltam > 0
+          ? `Perfeito 🙂\nFaltam ${faltam} parcela${faltam > 1 ? "s" : ""} do ${inst.item}.`
+          : `Ótimo 🙂\n${inst.item} — quitado!`;
+        setLastInstallment(user.id, { ...inst, parcelaAtual: pago + 1 });
       } else {
-        // pmCount: total vem do lastInstallment
-        const pago = parseInt(pmCount![1], 10);
-
-        if (inst) {
-          const faltam = inst.totalParcelas - pago;
-          txt = faltam > 0
-            ? `Perfeito 🙂\nFaltam ${faltam} parcelas da ${inst.item}.`
-            : `Ótimo 🙂\n${inst.item} — quitado!`;
-          setLastInstallment(user.id, { ...inst, parcelaAtual: pago + 1 });
-        } else {
-          txt = `De qual compra? Me manda assim:\ntv 12x de 230`;
-        }
+        txt = faltam > 0
+          ? `Certo 🙂\n${pago} de ${total} pagas.`
+          : `Ótimo 🙂\nQuitado!`;
       }
 
       try {
@@ -545,6 +525,28 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         log.error("falha ao enviar progresso parcela", err, { to: message.telefone });
       }
       return { success: false, userId: user.id, erro: "progresso parcela" };
+    }
+
+    // Context-aware: any natural phrasing — only fires if we know which installment
+    const inst = getLastInstallment(user.id);
+    if (inst) {
+      const progress = detectInstallmentProgress(t);
+      if (progress !== null) {
+        const txt = buildInstallmentProgressText(progress, inst);
+
+        if (progress.type === "pago" && progress.pago !== undefined) {
+          setLastInstallment(user.id, { ...inst, parcelaAtual: progress.pago + 1 });
+        } else if (progress.type === "current") {
+          setLastInstallment(user.id, { ...inst, parcelaAtual: progress.atual + 1 });
+        }
+
+        try {
+          await whatsapp.sendText({ to: message.telefone, text: txt });
+        } catch (err) {
+          log.error("falha ao enviar progresso parcela", err, { to: message.telefone });
+        }
+        return { success: false, userId: user.id, erro: "progresso parcela" };
+      }
     }
   }
 
@@ -2843,6 +2845,89 @@ function detectInstallment(texto: string): InstallmentInfo | null {
   }
 
   return null;
+}
+
+// ── Installment progress detector ────────────────────────────────────────────
+
+type ProgressResult =
+  | { type: "quitado" }
+  | { type: "comecou" }
+  | { type: "metade" }
+  | { type: "pago";    pago: number; total?: number }
+  | { type: "faltam";  faltam: number }
+  | { type: "current"; atual: number };
+
+function detectInstallmentProgress(texto: string): ProgressResult | null {
+  const t = texto.trim().toLowerCase();
+
+  // "terminei de pagar", "já quitei", "quitei tudo", "já acabou"
+  if (/\b(terminei\s+de\s+pagar|j[aá]\s+quitei\s+tudo|j[aá]\s+quitei|quitei\s+tudo|j[aá]\s+acabou|paguei\s+tudo|acabei\s+de\s+pagar)\b/.test(t)) {
+    return { type: "quitado" };
+  }
+
+  // "comecei agora", "primeira parcela", "é a primeira"
+  if (/\b(comecei\s+agora|paguei\s+a\s+primeira|primeira\s+parcela|[eéè]\s+a\s+primeira)\b/.test(t)) {
+    return { type: "comecou" };
+  }
+
+  // "já quitei metade", "paguei metade", "tô na metade"
+  if (/\b(j[aá]\s+quitei\s+metade|paguei\s+(a\s+)?metade|t[oô]\s+na\s+metade|metade\s+j[aá]\s+pag)\b/.test(t)) {
+    return { type: "metade" };
+  }
+
+  // "faltam 3", "restam 2", "faltam 2 parcelas"
+  let m = t.match(/\b(faltam|restam|falta|resta)\s+(\d+)(\s+parcelas?)?\b/);
+  if (m) return { type: "faltam", faltam: parseInt(m[2], 10) };
+
+  // "tô na parcela 6", "estou na 6", "é a 6ª"
+  m = t.match(/\b(t[oô]\s+na\s+parcela|estou\s+na\s+parcela|[eéè]\s+a\s+parcela|estou\s+na|t[oô]\s+na)\s+(\d+)/);
+  if (m) return { type: "current", atual: parseInt(m[2], 10) };
+
+  m = t.match(/\b[eéè]\s+a\s+(\d+)[aª]?\b/);
+  if (m) return { type: "current", atual: parseInt(m[1], 10) };
+
+  // "já paguei N de M", "paguei N de M", "quitei N de M"
+  m = t.match(/\b(j[aá]\s+)?(paguei|quitei)\s+(\d+)\s+de\s+(\d+)/);
+  if (m) return { type: "pago", pago: parseInt(m[3], 10), total: parseInt(m[4], 10) };
+
+  // "já paguei N parcelas", "paguei N"
+  m = t.match(/\b(j[aá]\s+)?(paguei|quitei)\s+(\d+)(\s+parcelas?)?\b/);
+  if (m) return { type: "pago", pago: parseInt(m[3], 10) };
+
+  return null;
+}
+
+function buildInstallmentProgressText(result: ProgressResult, inst: { item: string; totalParcelas: number }): string {
+  const { item, totalParcelas } = inst;
+
+  switch (result.type) {
+    case "quitado":
+      return `Ótimo 🙂\n${item} — quitado!`;
+
+    case "comecou":
+      return `Perfeito 🙂\nFaltam ${totalParcelas - 1} parcelas do ${item}.`;
+
+    case "metade": {
+      const faltam = Math.ceil(totalParcelas / 2);
+      return `Certo 🙂\nFaltam mais ou menos ${faltam} parcelas do ${item}.`;
+    }
+
+    case "pago": {
+      const total = result.total ?? totalParcelas;
+      const faltam = total - result.pago;
+      if (faltam <= 0) return `Ótimo 🙂\n${item} — quitado!`;
+      return `Perfeito 🙂\nFaltam ${faltam} parcela${faltam > 1 ? "s" : ""} do ${item}.`;
+    }
+
+    case "faltam":
+      return `Certo 🙂\nFaltam ${result.faltam} parcela${result.faltam > 1 ? "s" : ""} do ${item}.`;
+
+    case "current": {
+      const faltam = totalParcelas - result.atual;
+      if (faltam <= 0) return `Ótimo 🙂\n${item} — quitado!`;
+      return `Certo 🙂\nParcela ${result.atual} de ${totalParcelas} — faltam ${faltam}.`;
+    }
+  }
 }
 
 async function handleInstallmentRegistration(
