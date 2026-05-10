@@ -244,10 +244,10 @@ const SUBSCRIPTION_REMINDERS = [
 
 function buildReminderText(daysAhead: number, plansBlock: string): string {
   const intro = daysAhead === 7
-    ? "⏰ Lembrete: sua assinatura do Salva Bolso vence em 7 dias.\n\nRenove agora e continue sem interrupções:"
+    ? "Sua assinatura do Salva Bolso vence em 7 dias.\n\nSe quiser renovar com antecedência:"
     : daysAhead === 3
-    ? "⚠️ Sua assinatura vence em 3 dias!\n\nNão perca seu acesso ao Salva Bolso:"
-    : "🔴 Sua assinatura vence hoje!\n\nRenove agora para não perder o acesso:";
+    ? "Sua assinatura vence em 3 dias.\n\nPara continuar sem interrupção:"
+    : "Sua assinatura vence hoje.\n\nSe quiser manter o acesso:";
   return plansBlock ? `${intro}\n\n${plansBlock}` : intro;
 }
 
@@ -293,6 +293,66 @@ async function sendSubscriptionReminders(): Promise<void> {
         log.whatsapp(`sub_reminder ${daysAhead}d enviado`, { to: user.telefone, userId: user.id });
       } catch (err) {
         log.error(`falha sub_reminder ${daysAhead}d`, err, { userId: user.id });
+      }
+    }
+  }
+}
+
+// Lembretes de fim do trial: 3d e 0d antes de expirar (1x por marco, via sent_insights)
+const TRIAL_REMINDERS = [
+  { daysAhead: 3, marco: 103 },
+  { daysAhead: 0, marco: 100 },
+] as const;
+
+function buildTrialReminderText(daysAhead: number, plansBlock: string): string {
+  const intro = daysAhead === 3
+    ? "Seu período de teste termina em 3 dias.\n\nSe quiser continuar organizando seus gastos:"
+    : "Seu período de teste termina hoje.\n\nPara continuar usando o Salva Bolso:";
+  return plansBlock ? `${intro}\n\n${plansBlock}` : intro;
+}
+
+async function sendTrialReminders(): Promise<void> {
+  const plansBlock = await buildPlansBlock();
+
+  for (const { daysAhead, marco } of TRIAL_REMINDERS) {
+    let rows: { id: number; telefone: string; trial_date: string }[];
+    try {
+      ({ rows } = await pool.query<{ id: number; telefone: string; trial_date: string }>(
+        `SELECT u.id, u.telefone,
+                DATE(u.trial_ends_at AT TIME ZONE 'America/Sao_Paulo')::text AS trial_date
+         FROM users u
+         WHERE u.subscription_status = 'trial'
+           AND u.trial_ends_at IS NOT NULL
+           AND DATE(u.trial_ends_at AT TIME ZONE 'America/Sao_Paulo')
+               = (NOW() AT TIME ZONE 'America/Sao_Paulo')::date + ($1 || ' days')::INTERVAL
+           AND NOT EXISTS (
+             SELECT 1 FROM sent_insights
+             WHERE user_id = u.id
+               AND categoria = 'trial_reminder'
+               AND marco = $2
+               AND mes_referencia = DATE(u.trial_ends_at AT TIME ZONE 'America/Sao_Paulo')
+           )`,
+        [daysAhead.toString(), marco]
+      ));
+    } catch (err) {
+      log.error(`falha ao buscar usuarios para trial_reminder ${daysAhead}d`, err);
+      continue;
+    }
+
+    for (const user of rows) {
+      try {
+        const inserted = await pool.query(
+          `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+           VALUES ($1, 'trial_reminder', $2, $3::date)
+           ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+          [user.id, marco, user.trial_date]
+        );
+        if ((inserted.rowCount ?? 0) === 0) continue;
+
+        await whatsapp.sendText({ to: user.telefone, text: buildTrialReminderText(daysAhead, plansBlock) });
+        log.whatsapp(`trial_reminder ${daysAhead}d enviado`, { to: user.telefone, userId: user.id });
+      } catch (err) {
+        log.error(`falha trial_reminder ${daysAhead}d`, err, { userId: user.id });
       }
     }
   }
@@ -535,6 +595,7 @@ export async function runWeeklyNotifications(): Promise<void> {
 export async function runDailyNotifications(): Promise<void> {
   log.webhook("iniciando notificações diárias");
   try { await sendSubscriptionReminders(); }            catch (err) { log.error("falha sub reminders", err); }
+  try { await sendTrialReminders(); }                   catch (err) { log.error("falha trial reminders", err); }
   try { await sendRecorrentesAlert(); }                 catch (err) { log.error("falha alerta recorrentes", err); }
   try { await sendInactivityNotifications(); }          catch (err) { log.error("falha notif inatividade", err); }
   try { await sendMonthEndNotifications(); }             catch (err) { log.error("falha notif fim mes", err); }

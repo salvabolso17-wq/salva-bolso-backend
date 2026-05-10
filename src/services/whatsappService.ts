@@ -141,6 +141,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         "35 uber  •  50 mercado  •  120 farmácia",
         "",
         "Que eu vou organizando tudo pra você 📝",
+        "",
+        "Você tem 7 dias grátis pra testar no seu ritmo.",
       ].join("\n");
 
       try {
@@ -162,12 +164,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       new Date(user.trial_ends_at) <= new Date();
 
     const intro = ehTrialExpirado
-      ? "⏰ Seu período de teste encerrou.\n\nPara continuar controlando suas finanças no WhatsApp, escolha um plano:"
-      : "🔒 Sua assinatura expirou.\n\nPara continuar usando o Salva Bolso, renove agora:";
+      ? "Seu período de teste encerrou.\n\nPara continuar organizando seus gastos, escolha um plano:"
+      : "Sua assinatura expirou.\n\nPara continuar usando o Salva Bolso, renove agora:";
 
     const plansBlock = await buildPlansBlock();
     const corpo = plansBlock || "Entre em contato para assinar.";
-    const rodape = "\n\n✅ Após o pagamento, seu acesso é liberado automaticamente!";
+    const rodape = "\n\nApós o pagamento, seu acesso é liberado automaticamente.";
 
     await whatsapp.sendText({ to: message.telefone, text: `${intro}\n\n${corpo}${rodape}` });
     return { success: false, userId: user.id, erro: "Assinatura expirada" };
