@@ -450,7 +450,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   const linhasConfirmacao = parsed.tipo === "entrada"
     ? [`💰 ${fmtValor(parsed.valor)} registrado`]
-    : [`✅ ${fmtValor(parsed.valor)} — ${parsed.descricao}`];
+    : [`✅ ${fmtValor(parsed.valor)} — ${capitalizeFirst(parsed.descricao)}`];
 
   if (parsed.tipo === "saida") {
     const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
@@ -621,6 +621,10 @@ async function handleResumoCommand(user: UserRow, telefone: string): Promise<Pro
 
 function fmtValor(valor: number): string {
   return valor % 1 === 0 ? `R$ ${valor.toFixed(0)}` : `R$ ${valor.toFixed(2)}`;
+}
+
+function capitalizeFirst(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
 // Micro insight contextual — raro, leve, 100% detached do fluxo principal
@@ -1357,7 +1361,7 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
 }
 
 const ONBOARDING_TIPS: Record<number, string> = {
-  1:  `💡 Envie "saldo" para acompanhar quanto ainda resta no mês.`,
+  1:  `Perfeito. Vou organizando tudo por aqui pra você 👌`,
   3:  `Você já tem gastos em várias categorias!\nEnvie "ranking" para ver onde vai mais.`,
   4:  `Que tal criar uma meta?\nEx: meta viagem 5000`,
   10: `💡 Use "guardar 200 <nome da meta>" para registrar seu progresso.`,
