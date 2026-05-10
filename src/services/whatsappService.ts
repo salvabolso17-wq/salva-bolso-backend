@@ -1362,8 +1362,6 @@ async function handleHojeCommand(user: UserRow, telefone: string): Promise<Proce
 
 const ONBOARDING_TIPS: Record<number, string> = {
   1:  `Perfeito. Vou organizando tudo por aqui pra você 👌`,
-  3:  `Você já tem gastos em várias categorias!\nEnvie "ranking" para ver onde vai mais.`,
-  4:  `Que tal criar uma meta?\nEx: meta viagem 5000`,
   10: `💡 Use "guardar 200 <nome da meta>" para registrar seu progresso.`,
   11: `📈 Use "previsão" para estimar o fechamento do mês.`,
   12: `📅 Use "próximas" para ver suas contas recorrentes.`,
@@ -1402,23 +1400,12 @@ async function checkAndSendOnboardingTip(userId: number, telefone: string, event
           const linhas = [
             `Você já registrou ${fmtValor(metrics.total_saidas)} este mês.`,
             `Maior gasto: ${top.categoria}.`,
-            "",
-            'Envie "resumo" para ver o detalhamento.',
           ];
           await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
           log.whatsapp("aha moment enviado", { to: telefone, userId, totalSaidas: metrics.total_saidas });
         }
       }
       return;
-    } else if (n === 15) {
-      tipId = 4;   // 15º gasto → criar meta
-    } else {
-      // ranking: 5+ gastos OU 3+ categorias distintas (o que vier primeiro)
-      const catRow = await pool.query<{ count: string }>(
-        `SELECT COUNT(DISTINCT categoria) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
-        [userId]
-      );
-      if (n >= 5 && Number(catRow.rows[0].count) >= 3) tipId = 3;
     }
   } else if (evento === "recorrente_criado") {
     tipId = 12;                    // criou recorrente → próximas
