@@ -632,9 +632,25 @@ function capitalizeFirst(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-// Detecta quando a mesma descrição aparece 2x no mês → sugere recorrente 1x na vida
+const RECURRING_KEYWORDS = [
+  "netflix", "spotify", "disney", "prime", "youtube", "globoplay", "hbo",
+  "paramount", "deezer", "apple", "icloud",
+  "academia", "gym", "pilates", "natacao",
+  "aluguel", "condominio", "internet", "banda larga",
+  "luz", "energia", "água", "agua", "gas",
+  "faculdade", "escola", "mensalidade",
+  "seguro", "financiamento",
+  "assinatura", "plano",
+  "canva", "chatgpt", "openai", "dropbox", "amazon",
+];
+
+// Detecta serviços recorrentes conhecidos na 2ª ocorrência — pergunta natural, 1x na vida
 async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string): Promise<void> {
   try {
+    const descLower = descricao.toLowerCase();
+    const isKnown   = RECURRING_KEYWORDS.some(kw => descLower.includes(kw));
+    if (!isKnown) return;
+
     const now       = new Date();
     const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
@@ -647,7 +663,7 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
     );
     if (Number(countRow.rows[0].count) < 2) return;
 
-    const sentinel = `rec_${descricao.toLowerCase().replace(/\s+/g, "_").slice(0, 45)}`;
+    const sentinel = `rec_${descLower.replace(/\s+/g, "_").slice(0, 45)}`;
     const LIFETIME = new Date("2000-01-01");
     const inserted = await pool.query(
       `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
@@ -659,7 +675,7 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
 
     await whatsapp.sendText({
       to:   telefone,
-      text: `${capitalizeFirst(descricao)} apareceu mais de uma vez esse mês — parece conta fixa.`,
+      text: `${capitalizeFirst(descricao)} costuma aparecer todo mês?`,
     });
     log.whatsapp("sugestao recorrente enviada", { to: telefone, userId, descricao });
   } catch (err) {
