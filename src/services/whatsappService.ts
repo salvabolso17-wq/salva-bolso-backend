@@ -404,8 +404,24 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (/^resumo$/i.test(message.texto.trim())) {
     return await handleResumoCommand(user, message.telefone);
   }
-  if (/^top\s*gastos$/i.test(message.texto.trim())) {
+  if (/^top(\s*gastos)?$/i.test(message.texto.trim())) {
     return await handleTopGastosCommand(user, message.telefone);
+  }
+  if (/^parcelas?$|^parcelamentos?$/i.test(message.texto.trim())) {
+    try {
+      await whatsapp.sendText({
+        to:   message.telefone,
+        text: [
+          "Registre cada parcela assim:",
+          "120 parcela tv  •  80 parcela notebook",
+          "",
+          "\"buscar parcela\" mostra tudo registrado 🔍",
+        ].join("\n"),
+      });
+    } catch (err) {
+      log.error("falha ao enviar info parcelas", err, { to: message.telefone });
+    }
+    return { success: false, userId: user.id, erro: "parcelas info" };
   }
   if (/^limite\s+.+\s+[\d,.]+$/i.test(message.texto.trim())) {
     return await handleLimiteCommand(user, message.telefone, message.texto.trim());
@@ -2372,7 +2388,7 @@ function isSubscriptionActive(user: UserRow): boolean {
 function isCuriosityPhrase(texto: string): boolean {
   const t = texto.trim();
   if (/^(mostra|mostra\s+a[ií]|explica|me\s+conta|pode\s+falar)[\?!.]*$/i.test(t)) return true;
-  return /quero\s+ver|me\s+mostra|como\s+funciona|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|o\s+que\s+d[aá]\s+pra\s+fa[çz]|tem\s+mais\s+coisa|quero\s+entender|me\s+explica|o\s+que\s+[eéè]\s+isso|como\s+(uso|usar|fa[çc]o)\b|o\s+que\s+tem\s+(aqui|nesse?\s+bot)?|conta\s+mais|o\s+que\s+voc[eê]\s+conseg/i.test(t);
+  return /quero\s+ver|me\s+mostra|como\s+funciona|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|o\s+que\s+d[aá]\s+pra\s+fa[çz]|tem\s+mais\s+coisa|quero\s+entender|me\s+explica|o\s+que\s+[eéè]\s+isso|como\s+(uso|usar|fa[çc]o)\b|o\s+que\s+tem\s+(aqui|nesse?\s+bot)?|conta\s+mais|o\s+que\s+voc[eê]\s+conseg|o\s+que\s+mais\s+(posso|d[aá]|consigo)\s+(fazer|ver|usar)|o\s+que\s+(posso|consigo)\s+(fazer|ver|usar)/i.test(t);
 }
 
 function buildFeaturesMenuText(): string {
@@ -2690,9 +2706,9 @@ function buildContextualHint(texto: string): string {
   // Só sugere registro se claramente não for uma pergunta
   if (!ehPergunta && /dinheiro|gast|paguei|comprei|gastei/.test(t))    return 'Me manda o valor e o que foi:\n50 mercado';
   const fallbacks = [
-    "Me fala o que quer acompanhar.",
     "Pode me mandar um gasto ou perguntar sobre o mês.",
-    "Me manda um gasto ou fala o que quer ver 🙂",
+    "Me manda o valor e o que foi — ou me pergunta qualquer coisa.",
+    "Pode registrar um gasto ou pedir o saldo do mês.",
   ];
   return fallbacks[new Date().getHours() % fallbacks.length];
 }
