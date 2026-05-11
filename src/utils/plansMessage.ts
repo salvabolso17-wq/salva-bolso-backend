@@ -41,9 +41,9 @@ export async function buildPlansBlock(): Promise<string> {
   let plans: PlanInfo[];
   try {
     plans = await getActivePlans();
-    log.webhook(`[PLANS_LOG] getActivePlans returned ${plans.length} plans:`, plans.map(p => p.nome));
+    log.webhook(`[PLANS_LOG] getActivePlans returned ${plans.length} plans:`, { planNames: plans.map(p => p.nome) });
   } catch (err) {
-    log.error(`[PLANS_LOG] Error fetching active plans: ${err}`);
+    log.error(`[PLANS_LOG] Error fetching active plans:`, { error: String(err) });
     return "";
   }
 
@@ -82,14 +82,15 @@ export async function buildPlansBlock(): Promise<string> {
     if (plan.link && plan.preco !== null) {
       const checkoutUrl = `/checkout-premium?plan=${encodeURIComponent(plan.nome)}`;
       lines.push(`🚀 Assine agora: ${process.env.PUBLIC_URL ?? ''}${checkoutUrl}`);
-      log.webhook(`[PLANS_LOG] Generated checkout URL for ${plan.nome}: ${process.env.PUBLIC_URL ?? ''}${checkoutUrl}`);
+      log.webhook(`[PLANS_LOG] Generated checkout URL for ${plan.nome}:`, { url: `${process.env.PUBLIC_URL ?? ''}${checkoutUrl}` });
     } else {
-      log.webhook(`[PLANS_LOG] Skipping link for ${plan.nome}: plan.link=${plan.link}, plan.preco=${plan.preco}`);
+      log.webhook(`[PLANS_LOG] Skipping link for ${plan.nome}:`, { link: plan.link, price: plan.preco });
     }
     lines.push(""); // Add a blank line for separation
   }
 
-  const finalBlock = lines.join("\n").trimEnd();
-  log.webhook("[PLANS_LOG] Final plans block generated:", finalBlock.slice(0, 200) + '...'); // Log first 200 chars
+  const finalBlock = lines.join("
+").trimEnd();
+  log.webhook("[PLANS_LOG] Final plans block generated:", { block: finalBlock.slice(0, 200) + '...' }); // Log first 200 chars
   return finalBlock;
 }
