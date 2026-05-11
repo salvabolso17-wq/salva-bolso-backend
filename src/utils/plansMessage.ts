@@ -80,7 +80,7 @@ export async function buildPlansBlock(): Promise<string> {
     }
     lines.push(planLine);
     if (plan.link && plan.preco !== null) {
-      const fullUrl = `https://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+      const fullUrl = `https://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html?plan=${encodeURIComponent(plan.nome)}&price=${plan.preco.toFixed(2)}&checkoutLink=${encodeURIComponent(plan.link)}`;
       lines.push(`🚀 Assine agora: ${fullUrl}`);
       log.webhook(`[PLANS_LOG] Generated checkout URL for ${plan.nome}:`, { url: fullUrl });
     } else {
