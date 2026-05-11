@@ -33,7 +33,7 @@ body {
 
 .container {
     background-color: var(--white);
-    padding: 24px 44px 40px;
+    padding: 40px 44px;
     border-radius: var(--border-radius);
     box-shadow: var(--box-shadow-premium);
     text-align: center;
@@ -56,25 +56,16 @@ body {
 
 .brand-header {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin-bottom: 12px;
-    position: relative;
-}
-
-.logo {
-    width: 170px;
-    height: auto;
-    margin-bottom: 6px;
-    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05));
+    justify-content: center;
+    margin-bottom: 20px;
 }
 
 .premium-badge {
     background: linear-gradient(135deg, var(--accent-color) 0%, #d97706 100%);
     color: var(--white);
-    padding: 4px 14px;
+    padding: 6px 16px;
     border-radius: 9999px;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.05em;
