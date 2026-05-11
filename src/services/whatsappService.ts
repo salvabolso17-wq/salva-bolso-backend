@@ -1337,6 +1337,31 @@ async function handleLimiteCommand(user: UserRow, telefone: string, texto: strin
   };
 }
 
+async function handleListLimitsCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando list_limites", { userId: user.id });
+
+  const r = await pool.query<{ categoria: string; valor_limite: string }>(
+    `SELECT categoria, valor_limite FROM category_limits WHERE user_id = $1 ORDER BY categoria ASC`,
+    [user.id]
+  );
+
+  let txt: string;
+  if (r.rows.length === 0) {
+    txt = "Você ainda não tem limites definidos.\n\nEx:\nlimite alimentação 800";
+  } else {
+    const itens = r.rows.map(row => `• ${row.categoria} — ${fmtValor(Number(row.valor_limite))}`);
+    txt = ["Seus limites por categoria:", "", ...itens].join("\n");
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: txt });
+  } catch (err) {
+    log.error("falha ao enviar lista de limites", err, { to: telefone });
+  }
+
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "list_limites" } };
+}
+
 async function handleSemanaCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando semana", { userId: user.id });
 
@@ -2946,6 +2971,39 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     getLastContext(user.id) === "recurring"
   ) {
     return await handleRecorrentesTotalCommand(user, telefone);
+  }
+
+  // "extrato" / "ver extrato" / "meu extrato" → extrato do mês atual
+  if (
+    !temNumero &&
+    /^(extrato|ver\s+extrato|meu\s+extrato|quero\s+(ver\s+)?o?\s*extrato)[\?!.]*$/i.test(t)
+  ) {
+    const mesAtual = MESES_NOME[new Date().getMonth() + 1];
+    return await handleExtratoCommand(user, telefone, `extrato ${mesAtual}`);
+  }
+
+  // "buscar" / "buscar gastos" / "quero buscar" → pede o termo
+  if (
+    !temNumero &&
+    /^(buscar(\s+gastos?)?|quero\s+buscar|quero\s+procurar|procurar\s+gastos?)[\?!.]*$/i.test(t)
+  ) {
+    try {
+      await whatsapp.sendText({
+        to:   telefone,
+        text: "O que quer buscar?\n\nEx: buscar mercado",
+      });
+    } catch (err) {
+      log.error("falha ao enviar hint buscar", err, { userId: user.id });
+    }
+    return { success: false, userId: user.id, erro: "buscar sem termo" };
+  }
+
+  // "meus limites" / "quero ver meu limite" / "quais limites tenho" → lista limites
+  if (
+    !temNumero &&
+    /meus?\s+limites?|quero\s+(ver\s+)?(meu[s]?\s+)?limites?|quais?\s+(limites?\s+)?(eu\s+)?tenho|ver\s+limites?/i.test(t)
+  ) {
+    return await handleListLimitsCommand(user, telefone);
   }
 
   return null;
