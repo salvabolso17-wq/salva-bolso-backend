@@ -2683,7 +2683,7 @@ async function handleExtratoCommand(user: UserRow, telefone: string, texto: stri
 
 // Comandos de consulta permitidos em modo limitado (trial/assinatura expirados)
 function isReadOnlyCommand(texto: string): boolean {
-  return /^(saldo|resumo|hoje|semana|ranking|comparar|previs[aã]o|categorias|desafio|ajuda|metas|recorrentes|pr[oó]ximas|top\s*gastos)$/i.test(texto)
+  return /^(saldo|resumo|hoje|semana|ranking|comparar|previs[aã]o|categorias|desafio|ajuda|menu|metas|recorrentes|pr[oó]ximas|top\s*gastos|extrato|parcelas)$/i.test(texto)
       || /^(buscar|extrato)\s+/i.test(texto);
 }
 
