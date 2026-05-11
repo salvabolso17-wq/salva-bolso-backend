@@ -247,6 +247,15 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       // Comando reconhecido → cancela pending e continua abaixo
       await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     } else if (pending.step === "waiting_renda") {
+      // Skip explícito → cancela e segue
+      const skipRenda = /^(n[aã]o\s+sei|n[aã]o\s+tenho|sem\s+renda|pula|pular|depois|n[aã]o\s+quero|prefiro\s+n[aã]o|ignore|ignora|skip)[\?!.]*$/i.test(textoTrim);
+      if (skipRenda) {
+        await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+        try {
+          await whatsapp.sendText({ to: message.telefone, text: "Tudo bem 🙂\nSempre que quiser informar, manda: recebo 3000" });
+        } catch (_) { /* silent */ }
+        return { success: false, userId: user.id, erro: "renda ignorada pelo usuario" };
+      }
       // Gasto explícito cancela o contexto de renda e processa normalmente
       const parsedAsExpense = parseTransaction(textoTrim);
       if (parsedAsExpense && parsedAsExpense.tipo === "saida") {
@@ -917,7 +926,7 @@ async function handleSaldoCommand(user: UserRow, telefone: string): Promise<Proc
     `Gastos: ${fmtValor(metrics.total_saidas)}`,
     sobrou >= 0
       ? `💚 Sobrou: ${fmtValor(sobrou)}`
-      : `⚠️ Deficit: ${fmtValor(Math.abs(sobrou))}`,
+      : `🔴 No vermelho: ${fmtValor(Math.abs(sobrou))} a mais do que entrou`,
   ];
 
   try {
@@ -3053,6 +3062,25 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     /meus?\s+limites?|quero\s+(ver\s+)?(meu[s]?\s+)?limites?|quais?\s+(limites?\s+)?(eu\s+)?tenho|ver\s+limites?/i.test(t)
   ) {
     return await handleListLimitsCommand(user, telefone);
+  }
+
+  // Atualização de renda via linguagem natural: "minha renda é 4000", "recebo 3000", "meu salário mudou"
+  if (/recebo\s+[\d]|minha\s+renda\s+[eéè\s]|meu\s+sal[aá]rio\s+(mudou|[eéè\s]|[eé]\s)|ganho\s+[\d]|renda\s+de\s+[\d]|sal[aá]rio\s+de\s+[\d]/i.test(t)) {
+    const m = t.match(/[\d][0-9.,]*/);
+    if (m) {
+      const novaRenda = parseValor(m[0]);
+      if (novaRenda > 0) {
+        try {
+          await pool.query(`UPDATE users SET renda = $1 WHERE id = $2`, [novaRenda, user.id]);
+          const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(novaRenda);
+          await whatsapp.sendText({ to: telefone, text: `Anotado 🙂 Renda atualizada para ${fmt}.` });
+          log.whatsapp("renda atualizada via intent", { to: telefone, userId: user.id, novaRenda });
+        } catch (err) {
+          log.error("falha ao atualizar renda via intent", err, { userId: user.id });
+        }
+        return { success: false, userId: user.id, erro: "renda atualizada" };
+      }
+    }
   }
 
   return null;
