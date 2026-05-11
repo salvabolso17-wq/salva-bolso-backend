@@ -178,16 +178,27 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   // ── Controle de acesso (trial / active / expired) — modo limitado ────────
-  if (!isSubscriptionActive(user)) {
+  const _ativo = isSubscriptionActive(user);
+  log.webhook("controle de acesso", {
+    userId:                user.id,
+    status:                user.subscription_status,
+    trial_ends_at:         user.trial_ends_at?.toISOString() ?? null,
+    subscription_expires_at: user.subscription_expires_at?.toISOString() ?? null,
+    ativo:                 _ativo,
+  });
+
+  if (!_ativo) {
     const textoTrim    = message.texto.trim();
     const tentativaOp  = parseTransaction(textoTrim);
     const apenasLeitura = isReadOnlyCommand(textoTrim);
+    log.webhook("acesso negado — verificando tipo", { textoTrim, tentativaOp: !!tentativaOp, apenasLeitura });
 
     if (tentativaOp || !apenasLeitura) {
       // Operação de escrita bloqueada — modo limitado
+      const statusNorm  = (user.subscription_status ?? "").trim().toLowerCase();
       const eraTrialUser =
-        user.subscription_status === "trial" ||
-        (user.subscription_status === "expired" && !user.subscription_expires_at);
+        statusNorm === "trial" ||
+        (statusNorm === "expired" && !user.subscription_expires_at);
       const expirouEm = user.subscription_expires_at ?? user.trial_ends_at ?? new Date();
       try {
         await sendExpirationBlock(user.id, message.telefone, eraTrialUser, expirouEm);
@@ -2729,14 +2740,20 @@ async function sendExpirationBlock(userId: number, telefone: string, eraTrialUse
 }
 
 function isSubscriptionActive(user: UserRow): boolean {
-  if (user.subscription_status === "active") {
+  const status = (user.subscription_status ?? "").trim().toLowerCase();
+
+  if (status === "expired") return false;
+
+  if (status === "active") {
     if (!user.subscription_expires_at) return true;
     return new Date(user.subscription_expires_at) > new Date();
   }
-  if (user.subscription_status === "trial") {
+
+  if (status === "trial") {
     return !user.trial_ends_at || new Date(user.trial_ends_at) > new Date();
   }
-  return false;
+
+  return false; // qualquer status desconhecido = bloqueado
 }
 
 function isCuriosityPhrase(texto: string): boolean {
