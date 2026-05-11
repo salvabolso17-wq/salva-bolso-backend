@@ -232,8 +232,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "registrar_parcela";
-    step: "waiting_selection" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -271,6 +271,18 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
       // Comando reconhecido → cancela pending e continua abaixo
       await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    } else if (pending.action === "confirmar_recorrente_multi" && pending.step === "waiting_selection_multi") {
+      const isNegative = /^(não|nao|n|no|agora\s*não|agora\s*nao|depois|nenhum|nenhuma|nada|por\s+enquanto|dispenso|obrigad[ao])[\?!.]*$/i.test(textoTrim);
+      
+      if (isNegative) {
+        await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+        await whatsapp.sendText({ to: message.telefone, text: "Tudo bem 🙂" });
+        return { success: false, userId: user.id, erro: "Recorrentes rejeitados" };
+      } else if (isKnownCommand(textoTrim)) {
+        await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+      } else {
+        return await handleConfirmarRecorrenteMulti(user, message.telefone, textoTrim, pending.tx_ids);
+      }
     } else if (pending.step === "waiting_new_value") {
       if (!isKnownCommand(textoTrim)) {
         return await handleCorrigirNovoValor(user, message.telefone, message.texto, pending.selected_tx_id!);
@@ -683,6 +695,18 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         }
         return { success: false, userId: user.id, erro: "installment context follow-up" };
       }
+    }
+  }
+
+  // ── Recurring context follow-ups ─────────────────────────────────────────
+  if (getLastContext(user.id) === "recurring") {
+    const tq = message.texto.trim().toLowerCase();
+    const isQuestion = /(mostr|ver|qua(is|l)|lista|tudo|todos|resumo|meus|outros|quais\s+s[aã]o|quais\s+(eu\s+)?tenho|e\s+os\s+outros)/i.test(tq);
+    const temNumero = /\d/.test(tq);
+    
+    if (isQuestion && !temNumero) {
+      setLastCommand(user.id, "recorrentes");
+      return await handleRecorrentesCommand(user, message.telefone);
     }
   }
 
@@ -3293,15 +3317,19 @@ async function handleMultiLineTransactions(
           }
         }
 
-        // Fallback genérico: pergunta sobre a lista toda
+        // Fallback genérico: pergunta sobre a lista toda com numeração
         if (!disparou) {
-          await whatsapp.sendText({ to: telefone, text: "Algum desses acontece todo mês? 🔁" });
+          const listaOpcoes = saidas.map((r, i) => `${i + 1}. ${r.descricao}`).join("\n");
+          await whatsapp.sendText({ 
+            to: telefone, 
+            text: `Quais desses gastos acontecem todo mês? (ex: 1 e 3, ou todos)\n\n${listaOpcoes}` 
+          });
           const payload = saidas.map(r => ({ nome: r.descricao, valor: r.valor, frequencia: "mensal" }));
           await pool.query(
             `INSERT INTO pending_actions (user_id, action, step, tx_ids)
-             VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
+             VALUES ($1, 'confirmar_recorrente_multi', 'waiting_selection_multi', $2::jsonb)
              ON CONFLICT (user_id) DO UPDATE
-               SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+               SET action = 'confirmar_recorrente_multi', step = 'waiting_selection_multi', tx_ids = $2::jsonb,
                    selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
             [user.id, JSON.stringify(payload)]
           );
@@ -3460,7 +3488,57 @@ async function handleRegistrarParcelaValor(
   };
 }
 
-// ── Installment parser ────────────────────────────────────────────────────────
+async function handleConfirmarRecorrenteMulti(user: UserRow, telefone: string, texto: string, txIdsRaw: unknown): Promise<ProcessResult> {
+  const items = txIdsRaw as { nome: string; valor: number; frequencia: string }[];
+  const t = texto.toLowerCase();
+  
+  let selectedIndices: number[] = [];
+  
+  if (t.includes("todo") || t.includes("tudo") || t.includes("ambos") || t.includes("os dois") || t.includes("as duas")) {
+    selectedIndices = items.map((_, i) => i);
+  } else {
+    // Parse numbers
+    const matches = t.match(/\d+/g);
+    if (matches) {
+       selectedIndices = matches.map(n => parseInt(n, 10) - 1).filter(i => i >= 0 && i < items.length);
+    }
+  }
+  
+  if (selectedIndices.length === 0) {
+     await whatsapp.sendText({ to: telefone, text: "Não entendi quais. Pode mandar os números? (ex: 1 e 2)\nOu 'nenhum' para pular." });
+     return { success: false, userId: user.id, erro: "Aguardando seleção válida" };
+  }
+  
+  const selectedItems = selectedIndices.map(i => items[i]);
+  
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+  
+  let totalFixo = 0;
+  for (const item of selectedItems) {
+    await pool.query(
+      `INSERT INTO recurring_expenses (user_id, nome, valor, frequencia)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, nome)
+       DO UPDATE SET valor = $3, frequencia = $4, ativo = TRUE`,
+      [user.id, item.nome, item.valor, item.frequencia]
+    );
+    totalFixo += item.valor;
+  }
+  
+  recordAction(user.id, "created_recurring");
+  setLastCommand(user.id, "recorrentes");
+  setLastContext(user.id, "recurring");
+  
+  const linhas = ["📌 Recorrentes salvos.", ""];
+  for (const item of selectedItems) {
+    linhas.push(`• ${capitalizeFirst(item.nome)} — ${fmtValor(item.valor)}`);
+  }
+  linhas.push("", `Total mensal fixo:`);
+  linhas.push(fmtValor(totalFixo));
+  
+  await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "confirmar_recorrente_multi" } };
+}
 
 interface InstallmentInfo {
   item:          string;
