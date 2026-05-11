@@ -1,4 +1,5 @@
 import pool from "../db/client";
+import { log } from "../utils/logger";
 
 interface PlanInfo {
   nome: string;
@@ -40,14 +41,14 @@ export async function buildPlansBlock(): Promise<string> {
   let plans: PlanInfo[];
   try {
     plans = await getActivePlans();
-    console.log(`[PLANS_LOG] getActivePlans returned ${plans.length} plans:`, plans.map(p => p.nome));
+    log.webhook(`[PLANS_LOG] getActivePlans returned ${plans.length} plans:`, plans.map(p => p.nome));
   } catch (err) {
-    console.error(`[PLANS_LOG] Error fetching active plans: ${err}`);
+    log.error(`[PLANS_LOG] Error fetching active plans: ${err}`);
     return "";
   }
 
   if (plans.length === 0) {
-    console.log("[PLANS_LOG] No active plans found, returning empty string.");
+    log.webhook("[PLANS_LOG] No active plans found, returning empty string.");
     return "";
   }
 
@@ -81,14 +82,14 @@ export async function buildPlansBlock(): Promise<string> {
     if (plan.link && plan.preco !== null) {
       const checkoutUrl = `/checkout-premium?plan=${encodeURIComponent(plan.nome)}`;
       lines.push(`🚀 Assine agora: ${process.env.PUBLIC_URL ?? ''}${checkoutUrl}`);
-      console.log(`[PLANS_LOG] Generated checkout URL for ${plan.nome}: ${process.env.PUBLIC_URL ?? ''}${checkoutUrl}`);
+      log.webhook(`[PLANS_LOG] Generated checkout URL for ${plan.nome}: ${process.env.PUBLIC_URL ?? ''}${checkoutUrl}`);
     } else {
-      console.log(`[PLANS_LOG] Skipping link for ${plan.nome}: plan.link=${plan.link}, plan.preco=${plan.preco}`);
+      log.webhook(`[PLANS_LOG] Skipping link for ${plan.nome}: plan.link=${plan.link}, plan.preco=${plan.preco}`);
     }
     lines.push(""); // Add a blank line for separation
   }
 
   const finalBlock = lines.join("\n").trimEnd();
-  console.log("[PLANS_LOG] Final plans block generated:", finalBlock.slice(0, 200) + '...'); // Log first 200 chars
+  log.webhook("[PLANS_LOG] Final plans block generated:", finalBlock.slice(0, 200) + '...'); // Log first 200 chars
   return finalBlock;
 }

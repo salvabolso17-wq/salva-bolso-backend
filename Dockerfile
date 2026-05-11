@@ -16,6 +16,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev --prefer-offline
 
+COPY .env .env
+
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
