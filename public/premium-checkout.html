@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salva Bolso Premium</title>
+    <link rel="stylesheet" href="/style.css">
+    <script>
+        // Dados do plano e link de checkout serão injetados aqui pelo backend
+        window.planData = {
+            name: '{{PLAN_NAME}}',
+            price: '{{PLAN_PRICE}}',
+            checkoutLink: '{{CHECKOUT_LINK}}'
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <img src="/logo.png" alt="Salva Bolso Logo" class="logo">
+        <h1>Seu dinheiro organizado no WhatsApp</h1>
+        <p class="slogan">Mais controle, menos preocupação. Tudo na palma da sua mão.</p>
+
+        <div class="plan-details">
+            <h2>✨ Seu Plano Escolhido: <span id="plan-name"></span></h2>
+            <p class="price" id="plan-price"></p>
+            <ul class="benefits">
+                <li>✅ Acesso ilimitado a todos os recursos</li>
+                <li>📊 Relatórios financeiros detalhados</li>
+                <li>🎯 Metas de economia personalizadas</li>
+                <li>🔁 Gestão de gastos recorrentes</li>
+                <li>🔒 Seus dados seguros e privados</li>
+            </ul>
+        </div>
+
+        <button id="continue-payment-button" class="cta-button">Continuar Pagamento</button>
+        <p class="security-info">Pagamento seguro via Asaas</p>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const planName = window.planData.name;
+            const planPrice = window.planData.price;
+            const checkoutLink = window.planData.checkoutLink;
+
+            if (planName) {
+                document.getElementById('plan-name').textContent = planName;
+            }
+            if (planPrice) {
+                document.getElementById('plan-price').textContent = `Investimento: R$ ${parseFloat(planPrice).toFixed(2).replace('.', ',')}`;
+            }
+
+            const continueButton = document.getElementById('continue-payment-button');
+            if (checkoutLink) {
+                continueButton.onclick = () => {
+                    window.location.href = checkoutLink;
+                };
+            } else {
+                continueButton.disabled = true;
+                continueButton.textContent = 'Link de pagamento indisponível';
+            }
+        });
+    </script>
+</body>
+</html>
