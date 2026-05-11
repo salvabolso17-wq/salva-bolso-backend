@@ -90,8 +90,7 @@ export async function buildPlansBlock(): Promise<string> {
     lines.push(""); // Add a blank line for separation
   }
 
-  const finalBlock = lines.join("
-").trimEnd();
+  const finalBlock = lines.join("\n").trimEnd();
   log.webhook("[PLANS_LOG] Final plans block generated:", { block: finalBlock.slice(0, 200) + '...' }); // Log first 200 chars
   return finalBlock;
 }
