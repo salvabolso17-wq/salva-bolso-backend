@@ -40,11 +40,16 @@ export async function buildPlansBlock(): Promise<string> {
   let plans: PlanInfo[];
   try {
     plans = await getActivePlans();
-  } catch {
+    console.log(`[PLANS_LOG] getActivePlans returned ${plans.length} plans:`, plans.map(p => p.nome));
+  } catch (err) {
+    console.error(`[PLANS_LOG] Error fetching active plans: ${err}`);
     return "";
   }
 
-  if (plans.length === 0) return "";
+  if (plans.length === 0) {
+    console.log("[PLANS_LOG] No active plans found, returning empty string.");
+    return "";
+  }
 
   // Calcula economia do plano anual em relação ao mensal
   const mensal = plans.find(p => p.nome === "mensal");
@@ -76,9 +81,14 @@ export async function buildPlansBlock(): Promise<string> {
     if (plan.link && plan.preco !== null) {
       const checkoutUrl = `/checkout-premium?plan=${encodeURIComponent(plan.nome)}`;
       lines.push(`🚀 Assine agora: ${process.env.PUBLIC_URL ?? ''}${checkoutUrl}`);
+      console.log(`[PLANS_LOG] Generated checkout URL for ${plan.nome}: ${process.env.PUBLIC_URL ?? ''}${checkoutUrl}`);
+    } else {
+      console.log(`[PLANS_LOG] Skipping link for ${plan.nome}: plan.link=${plan.link}, plan.preco=${plan.preco}`);
     }
     lines.push(""); // Add a blank line for separation
   }
 
-  return lines.join("\n").trimEnd();
+  const finalBlock = lines.join("\n").trimEnd();
+  console.log("[PLANS_LOG] Final plans block generated:", finalBlock.slice(0, 200) + '...'); // Log first 200 chars
+  return finalBlock;
 }
