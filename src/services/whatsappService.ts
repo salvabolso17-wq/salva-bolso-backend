@@ -130,15 +130,16 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     } else {
       // Guided: welcome sempre igual + convite ou menu dependendo da intenção
       const nome      = firstNameOf(message.pushName);
-      const saudacao  = nome ? `Olá, ${nome} 👋` : `Olá 👋`;
+      const saudacao  = nome ? `Oi, ${nome} 👋` : `Oi 👋`;
       const boas_vindas = [
         saudacao,
         "",
-        "Pode me mandar seus gastos por aqui mesmo.",
+        "Bem-vindo ao Salva Bolso.",
         "",
-        "35 uber  •  50 mercado  •  120 farmácia 📝",
+        "Me manda um gasto pra começar:",
+        "50 mercado  •  35 uber  •  120 farmácia",
         "",
-        "Você tem 7 dias grátis pra testar no seu ritmo.",
+        "Você tem 7 dias grátis 🙂",
       ].join("\n");
 
       try {
