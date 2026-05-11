@@ -48,7 +48,7 @@ export async function buildPlansBlock(): Promise<string> {
   }
 
   if (plans.length === 0) {
-    log.webhook("[PLANS_LOG] No active plans found, returning empty string.");
+    log.webhook("[PLANS_LOG] No active plans found, returning empty string.", {});
     return "";
   }
 
