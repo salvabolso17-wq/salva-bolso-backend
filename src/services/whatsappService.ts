@@ -1804,14 +1804,18 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
       "120 farmácia",
       "+3000 salário",
       "",
+      "Parcelas:",
+      "iphone 12x de 755",
+      "tv 6x 300",
+      "",
       "Para consultar:",
-      "saldo — como está o mês",
-      "resumo — gastos por categoria",
-      "hoje — o que gastei hoje",
+      "saldo  •  resumo  •  hoje",
     ];
   } else if (n < 15) {
     linhas = [
       "Para registrar: 50 mercado  •  +3000 salário",
+      "",
+      "Parcelas: iphone 12x de 755",
       "",
       "Consultas:",
       "saldo  •  resumo  •  hoje  •  semana",
@@ -1820,20 +1824,22 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
       "Extras:",
       "meta viagem 5000",
       "limite alimentação 800",
+      "recorrente 39 netflix mensal",
     ];
   } else {
     linhas = [
       "Para registrar: 50 mercado  •  +3000 salário",
+      "Parcelas: iphone 12x de 755  •  tv 6x 300",
       "",
       "Consultas:",
       "saldo  •  resumo  •  hoje  •  semana",
-      "ranking  •  previsão  •  categorias",
-      "recorrentes  •  próximas  •  buscar <termo>",
+      "ranking  •  previsão  •  recorrentes  •  próximas",
       "apagar  •  corrigir",
       "",
       "Extras:",
       "meta viagem 5000  •  guardar 200 viagem",
       "limite alimentação 800  •  recorrente 39 netflix mensal",
+      "buscar mercado  •  extrato março",
     ];
   }
 
@@ -2618,15 +2624,11 @@ function buildFeaturesMenuText(): string {
   return [
     "O que consigo fazer:",
     "",
-    "📊 saldo",
-    "🧾 resumo",
-    "📈 ranking · previsão",
-    "",
-    "🔁 recorrentes",
-    "🎯 metas",
-    "",
-    "✏️ corrigir · apagar",
-    "📚 buscar · extrato",
+    "📊 saldo  •  resumo  •  ranking",
+    "💳 parcelas — iphone 12x de 755",
+    "🔁 recorrentes  •  próximas",
+    "🎯 metas  •  limites",
+    "✏️ corrigir  •  apagar",
     "",
     "Pode me perguntar do seu jeito 🙂",
   ].join("\n");
