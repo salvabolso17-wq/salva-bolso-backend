@@ -2,31 +2,36 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Salva Bolso Premium</title>
     <link rel="stylesheet" href="/style.css">
     <link rel="icon" href="/favicon.ico">
 </head>
 <body>
     <div class="container">
-        <img src="/logo.png" alt="Salva Bolso Logo" class="logo">
-        <h1>Seu dinheiro organizado no WhatsApp</h1>
-        <p class="slogan">Mais controle, menos preocupação. Tudo na palma da sua mão.</p>
+        <img src="/logo.png" alt="Salva Bolso" class="logo">
+        <h1>Sua vida financeira organizada</h1>
+        <p class="slogan">Mais controle, menos preocupação. Direto no seu WhatsApp.</p>
 
         <div class="plan-details">
-            <h2>✨ Seu Plano Escolhido: <span id="plan-name"></span></h2>
-            <p class="price" id="plan-price"></p>
+            <h2>Plano <span id="plan-name">Premium</span></h2>
+            <div class="price" id="plan-price">R$ 0,00 <small>/mês</small></div>
+            
             <ul class="benefits">
-                <li>✅ Acesso ilimitado a todos os recursos</li>
-                <li>📊 Relatórios financeiros detalhados</li>
-                <li>🎯 Metas de economia personalizadas</li>
-                <li>🔁 Gestão de gastos recorrentes</li>
-                <li>🔒 Seus dados seguros e privados</li>
+                <li>Acesso ilimitado a todos os recursos</li>
+                <li>Relatórios financeiros detalhados</li>
+                <li>Metas de economia personalizadas</li>
+                <li>Gestão de gastos recorrentes</li>
+                <li>Privacidade e segurança total</li>
             </ul>
         </div>
 
-        <button id="continue-payment-button" class="cta-button">Continuar Pagamento</button>
-        <p class="security-info">Pagamento seguro via Asaas</p>
+        <button id="continue-payment-button" class="cta-button">
+            Assinar Agora
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </button>
+        
+        <p class="security-info">Pagamento 100% seguro via Asaas</p>
     </div>
 
     <script>
@@ -39,18 +44,27 @@
             if (planName) {
                 document.getElementById('plan-name').textContent = planName;
             }
+            
             if (planPrice) {
-                document.getElementById('plan-price').textContent = `Investimento: R$ ${parseFloat(planPrice).toFixed(2).replace('.', ',')}`;
+                const formattedPrice = parseFloat(planPrice).toLocaleString('pt-BR', {
+                    style: 'currency',
+                    currency: 'BRL'
+                });
+                const period = planName && planName.toLowerCase().includes('anual') ? 'ano' : 'mês';
+                document.getElementById('plan-price').innerHTML = `${formattedPrice} <small>/${period}</small>`;
             }
 
             const continueButton = document.getElementById('continue-payment-button');
             if (checkoutLink) {
                 continueButton.onclick = () => {
+                    continueButton.disabled = true;
+                    continueButton.textContent = 'Redirecionando...';
                     window.location.href = checkoutLink;
                 };
             } else {
                 continueButton.disabled = true;
-                continueButton.textContent = 'Link de pagamento indisponível';
+                continueButton.textContent = 'Link indisponível';
+                continueButton.style.opacity = '0.5';
             }
         });
     </script>

@@ -1,96 +1,131 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+
 :root {
-    --primary-color: #007bff;
-    --secondary-color: #2c3e50;
-    --accent-color: #28a745;
-    --light-bg: #f8f9fa;
-    --dark-text: #343a40;
-    --medium-text: #6c757d;
-    --border-radius: 12px;
-    --box-shadow-subtle: 0 4px 10px rgba(0, 0, 0, 0.05);
-    --box-shadow-medium: 0 8px 20px rgba(0, 0, 0, 0.1);
+    --primary-color: #10b981; /* Emerald Green - gives a sense of growth/money */
+    --primary-dark: #059669;
+    --secondary-color: #1f2937; /* Dark Slate - professional */
+    --accent-color: #f59e0b; /* Amber - for 'Premium' feel */
+    --light-bg: #f3f4f6;
+    --white: #ffffff;
+    --dark-text: #111827;
+    --medium-text: #4b5563;
+    --border-radius: 20px;
+    --box-shadow-subtle: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --box-shadow-premium: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+* {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
 }
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-    background-color: var(--light-bg);
+    font-family: 'Inter', sans-serif;
+    background: linear-gradient(135deg, #e0f2fe 0%, #f0fdf4 100%);
     color: var(--dark-text);
     margin: 0;
-    padding: 0;
+    padding: 20px;
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    box-sizing: border-box;
 }
 
 .container {
-    background-color: #fff;
+    background-color: var(--white);
     padding: 40px;
     border-radius: var(--border-radius);
-    box-shadow: var(--box-shadow-medium);
+    box-shadow: var(--box-shadow-premium);
     text-align: center;
-    max-width: 500px;
+    max-width: 480px;
     width: 100%;
-    margin: 30px auto;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Premium ribbon or accent */
+.container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
 }
 
 .logo {
-    width: 150px;
-    margin-bottom: 35px;
+    width: 120px;
+    height: auto;
+    margin-bottom: 24px;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05));
 }
 
 h1 {
-    font-size: 2.3em;
+    font-size: 2rem;
     color: var(--secondary-color);
-    margin-bottom: 18px;
-    line-height: 1.3;
-    font-weight: 700;
+    margin-bottom: 12px;
+    line-height: 1.2;
+    font-weight: 800;
+    letter-spacing: -0.025em;
 }
 
 .slogan {
-    font-size: 1.25em;
+    font-size: 1.1rem;
     color: var(--medium-text);
-    margin-bottom: 45px;
-    line-height: 1.6;
+    margin-bottom: 32px;
+    line-height: 1.5;
     font-weight: 400;
 }
 
 .plan-details {
-    background-color: #ffffff;
-    border: 1px solid #e0e0e0;
-    padding: 30px;
-    border-radius: var(--border-radius);
-    margin-bottom: 40px;
+    background-color: #f9fafb;
+    border: 1px solid #e5e7eb;
+    padding: 28px;
+    border-radius: 16px;
+    margin-bottom: 32px;
     text-align: left;
-    box-shadow: var(--box-shadow-subtle);
-    transition: transform 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .plan-details:hover {
-    transform: translateY(-5px);
+    transform: translateY(-4px);
+    box-shadow: var(--box-shadow-subtle);
+    border-color: var(--primary-color);
 }
 
 .plan-details h2 {
-    font-size: 1.6em;
-    color: var(--primary-color);
+    font-size: 1.25rem;
+    color: var(--secondary-color);
     margin-top: 0;
-    margin-bottom: 15px;
+    margin-bottom: 16px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-weight: 600;
+    gap: 8px;
+    font-weight: 700;
 }
 
 .plan-details h2 span {
-    font-weight: 700;
-    color: var(--secondary-color);
+    color: var(--primary-color);
+    background: #ecfdf5;
+    padding: 2px 10px;
+    border-radius: 9999px;
+    font-size: 0.9rem;
+    text-transform: uppercase;
 }
 
 .price {
-    font-size: 2em;
+    font-size: 2.25rem;
     font-weight: 800;
-    color: var(--accent-color);
-    margin-bottom: 30px;
+    color: var(--secondary-color);
+    margin-bottom: 24px;
+    display: block;
+}
+
+.price small {
+    font-size: 1rem;
+    font-weight: 400;
+    color: var(--medium-text);
 }
 
 .benefits {
@@ -100,123 +135,110 @@ h1 {
 }
 
 .benefits li {
-    font-size: 1.05em;
-    margin-bottom: 15px;
-    color: var(--dark-text);
-    position: relative;
-    padding-left: 35px;
-    line-height: 1.6;
-    font-weight: 400;
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+    color: var(--medium-text);
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .benefits li::before {
-    content: '✅';
-    position: absolute;
-    left: 0;
-    color: var(--accent-color);
-    font-size: 1.2em;
+    content: '✓';
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background-color: #d1fae5;
+    color: var(--primary-dark);
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 900;
+    flex-shrink: 0;
 }
 
 .cta-button {
-    background-color: var(--primary-color);
+    background: linear-gradient(180deg, var(--primary-color) 0%, var(--primary-dark) 100%);
     color: #fff;
     border: none;
-    border-radius: 10px;
-    padding: 20px 40px;
-    font-size: 1.4em;
+    border-radius: 14px;
+    padding: 18px 32px;
+    font-size: 1.125rem;
     font-weight: 700;
     cursor: pointer;
-    transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
+    transition: all 0.2s ease;
     width: 100%;
-    max-width: 380px;
-    margin-bottom: 25px;
-    box-shadow: 0 6px 15px rgba(0, 123, 255, 0.3);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
 }
 
 .cta-button:hover {
-    background-color: #0056b3;
-    transform: translateY(-5px);
-    box-shadow: 0 8px 20px rgba(0, 123, 255, 0.4);
+    transform: translateY(-2px);
+    box-shadow: 0 20px 25px -5px rgba(16, 185, 129, 0.4);
+    filter: brightness(1.05);
 }
 
-.cta-button:disabled {
-    background-color: #cccccc;
-    cursor: not-allowed;
-    box-shadow: none;
+.cta-button:active {
     transform: translateY(0);
 }
 
+.cta-button:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+}
+
 .security-info {
-    font-size: 0.95em;
+    font-size: 0.875rem;
     color: var(--medium-text);
-    margin-top: 20px;
-    font-weight: 300;
+    margin-top: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.security-info::before {
+    content: '🔒';
+    font-size: 0.9rem;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.container {
+    animation: fadeIn 0.6s ease-out;
 }
 
 /* Responsive adjustments */
-@media (max-width: 600px) {
+@media (max-width: 480px) {
     body {
-        padding: 10px;
+        padding: 16px;
         align-items: flex-start;
     }
 
     .container {
-        padding: 20px;
-        margin-top: 20px;
-        border-radius: 10px;
-        box-shadow: var(--box-shadow-subtle);
-    }
-
-    .logo {
-        width: 100px;
-        margin-bottom: 20px;
+        padding: 32px 24px;
+        margin-top: 10px;
     }
 
     h1 {
-        font-size: 1.9em;
-        margin-bottom: 12px;
-    }
-
-    .slogan {
-        font-size: 1.1em;
-        margin-bottom: 35px;
+        font-size: 1.75rem;
     }
 
     .plan-details {
         padding: 20px;
-        margin-bottom: 35px;
-        border-radius: 10px;
-    }
-
-    .plan-details h2 {
-        font-size: 1.4em;
-        flex-direction: column;
-        align-items: flex-start;
-        margin-bottom: 10px;
     }
 
     .price {
-        font-size: 1.8em;
-        margin-bottom: 25px;
-    }
-
-    .benefits li {
-        font-size: 1em;
-        padding-left: 30px;
-        margin-bottom: 10px;
-    }
-
-    .cta-button {
-        padding: 16px 30px;
-        font-size: 1.2em;
-        max-width: 100%;
-        box-shadow: 0 4px 10px rgba(0, 123, 255, 0.2);
-    }
-
-    .security-info {
-        font-size: 0.85em;
-        margin-top: 15px;
+        font-size: 1.875rem;
     }
 }
