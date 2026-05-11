@@ -247,10 +247,16 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       // Comando reconhecido → cancela pending e continua abaixo
       await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     } else if (pending.step === "waiting_renda") {
-      if (!isKnownCommand(textoTrim)) {
+      // Gasto explícito cancela o contexto de renda e processa normalmente
+      const parsedAsExpense = parseTransaction(textoTrim);
+      if (parsedAsExpense && parsedAsExpense.tipo === "saida") {
+        await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+        // fall through para registro normal
+      } else if (!isKnownCommand(textoTrim)) {
         return await handleNovoMesRenda(user, message.telefone, textoTrim);
+      } else {
+        await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
       }
-      await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     } else if (pending.step === "waiting_carryover") {
       if (textoTrim === "1" || textoTrim === "2") {
         return await handleNovoMesCarryover(user, message.telefone, textoTrim, pending.tx_ids);
@@ -672,7 +678,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Parser ────────────────────────────────────────────────────────────────
 
-  // Onboarding step 1: número puro sem palavra-chave → interpretar como renda
+  // Número puro sem descrição
   let textoParsear = message.texto;
   if (/^\d[\d,.]*$/.test(message.texto.trim())) {
     const cRow = await pool.query<{ count: string }>(
@@ -680,8 +686,20 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       [user.id]
     );
     if (Number(cRow.rows[0].count) === 0) {
+      // Onboarding: primeiro contato → assume renda
       textoParsear = message.texto.trim() + " salário";
       log.parser("onboarding: numero puro → renda", { original: message.texto, ajustado: textoParsear });
+    } else {
+      // Usuário ativo: número sem contexto → pede o que foi
+      try {
+        await whatsapp.sendText({
+          to:   message.telefone,
+          text: `Qual foi o gasto?\n\nMe manda assim:\n${message.texto.trim()} mercado`,
+        });
+      } catch (err) {
+        log.error("falha ao pedir descricao numero puro", err, { to: message.telefone });
+      }
+      return { success: false, userId: user.id, erro: "numero puro sem descricao" };
     }
   }
 
