@@ -188,28 +188,46 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   });
 
   if (!_ativo) {
-    const textoTrim = message.texto.trim();
-    const ehPremium = isPremiumCommand(textoTrim);
-    log.webhook("acesso negado — verificando tipo freemium", { textoTrim, ehPremium });
+    const textoTrim    = message.texto.trim();
+    const tentativaOp  = parseTransaction(textoTrim);
+    const comandoBloq  = isBlockedFreemium(textoTrim);
+    const comandoValid = isKnownCommand(textoTrim);
+    
+    // Leitura básica explícita é permitida. Tudo que altera o banco ou é premium é bloqueado.
+    const apenasLeituraBasica = /^(saldo|resumo|extrato\s+.*)$/i.test(textoTrim);
+    const ehTentativaDeUso = tentativaOp || comandoBloq || (comandoValid && !apenasLeituraBasica);
+
+    log.webhook("acesso negado — verificando tipo acesso restrito", { textoTrim, tentativaOp: !!tentativaOp, comandoBloq, apenasLeituraBasica });
 
     const expirouEm = user.subscription_expires_at ?? user.trial_ends_at ?? new Date();
     
-    // Sempre verifica e envia aviso de expiração amigável se for a primeira vez
-    try {
-      await checkAndSendExpirationNotice(user.id, message.telefone, expirouEm);
-    } catch (err) {
-      log.error("falha no expiracao notice freemium", err, { userId: user.id });
-    }
-
-    if (ehPremium) {
+    // Tenta enviar o aviso completo (apenas 1 vez) se o usuário tentou usar
+    if (ehTentativaDeUso) {
+      let mostrouAvisoInicial = false;
       try {
-        await sendPremiumUpsell(message.telefone);
+        mostrouAvisoInicial = await checkAndSendExpirationNotice(user.id, message.telefone, expirouEm);
       } catch (err) {
-        log.error("falha no envio de premium upsell", err, { userId: user.id });
+        log.error("falha no expiracao notice strict", err, { userId: user.id });
       }
-      return { success: false, userId: user.id, erro: "Acesso Premium necessário" };
+
+      // Se não mostrou o aviso completo agora, mostra as versões curtas
+      if (!mostrouAvisoInicial) {
+        let txtCurto = "Atenção: acesso limitado.";
+        
+        if (tentativaOp) {
+           txtCurto = `🔒 Registro de novos gastos disponível no Premium.\n\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+        } else if (comandoBloq || (comandoValid && !apenasLeituraBasica)) {
+           txtCurto = `🔒 Função exclusiva do Premium.\n\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+        }
+        
+        try {
+          await whatsapp.sendText({ to: message.telefone, text: txtCurto });
+        } catch (err) {
+          log.error("falha no envio do block aviso curto", err, { userId: user.id });
+        }
+      }
+      return { success: false, userId: user.id, erro: "Acesso bloqueado pós-trial" };
     }
-    // Funcionalidades básicas passam normalmente no plano Freemium!
   }
 
   // ── Pending action check ──────────────────────────────────────────────────
