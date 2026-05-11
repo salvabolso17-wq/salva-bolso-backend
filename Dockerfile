@@ -18,6 +18,8 @@ RUN npm ci --omit=dev --prefer-offline
 
 COPY .env .env
 
+COPY public ./public
+
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
