@@ -61,18 +61,18 @@ body {
 }
 
 .premium-badge {
-    background: linear-gradient(135deg, #0f766e 0%, #064e3b 100%); /* Deep Teal to Dark Emerald */
-    color: #ccfbf1; /* Very light teal/mint for contrast */
-    padding: 6px 16px;
+    background: transparent;
+    color: #b47b2b; /* Elegant sophisticated gold */
+    padding: 5px 16px;
     border-radius: 9999px;
-    font-size: 0.8rem;
-    font-weight: 700;
+    font-size: 0.75rem;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    box-shadow: 0 4px 10px rgba(6, 78, 59, 0.2);
+    letter-spacing: 0.08em;
+    border: 1px solid rgba(180, 123, 43, 0.3); /* Soft golden border */
     display: inline-flex;
     align-items: center;
-    border: 1px solid rgba(204, 251, 241, 0.1);
+    box-shadow: none;
 }
 
 h1 {
