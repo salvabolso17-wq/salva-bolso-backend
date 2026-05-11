@@ -15,8 +15,6 @@ import reportsRoutes from "./routes/reports";
 import webhooksRoutes from "./routes/webhooks";
 import insightsRoutes from "./routes/insights";
 import healthDeepRoutes from "./routes/healthDeep";
-import * as fs from 'fs';
-import * as path from 'path';
 
 const app = express();
 
@@ -34,42 +32,6 @@ app.use("/reports", reportsRoutes);
 app.use("/webhooks", webhooksRoutes);
 app.use("/insights", insightsRoutes);
 app.use("/healthz/deep", healthDeepRoutes);
-
-// New route for dynamic checkout page
-app.get("/checkout-premium", async (req, res) => {
-  try {
-    const planName = req.query.plan as string;
-
-    if (!planName) {
-      return res.status(400).send("Plano não especificado.");
-    }
-
-    const upperPlanName = planName.toUpperCase();
-    const planPrice = process.env[`PLAN_PRICE_${upperPlanName}`];
-    const checkoutLink = process.env[`PAYMENT_LINK_${upperPlanName}`];
-
-    console.log(`[CHECKOUT_LOG] Plan Name: ${planName}`);
-    console.log(`[CHECKOUT_LOG] Plan Price: ${planPrice}`);
-    console.log(`[CHECKOUT_LOG] Checkout Link (Asaas): ${checkoutLink ? checkoutLink.slice(0, 50) + '...' : 'undefined'}`); // Log first 50 chars of link
-
-    if (!planPrice || !checkoutLink) {
-      console.error(`[CHECKOUT] Informações de plano ausentes para: ${planName}`);
-      return res.status(404).send("Informações do plano não encontradas.");
-    }
-
-    let htmlContent = await fs.promises.readFile(path.join(__dirname, '../public', 'premium-checkout.html'), 'utf8');
-
-    htmlContent = htmlContent.replace(/{{PLAN_NAME}}/g, planName.charAt(0).toUpperCase() + planName.slice(1));
-    htmlContent = htmlContent.replace(/{{PLAN_PRICE}}/g, planPrice);
-    htmlContent = htmlContent.replace(/{{CHECKOUT_LINK}}/g, checkoutLink);
-
-    res.send(htmlContent);
-
-  } catch (error) {
-    console.error("[CHECKOUT ERROR]", error);
-    res.status(500).send("Erro ao carregar a página de checkout.");
-  }
-});
 
 // Global error handler — catches sync throws and next(err) calls
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
