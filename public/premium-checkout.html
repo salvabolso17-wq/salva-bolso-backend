@@ -5,14 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Salva Bolso Premium</title>
     <link rel="stylesheet" href="/style.css">
-    <script>
-        // Dados do plano e link de checkout serão injetados aqui pelo backend
-        window.planData = {
-            name: '{{PLAN_NAME}}',
-            price: '{{PLAN_PRICE}}',
-            checkoutLink: '{{CHECKOUT_LINK}}'
-        };
-    </script>
+    <link rel="icon" href="/favicon.ico">
 </head>
 <body>
     <div class="container">
@@ -38,9 +31,10 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const planName = window.planData.name;
-            const planPrice = window.planData.price;
-            const checkoutLink = window.planData.checkoutLink;
+            const params = new URLSearchParams(window.location.search);
+            const planName = params.get('plan');
+            const planPrice = params.get('price');
+            const checkoutLink = params.get('checkoutLink');
 
             if (planName) {
                 document.getElementById('plan-name').textContent = planName;
