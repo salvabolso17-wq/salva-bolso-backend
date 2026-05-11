@@ -1930,54 +1930,32 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
 
   let linhas: string[];
 
-  if (n < 5) {
-    linhas = [
-      "É bem simples! Basta enviar o valor e o que foi:",
-      "",
-      "50 mercado",
-      "35 gasolina",
-      "120 farmácia",
-      "+3000 salário",
-      "",
-      "Parcelas:",
-      "iphone 12x de 755",
-      "tv 6x 300",
-      "",
-      "Para consultar:",
-      "saldo  •  resumo  •  hoje",
-    ];
-  } else if (n < 15) {
-    linhas = [
-      "Para registrar: 50 mercado  •  +3000 salário",
-      "",
-      "Parcelas: iphone 12x de 755",
-      "",
-      "Consultas:",
-      "saldo  •  resumo  •  hoje  •  semana",
-      "ranking  •  previsão",
-      "",
-      "Extras:",
-      "meta viagem 5000",
-      "limite alimentação 800",
-      "recorrente 39 netflix mensal — cadastrar conta fixa",
-    ];
-  } else {
-    linhas = [
-      "Para registrar: 50 mercado  •  +3000 salário",
-      "Parcelas: iphone 12x de 755  •  tv 6x 300",
-      "",
-      "Consultas:",
-      "saldo  •  resumo  •  hoje  •  semana",
-      "ranking  •  previsão  •  próximas",
-      "recorrentes — suas contas fixas do mês",
-      "apagar  •  corrigir",
-      "",
-      "Extras:",
-      "meta viagem 5000  •  guardar 200 viagem",
-      "limite alimentação 800  •  recorrente 39 netflix mensal",
-      "buscar mercado  •  extrato março",
-    ];
-  }
+  linhas = [
+    "👋 Posso te ajudar com:",
+    "",
+    "💸 *Gastos*",
+    "• 50 mercado",
+    "• +3000 salário",
+    "",
+    "📊 *Consultas*",
+    "• saldo",
+    "• resumo",
+    "• ranking",
+    "",
+    "🎯 *Metas*",
+    "• meta viagem 5000",
+    "• guardar 200 viagem",
+    "",
+    "📦 *Parcelas*",
+    "• iphone 12x de 345",
+    "",
+    "🔁 *Recorrentes*",
+    "• netflix 39 mensal",
+    "",
+    "✏️ *Ajustes*",
+    "• apagar",
+    "• corrigir",
+  ];
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
