@@ -647,6 +647,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   log.parser("analisando", { texto: textoParsear });
 
+  // ── Multi-line transactions ───────────────────────────────────────────────
+  {
+    const linhasMulti = detectMultiLine(message.texto);
+    if (linhasMulti) {
+      return await handleMultiLineTransactions(user, message.telefone, linhasMulti);
+    }
+  }
+
   // Installment pattern takes priority over generic parser
   const installment = detectInstallment(textoParsear);
   if (installment) {
@@ -2890,6 +2898,110 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   }
 
   return null;
+}
+
+// ── Multi-line transaction parser ────────────────────────────────────────────
+
+function looksLikeTransactionLine(linha: string): boolean {
+  const t = linha.trim();
+  if (!t || t.length < 2) return false;
+  // Starts with a digit (most common: "40 netflix", "30,50 mercado")
+  if (/^[\d]/.test(t)) return true;
+  // Income: "+3000" or "+ 500"
+  if (/^\+\s*[\d]/.test(t)) return true;
+  // Common expense/income verbs
+  if (/^(gastei|paguei|pago|comprei|tomei|saiu|custou|recebi|salario|salário|renda|entrada|freelance|bonus|bônus)\s/i.test(t)) return true;
+  // Installment: "item Nx de valor" or "item N parcelas de valor"
+  if (/^.+\s+\d{1,2}[xX]\s+[\d,.]+$/i.test(t)) return true;
+  if (/^.+\s+\d{1,2}\s+parcelas?\s+de\s+[\d,.]+$/i.test(t)) return true;
+  return false;
+}
+
+function detectMultiLine(texto: string): string[] | null {
+  const linhas = texto
+    .split(/\n/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+  if (linhas.length < 2) return null;
+  if (!linhas.every(looksLikeTransactionLine)) return null;
+  return linhas;
+}
+
+async function handleMultiLineTransactions(
+  user: UserRow,
+  telefone: string,
+  linhas: string[],
+): Promise<ProcessResult> {
+  type Resultado = { descricao: string; valor: number; tipo: string };
+  const resultados: Resultado[] = [];
+  const falhas: string[]        = [];
+
+  for (const linha of linhas) {
+    try {
+      // Installment line: "iphone 12x de 345"
+      const inst = detectInstallment(linha);
+      if (inst) {
+        const { item, valor, totalParcelas } = inst;
+        const tempParsed = parseTransaction(`${valor} ${item}`);
+        const categoria  = tempParsed?.categoria ?? "Outros";
+        const descricao  = capitalizeFirst(item);
+        await pool.query(
+          `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao) VALUES ($1, 'saida', $2, $3, $4)`,
+          [user.id, valor, categoria, descricao]
+        );
+        setLastInstallment(user.id, { item: descricao, valor, totalParcelas, parcelaAtual: 1 });
+        recordAction(user.id, "registered_transaction");
+        resultados.push({ descricao: `${descricao} (${totalParcelas}×)`, valor, tipo: "saida" });
+        continue;
+      }
+
+      // Regular expense / income
+      const parsed = parseTransaction(linha);
+      if (!parsed) { falhas.push(linha); continue; }
+
+      await pool.query(
+        `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao) VALUES ($1, $2, $3, $4, $5)`,
+        [user.id, parsed.tipo, parsed.valor, parsed.categoria, parsed.descricao]
+      );
+      recordAction(user.id, "registered_transaction");
+      resultados.push({ descricao: parsed.descricao, valor: parsed.valor, tipo: parsed.tipo });
+    } catch (err) {
+      log.error("falha ao processar linha multilinha", err, { linha, userId: user.id });
+      falhas.push(linha);
+    }
+  }
+
+  if (resultados.length === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Não consegui interpretar. Tenta uma linha por vez?" });
+    return { success: false, userId: user.id, erro: "multilinha: nenhuma linha processada" };
+  }
+
+  const itens = resultados.map(r => {
+    const sinal = r.tipo === "entrada" ? "+" : "";
+    return `• ${sinal}${fmtValor(r.valor)} — ${r.descricao}`;
+  });
+
+  const header = resultados.length === 1
+    ? "✅ Lançamento registrado:"
+    : `✅ ${resultados.length} lançamentos:`;
+
+  const partes = [header, "", ...itens];
+  if (falhas.length > 0) {
+    partes.push("", `Não entendi: ${falhas.join(", ")}`);
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: partes.join("\n") });
+  } catch (err) {
+    log.error("falha ao enviar confirmação multilinha", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "multilinha", count: resultados.length },
+  };
 }
 
 // ── Installment parser ────────────────────────────────────────────────────────
