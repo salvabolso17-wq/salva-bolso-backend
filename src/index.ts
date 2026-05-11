@@ -48,6 +48,10 @@ app.get("/checkout-premium", async (req, res) => {
     const planPrice = process.env[`PLAN_PRICE_${upperPlanName}`];
     const checkoutLink = process.env[`PAYMENT_LINK_${upperPlanName}`];
 
+    console.log(`[CHECKOUT_LOG] Plan Name: ${planName}`);
+    console.log(`[CHECKOUT_LOG] Plan Price: ${planPrice}`);
+    console.log(`[CHECKOUT_LOG] Checkout Link (Asaas): ${checkoutLink ? checkoutLink.slice(0, 50) + '...' : 'undefined'}`); // Log first 50 chars of link
+
     if (!planPrice || !checkoutLink) {
       console.error(`[CHECKOUT] Informações de plano ausentes para: ${planName}`);
       return res.status(404).send("Informações do plano não encontradas.");
