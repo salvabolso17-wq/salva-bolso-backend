@@ -2696,14 +2696,18 @@ async function sendExpirationBlock(userId: number, telefone: string, eraTrialUse
 
   if (fullNovo) {
     const intro = eraTrialUser
-      ? "Seu período gratuito chegou ao fim."
-      : "Sua assinatura chegou ao fim.";
+      ? "🚨 *Seu período gratuito do Salva Bolso chegou ao fim.*"
+      : "🚨 *Sua assinatura do Salva Bolso expirou.*";
+    const callToAction = eraTrialUser
+      ? "Para continuar aproveitando todos os benefícios e manter seus registros atualizados, escolha um plano abaixo e assine agora:" 
+      : "Para reativar seu acesso e continuar gerenciando suas finanças sem interrupções, reative seu plano:";
+
     const linhas = [
       intro,
       "",
-      "Seus registros continuam salvos aqui.",
+      "Seus dados estão seguros e aguardando você!",
       "",
-      "Pra continuar registrando novos gastos e acompanhando o mês, é só ativar um plano:",
+      callToAction,
     ];
     if (plansBlock) linhas.push("", plansBlock);
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
@@ -2712,8 +2716,8 @@ async function sendExpirationBlock(userId: number, telefone: string, eraTrialUse
 
   // Versão curta — sempre (sem silêncio)
   const curto = plansBlock
-    ? `Para registrar novos gastos, ative um plano:\n\n${plansBlock}`
-    : "Para registrar novos gastos, ative um plano.";
+    ? `Atenção: seu acesso está limitado. Escolha um plano para continuar.\n\n${plansBlock}`
+    : "Atenção: seu acesso está limitado. Ative um plano para continuar usando o Salva Bolso.";
   await whatsapp.sendText({ to: telefone, text: curto });
 }
 

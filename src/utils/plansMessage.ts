@@ -55,21 +55,28 @@ export async function buildPlansBlock(): Promise<string> {
     if (pct > 0) savingsPct = pct;
   }
 
-  const lines: string[] = [];
+  const lines: string[] = ["✨ *Escolha seu Plano Premium:*"];
+  
+  if (plans.length > 0) {
+    lines.push("");
+  }
+
   for (const plan of plans) {
-    const emoji = PLAN_EMOJI[plan.nome] ?? "📋";
+    const emoji = PLAN_EMOJI[plan.nome] ?? "⭐";
     const nome  = plan.nome.charAt(0).toUpperCase() + plan.nome.slice(1);
 
-    let header = `${emoji} Plano ${nome}`;
+    let planLine = `${emoji} *Plano ${nome}*`;
     if (plan.preco !== null) {
-      header += ` — ${fmtPreco(plan.preco)}`;
+      planLine += ` — ${fmtPreco(plan.preco)}`;
       if (plan.nome === "anual" && savingsPct !== null) {
-        header += ` (economize ${savingsPct}%)`;
+        planLine += ` (economize ${savingsPct}%)`;
       }
     }
-    lines.push(header);
-    if (plan.link) lines.push(`🔗 ${plan.link}`);
-    lines.push("");
+    lines.push(planLine);
+    if (plan.link) {
+      lines.push(`🚀 Assine agora: ${plan.link}`);
+    }
+    lines.push(""); // Add a blank line for separation
   }
 
   return lines.join("\n").trimEnd();

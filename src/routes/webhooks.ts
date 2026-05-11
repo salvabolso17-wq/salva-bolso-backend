@@ -215,8 +215,8 @@ router.post("/asaas", async (req, res) => {
     log.webhook("asaas: usuario ativado", { userId: user.id, telefone: user.telefone, paymentId: payment?.id, isRenovacao });
 
     const texto = isRenovacao
-      ? `Pronto 🙂\n\nSua assinatura foi renovada. Pode continuar por aqui.`
-      : `Pronto 🙂\n\nSeu acesso ao Salva Bolso está ativo. Pode começar a registrar seus gastos por aqui.`;
+      ? `🎉 *Assinatura Renovada!* 🎉\n\nBoas notícias! Sua assinatura do Salva Bolso foi renovada com sucesso. Você já pode continuar a gerenciar suas finanças com tranquilidade.\n\n✅ Tudo pronto para você seguir no controle!`
+      : `✨ *Bem-vindo(a) ao Salva Bolso Premium!* ✨\n\nSua assinatura foi ativada com sucesso. Prepare-se para ter o controle total das suas finanças de forma inteligente e intuitiva.\n\n🚀 Comece agora a registrar seus gastos e descubra um novo nível de organização financeira!`;
 
     try {
       await whatsapp.sendText({ to: user.telefone, text: texto });
