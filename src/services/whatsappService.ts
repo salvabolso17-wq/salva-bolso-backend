@@ -2735,7 +2735,7 @@ async function checkAndSendExpirationNotice(userId: number, telefone: string, ex
   try {
     const ins = await pool.query(
       `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
-       VALUES ($1, 'expiracao_aviso_v3', 1, $2::date)
+       VALUES ($1, 'expiracao_aviso_v4', 1, $2::date)
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
       [userId, expirouEmDate]
     );
@@ -2743,10 +2743,13 @@ async function checkAndSendExpirationNotice(userId: number, telefone: string, ex
   } catch { /* continua */ }
 
   if (fullNovo) {
+    log.webhook("enviando aviso de expiracao LONGO (primeira vez)", { userId });
     const mensagem = `✨ Seu teste grátis terminou.\n\nVocê ainda pode:\n👀 consultar saldo\n📊 visualizar registros do mês\n\nDesbloqueie todos os recursos:\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
     await whatsapp.sendText({ to: telefone, text: mensagem });
     return true;
   }
+  
+  log.webhook("aviso longo ja foi enviado antes, ignorando para usar o curto", { userId });
   return false;
 }
 
