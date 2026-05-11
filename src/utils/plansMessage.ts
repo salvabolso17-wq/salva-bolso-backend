@@ -73,8 +73,9 @@ export async function buildPlansBlock(): Promise<string> {
       }
     }
     lines.push(planLine);
-    if (plan.link) {
-      lines.push(`🚀 Assine agora: ${plan.link}`);
+    if (plan.link && plan.preco !== null) {
+      const checkoutUrl = `/premium-checkout.html?plan=${encodeURIComponent(nome)}&price=${plan.preco.toFixed(2)}&checkoutLink=${encodeURIComponent(plan.link)}`;
+      lines.push(`🚀 Assine agora: ${process.env.PUBLIC_URL ?? ''}${checkoutUrl}`);
     }
     lines.push(""); // Add a blank line for separation
   }

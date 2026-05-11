@@ -21,6 +21,9 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
+// Serve static files from the 'public' directory
+app.use(express.static('public'));
+
 app.use("/auth", authRoutes);
 app.use("/users", usersRoutes);
 app.use("/transactions", transactionsRoutes);
