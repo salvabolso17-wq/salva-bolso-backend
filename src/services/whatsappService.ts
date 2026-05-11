@@ -758,26 +758,17 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Checagem de recorrente duplicado ─────────────────────────────────────
   if (parsed.tipo === "saida") {
-    try {
-      const recRows = await pool.query<{ nome: string; valor: string }>(
-        `SELECT nome, valor FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE`,
-        [user.id]
-      );
-      const descNorm = parsed.descricao.toLowerCase().trim();
-      const hit = recRows.rows.find(r => {
-        const n = r.nome.toLowerCase().trim();
-        return n === descNorm || descNorm.startsWith(n) || n.startsWith(descNorm);
-      });
-      if (hit) {
-        const recValor = parseFloat(hit.valor);
-        const nome     = capitalizeFirst(hit.nome);
-        if (Math.abs(recValor - parsed.valor) < 0.50) {
-          await whatsapp.sendText({ to: message.telefone, text: `${nome} já está nos seus recorrentes 🙂\nNão precisou registrar — já acompanho automaticamente.` });
-          return { success: false, userId: user.id, erro: "gasto duplica recorrente" };
-        } else {
+    const recMatch = await checkRecorrenteDuplicado(user.id, parsed.descricao, parsed.valor);
+    if (recMatch !== null) {
+      const { nome, recValor, sameValue } = recMatch;
+      if (sameValue) {
+        try { await whatsapp.sendText({ to: message.telefone, text: `${nome} já está nos seus recorrentes 🙂` }); } catch (_) { /* silent */ }
+        return { success: false, userId: user.id, erro: "gasto duplica recorrente" };
+      } else {
+        try {
           await whatsapp.sendText({
             to:   message.telefone,
-            text: `${nome} já é recorrente por ${fmtValor(recValor)}.\nQuer atualizar para ${fmtValor(parsed.valor)}?`,
+            text: `${nome} já existe por ${fmtValor(recValor)}.\nQuer atualizar para ${fmtValor(parsed.valor)}?`,
           });
           await pool.query(
             `INSERT INTO pending_actions (user_id, action, step, tx_ids)
@@ -785,13 +776,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
              ON CONFLICT (user_id) DO UPDATE
                SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
                    selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
-            [user.id, JSON.stringify({ update: true, nome: hit.nome, novoValor: parsed.valor })]
+            [user.id, JSON.stringify({ update: true, nome: recMatch.nomeOriginal, novoValor: parsed.valor })]
           );
-          return { success: false, userId: user.id, erro: "recorrente valor diferente, aguardando confirmacao" };
+        } catch (err) {
+          log.error("falha ao perguntar sobre atualização de recorrente", err, { userId: user.id });
         }
+        return { success: false, userId: user.id, erro: "recorrente valor diferente" };
       }
-    } catch (err) {
-      log.error("falha na checagem de recorrente duplicado", err, { userId: user.id });
     }
   }
 
@@ -1033,6 +1024,30 @@ function fmtValor(valor: number): string {
 
 function capitalizeFirst(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+async function checkRecorrenteDuplicado(
+  userId: number,
+  descricao: string,
+  valor: number,
+): Promise<{ nome: string; nomeOriginal: string; recValor: number; sameValue: boolean } | null> {
+  try {
+    const res = await pool.query<{ nome: string; valor: string }>(
+      `SELECT nome, valor FROM recurring_expenses
+       WHERE user_id = $1 AND ativo = TRUE
+         AND LOWER(TRIM(nome)) = LOWER(TRIM($2))
+       LIMIT 1`,
+      [userId, descricao]
+    );
+    if (!res.rows.length) return null;
+    const row      = res.rows[0];
+    const recValor = parseFloat(row.valor);
+    const sameValue = Math.abs(recValor - valor) < 0.50;
+    return { nome: capitalizeFirst(row.nome), nomeOriginal: row.nome, recValor, sameValue };
+  } catch (err) {
+    log.error("checkRecorrenteDuplicado falhou", err, { userId });
+    return null;
+  }
 }
 
 // Serviços de alta confiança: pergunta na 1ª ocorrência ─────────────────────
@@ -3208,6 +3223,15 @@ async function handleMultiLineTransactions(
       // Regular expense / income
       const parsed = parseTransaction(linha);
       if (!parsed) { falhas.push(linha); continue; }
+
+      // Skip if matches a recurring expense (same check as single-line path)
+      if (parsed.tipo === "saida") {
+        const recMatch = await checkRecorrenteDuplicado(user.id, parsed.descricao, parsed.valor);
+        if (recMatch !== null) {
+          resultados.push({ descricao: `${recMatch.nome} (recorrente)`, valor: parsed.valor, tipo: "saida" });
+          continue;
+        }
+      }
 
       await pool.query(
         `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao) VALUES ($1, $2, $3, $4, $5)`,
