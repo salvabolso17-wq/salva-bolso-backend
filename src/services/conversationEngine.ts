@@ -40,6 +40,8 @@ export interface GoalCtx {
   valorMeta: number;
 }
 
+export type LastContext = "installment" | "goal" | "recurring" | null;
+
 export interface SessionCtx {
   userId: number;
   txCount: number;            // transactions registered this session
@@ -49,6 +51,7 @@ export interface SessionCtx {
   lastCommand: string;        // last command/view shown, for follow-up disambiguation
   lastInstallment: InstallmentCtx | null; // last installment registered, for "já paguei X de Y"
   lastGoal: GoalCtx | null;               // last goal interacted with, for "quanto falta?" etc.
+  lastContext: LastContext;               // tracks which topic was discussed last, for disambiguation
   recentActions: string[];    // last 10 distinct actions, most recent first
   phase: ConversationPhase;
   sessionStart: Date;
@@ -83,6 +86,7 @@ export function initSession(userId: number): SessionCtx {
     lastCommand: "",
     lastInstallment: null,
     lastGoal: null,
+    lastContext: null,
     recentActions: [],
     phase: "onboarding",
     sessionStart: new Date(),
@@ -231,6 +235,7 @@ export function setLastInstallment(userId: number, info: InstallmentCtx): void {
   const session = SESSIONS.get(userId);
   if (!session || isExpired(session)) return;
   session.lastInstallment = info;
+  session.lastContext     = "installment";
   session.updatedAt       = new Date();
 }
 
@@ -243,8 +248,22 @@ export function getLastInstallment(userId: number): InstallmentCtx | null {
 export function setLastGoal(userId: number, info: GoalCtx): void {
   const session = SESSIONS.get(userId);
   if (!session || isExpired(session)) return;
-  session.lastGoal = info;
-  session.updatedAt = new Date();
+  session.lastGoal    = info;
+  session.lastContext = "goal";
+  session.updatedAt   = new Date();
+}
+
+export function setLastContext(userId: number, ctx: LastContext): void {
+  const session = SESSIONS.get(userId);
+  if (!session || isExpired(session)) return;
+  session.lastContext = ctx;
+  session.updatedAt   = new Date();
+}
+
+export function getLastContext(userId: number): LastContext {
+  const session = SESSIONS.get(userId);
+  if (!session || isExpired(session)) return null;
+  return session.lastContext;
 }
 
 export function getLastGoal(userId: number): GoalCtx | null {

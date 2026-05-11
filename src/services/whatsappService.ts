@@ -5,7 +5,7 @@ import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import { buildPlansBlock } from "../utils/plansMessage";
 import type { NormalizedMessage } from "../adapters/whatsappAdapters";
-import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep, canSendInsight, recordInsightSent, setLastCommand, setLastInstallment, getLastInstallment, setLastGoal, getLastGoal } from "./conversationEngine";
+import { initSession, getSession, classifyIntent, recordAction, getContextualNextStep, canSendInsight, recordInsightSent, setLastCommand, setLastInstallment, getLastInstallment, setLastGoal, getLastGoal, setLastContext, getLastContext } from "./conversationEngine";
 
 function firstNameOf(rawName?: string | null): string | null {
   if (!rawName) return null;
@@ -550,6 +550,56 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
+  // ── Parcela context follow-ups ───────────────────────────────────────────
+  // Responde perguntas sobre a parcela ativa sem exigir frase exata.
+  // Só dispara quando o lastContext é "installment" E lastInstallment existe.
+  {
+    const inst = getLastInstallment(user.id);
+    if (inst && getLastContext(user.id) === "installment") {
+      const tq = message.texto.trim().toLowerCase();
+
+      type IQ = "total_value" | "remaining_count" | "remaining_value" | "installment_value";
+      const iq: IQ | null = (
+        /\b(valor\s+total|total\s+da\s+compra|quanto\s+(é|e)\s+(o\s+)?total|qual\s+o\s+total)\b/.test(tq) ? "total_value" :
+        /\b(quantas\s+(parcelas\s+)?faltam|quantas\s+(ainda\s+)?restam|quantas\s+ainda\s+(tenho|faltam))\b/.test(tq) ? "remaining_count" :
+        /\b(quanto\s+falta\s+pagar|quanto\s+ainda\s+falta\s+pagar|valor\s+restante|quanto\s+falta\s+pra\s+quitar)\b/.test(tq) ? "remaining_value" :
+        /^quanto\s+falta[?!.]*$/.test(tq) ? "remaining_value" :
+        /\b(valor\s+da\s+parcela|qual\s+(é|e)\s+a\s+parcela|quanto\s+(é|e)\s+cada\s+(uma|parcela)|valor\s+de\s+cada)\b/.test(tq) ? "installment_value" :
+        null
+      );
+
+      if (iq !== null) {
+        const { item, valor, totalParcelas, parcelaAtual } = inst;
+        const pagas   = parcelaAtual - 1;
+        const faltam  = totalParcelas - pagas;
+        const total   = totalParcelas * valor;
+        const restante = faltam * valor;
+
+        let txt: string;
+        if (iq === "total_value") {
+          txt = `${item} — total de ${fmtValor(total)}\n${totalParcelas}× ${fmtValor(valor)}`;
+        } else if (iq === "remaining_count") {
+          txt = faltam > 0
+            ? `Faltam ${faltam} parcela${faltam > 1 ? "s" : ""} do ${item}.`
+            : `${item} — quitado!`;
+        } else if (iq === "remaining_value") {
+          txt = faltam > 0
+            ? `Faltam ${fmtValor(restante)} para quitar o ${item}.`
+            : `${item} — quitado!`;
+        } else {
+          txt = `Cada parcela do ${item} é ${fmtValor(valor)}.`;
+        }
+
+        try {
+          await whatsapp.sendText({ to: message.telefone, text: txt });
+        } catch (err) {
+          log.error("falha ao enviar parcela follow-up", err, { to: message.telefone });
+        }
+        return { success: false, userId: user.id, erro: "installment context follow-up" };
+      }
+    }
+  }
+
   // ── Intent de meta ───────────────────────────────────────────────────────
   // Intercepta linguagem natural sobre metas antes de chegar no parser de gastos
   {
@@ -559,6 +609,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         if (goalIntent.type === "adicionar")       return await handleAddToGoal(user, message.telefone, goalIntent.valor, goalIntent.nome);
         if (goalIntent.type === "criar_sem_valor") return await handleCreateGoalNoValue(user, message.telefone, goalIntent.nome);
         if (goalIntent.type === "progresso")       return await handleGoalProgress(user, message.telefone, goalIntent.nome);
+        if (goalIntent.type === "porcentagem")     return await handleGoalPercentage(user, message.telefone);
+        if (goalIntent.type === "juntei")          return await handleGoalAmountSaved(user, message.telefone);
       } catch (err) {
         log.error("falha no goal intent", err, { userId: user.id });
       }
@@ -983,6 +1035,8 @@ async function handleConfirmarRecorrente(user: UserRow, telefone: string, txIds:
     );
     const nome = capitalizeFirst(data.nome);
     recordAction(user.id, "created_recurring");
+    setLastCommand(user.id, "recorrentes");
+    setLastContext(user.id, "recurring");
     await whatsapp.sendText({
       to:   telefone,
       text: `Perfeito 🙂\nVou acompanhar ${nome} automaticamente.`,
@@ -2827,6 +2881,14 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     return await handleMetasCommand(user, telefone);
   }
 
+  // "quanto gasto com recorrentes?", "qual o total de recorrentes?", "quanto são os recorrentes?"
+  if (
+    !temNumero &&
+    /quanto\s+(eu\s+)?(gasto|pago)\s+(com\s+)?recorrentes?|total\s+de\s+recorrentes?|quanto\s+s[aã]o\s+(os\s+)?recorrentes?|quanto\s+(custa|custam)\s+(os\s+)?recorrentes?/.test(t)
+  ) {
+    return await handleRecorrentesTotalCommand(user, telefone);
+  }
+
   return null;
 }
 
@@ -2954,7 +3016,9 @@ function buildInstallmentProgressText(result: ProgressResult, inst: { item: stri
 type GoalIntent =
   | { type: "adicionar";      valor: number; nome?: string }
   | { type: "criar_sem_valor"; nome: string }
-  | { type: "progresso";      nome?: string };
+  | { type: "progresso";      nome?: string }
+  | { type: "porcentagem" }
+  | { type: "juntei" };
 
 function detectGoalIntent(texto: string): GoalIntent | null {
   const t  = texto.trim();
@@ -2992,6 +3056,19 @@ function detectGoalIntent(texto: string): GoalIntent | null {
   // "já juntei 300", "guardei 200", "juntei 150 pra viagem"
   m = t.match(/^(?:j[aá]\s+)?(?:guard|poup|junt|separ|coloc)ei\s+([\d,.]+)\s*(?:(?:na?|no|pra?|para|em)\s+(.+))?$/i);
   if (m) return { type: "adicionar", valor: parseFloat(m[1].replace(",", ".")), nome: m[2]?.trim() || undefined };
+
+  // ── consultas de progresso / contexto ─────────────────────────────────
+  // "qual porcentagem?", "que percentual?", "qual o percentual?"
+  if (/\b(qual\s+(é\s+|é\s+a\s+|a\s+)?porcentagem|que\s+porcentagem|qual\s+o\s+percentual|que\s+percentual)\b[?!.]*/.test(tl)) {
+    return { type: "porcentagem" };
+  }
+
+  // "quanto já juntei?", "quanto eu já guardei?", "quanto tenho guardado?", "quanto já guardei?"
+  if (/^quanto\s+(?:j[aá]\s+)?(juntei|guardei|poupei)[?!.]*$/.test(tl) ||
+      /^quanto\s+tenho\s+guardado[?!.]*$/.test(tl) ||
+      /^quanto\s+eu\s+j[aá]\s+(juntei|guardei|poupei)[?!.]*$/.test(tl)) {
+    return { type: "juntei" };
+  }
 
   return null;
 }
@@ -3147,6 +3224,83 @@ async function handleCreateGoalNoValue(
   const txt = `Perfeito 🙂\nQual o valor que quer guardar pro ${nomeFormatado}?\n\nEx: meta ${nome.toLowerCase()} 15000`;
   await whatsapp.sendText({ to: telefone, text: txt });
   return { success: false, userId: user.id, erro: "goal without value" };
+}
+
+async function handleGoalPercentage(user: UserRow, telefone: string): Promise<ProcessResult> {
+  const last = getLastGoal(user.id);
+  if (!last) return await handleMetasCommand(user, telefone);
+
+  const r = await pool.query<{ nome: string; valor_meta: string; valor_atual: string }>(
+    `SELECT nome, valor_meta, valor_atual FROM user_goals WHERE user_id = $1 AND LOWER(nome) = LOWER($2) LIMIT 1`,
+    [user.id, last.nome]
+  );
+  if (!r.rows[0]) return await handleMetasCommand(user, telefone);
+
+  const row     = r.rows[0];
+  const meta    = Number(row.valor_meta);
+  const atual   = Number(row.valor_atual);
+  const percent = meta > 0 ? Math.round((atual / meta) * 100) : 0;
+
+  const txt = meta > 0
+    ? `${row.nome} — ${percent}% concluída\n${fmtValor(atual)} de ${fmtValor(meta)}`
+    : `${row.nome} — ${fmtValor(atual)} guardados (sem valor-alvo definido)`;
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: txt });
+  } catch (err) {
+    log.error("falha ao enviar porcentagem meta", err, { to: telefone });
+  }
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "porcentagem_meta", nome: row.nome } };
+}
+
+async function handleGoalAmountSaved(user: UserRow, telefone: string): Promise<ProcessResult> {
+  const last = getLastGoal(user.id);
+  if (!last) return await handleMetasCommand(user, telefone);
+
+  const r = await pool.query<{ nome: string; valor_meta: string; valor_atual: string }>(
+    `SELECT nome, valor_meta, valor_atual FROM user_goals WHERE user_id = $1 AND LOWER(nome) = LOWER($2) LIMIT 1`,
+    [user.id, last.nome]
+  );
+  if (!r.rows[0]) return await handleMetasCommand(user, telefone);
+
+  const row     = r.rows[0];
+  const meta    = Number(row.valor_meta);
+  const atual   = Number(row.valor_atual);
+  const percent = meta > 0 ? Math.round((atual / meta) * 100) : 0;
+
+  const txt = meta > 0
+    ? `${row.nome} — ${fmtValor(atual)} guardados (${percent}%)`
+    : `${row.nome} — ${fmtValor(atual)} guardados`;
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: txt });
+  } catch (err) {
+    log.error("falha ao enviar juntei meta", err, { to: telefone });
+  }
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "juntei_meta", nome: row.nome } };
+}
+
+async function handleRecorrentesTotalCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  const result = await pool.query<{ nome: string; valor: string }>(
+    `SELECT nome, valor FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE ORDER BY criado_em ASC`,
+    [user.id]
+  );
+
+  if (result.rows.length === 0) {
+    await whatsapp.sendText({ to: telefone, text: "Você não tem recorrentes cadastrados." });
+    return { success: false, userId: user.id, erro: "Sem recorrentes" };
+  }
+
+  const total = result.rows.reduce((sum, row) => sum + Number(row.valor), 0);
+  const linhas = [`Total em recorrentes: ${fmtValor(total)}`, ""];
+  result.rows.forEach(row => linhas.push(`${row.nome} — ${fmtValor(Number(row.valor))}`));
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+  } catch (err) {
+    log.error("falha ao enviar total recorrentes", err, { to: telefone });
+  }
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "total_recorrentes" } };
 }
 
 async function handleInstallmentRegistration(
