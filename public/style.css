@@ -33,7 +33,7 @@ body {
 
 .container {
     background-color: var(--white);
-    padding: 36px 44px 44px;
+    padding: 24px 44px 40px;
     border-radius: var(--border-radius);
     box-shadow: var(--box-shadow-premium);
     text-align: center;
@@ -58,14 +58,14 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 12px;
     position: relative;
 }
 
 .logo {
     width: 170px;
     height: auto;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05));
 }
 
@@ -87,7 +87,7 @@ h1 {
     font-size: 2.1rem;
     color: var(--secondary-color);
     margin-top: 0;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
     line-height: 1.15;
     font-weight: 800;
     letter-spacing: -0.03em;
@@ -96,7 +96,7 @@ h1 {
 .slogan {
     font-size: 1.1rem;
     color: var(--medium-text);
-    margin-bottom: 32px;
+    margin-bottom: 24px;
     line-height: 1.5;
     font-weight: 400;
 }
