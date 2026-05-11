@@ -2652,13 +2652,14 @@ function buildFeaturesMenuText(): string {
   return [
     "O que consigo fazer:",
     "",
-    "📊 saldo  •  resumo  •  ranking",
-    "💳 parcelas — iphone 12x de 755",
-    "🔁 recorrentes — contas fixas (netflix, aluguel...)",
-    "🎯 metas  •  limites",
-    "✏️ corrigir  •  apagar",
+    "📊 Saldo e resumo do mês",
+    "💸 Registrar gastos — 50 mercado, 35 uber",
+    "💳 Parcelamentos — iphone 12x de 755",
+    "🔁 Contas fixas — netflix, aluguel, academia",
+    "🎯 Metas e limites de gasto",
+    "✏️ Corrigir ou apagar lançamentos",
     "",
-    "Pode me perguntar do seu jeito 🙂",
+    "Pode me perguntar do seu jeito 💬",
   ].join("\n");
 }
 
