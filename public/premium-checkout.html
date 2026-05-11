@@ -16,12 +16,18 @@
         <h1>Sua vida financeira organizada</h1>
         <p class="slogan">Mais controle, menos preocupação. Direto no seu WhatsApp.</p>
 
-        <div class="plan-details">
-            <h2>Plano <span id="plan-name">Premium</span></h2>
+        <div class="pricing-toggle">
+            <button id="btn-mensal" class="toggle-btn active">Mensal</button>
+            <button id="btn-anual" class="toggle-btn">Anual <span class="discount-badge">-16%</span></button>
+        </div>
+
+        <div class="plan-details" id="plan-card">
+            <h2 id="plan-title">Plano <span id="plan-name">Mensal</span></h2>
             <div class="price-wrapper">
-                <div class="price" id="plan-price">R$ 0,00 <small>/mês</small></div>
-                <div id="annual-highlight" class="annual-highlight" style="display: none;">🔥 Mais Escolhido</div>
+                <div class="price" id="plan-price">R$ 19,90 <small id="plan-period">/mês</small></div>
+                <div id="annual-highlight" class="annual-highlight" style="display: none;">🔥 Mais Vantajoso</div>
             </div>
+            <p id="plan-savings" class="plan-savings" style="display: none;">Equivale a R$ 16,58/mês. Você economiza 2 meses!</p>
             
             <ul class="benefits">
                 <li>Acesso ilimitado a todos os recursos</li>
@@ -58,40 +64,76 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const params = new URLSearchParams(window.location.search);
-            const planName = params.get('plan');
-            const planPrice = params.get('price');
-            const checkoutLink = params.get('checkoutLink');
-
-            if (planName) {
-                document.getElementById('plan-name').textContent = planName;
-                
-                if (planName.toLowerCase().includes('anual')) {
-                    document.getElementById('annual-highlight').style.display = 'inline-block';
+            const plans = {
+                mensal: {
+                    name: 'Mensal',
+                    priceHtml: 'R$ 19,90',
+                    period: '/mês',
+                    checkoutLink: 'https://www.asaas.com/c/rf9q457jxjxyipbt',
+                    isAnnual: false
+                },
+                anual: {
+                    name: 'Anual',
+                    priceHtml: 'R$ 199,00',
+                    period: '/ano',
+                    checkoutLink: 'https://www.asaas.com/c/0ekcdmk3zjjcl5e1',
+                    isAnnual: true
                 }
-            }
+            };
+
+            let currentPlan = 'mensal';
             
-            if (planPrice) {
-                const formattedPrice = parseFloat(planPrice).toLocaleString('pt-BR', {
-                    style: 'currency',
-                    currency: 'BRL'
-                });
-                const period = planName && planName.toLowerCase().includes('anual') ? 'ano' : 'mês';
-                document.getElementById('plan-price').innerHTML = `${formattedPrice} <small>/${period}</small>`;
+            const btnMensal = document.getElementById('btn-mensal');
+            const btnAnual = document.getElementById('btn-anual');
+            const planCard = document.getElementById('plan-card');
+            const planName = document.getElementById('plan-name');
+            const planPrice = document.getElementById('plan-price');
+            const annualHighlight = document.getElementById('annual-highlight');
+            const planSavings = document.getElementById('plan-savings');
+            const continueButton = document.getElementById('continue-payment-button');
+
+            function renderPlan(planKey) {
+                if (currentPlan === planKey && document.body.dataset.initialized) return;
+                currentPlan = planKey;
+                const plan = plans[planKey];
+
+                // Update Toggle Buttons
+                btnMensal.classList.toggle('active', planKey === 'mensal');
+                btnAnual.classList.toggle('active', planKey === 'anual');
+
+                // Visual Transition
+                planCard.style.opacity = '0';
+                
+                setTimeout(() => {
+                    planName.textContent = plan.name;
+                    planPrice.innerHTML = `${plan.priceHtml} <small id="plan-period">${plan.period}</small>`;
+                    
+                    if (plan.isAnnual) {
+                        annualHighlight.style.display = 'inline-block';
+                        planSavings.style.display = 'block';
+                        planCard.classList.add('anual-active');
+                    } else {
+                        annualHighlight.style.display = 'none';
+                        planSavings.style.display = 'none';
+                        planCard.classList.remove('anual-active');
+                    }
+                    
+                    planCard.style.opacity = '1';
+                }, 150);
             }
 
-            const continueButton = document.getElementById('continue-payment-button');
-            if (checkoutLink) {
-                continueButton.onclick = () => {
-                    continueButton.disabled = true;
-                    continueButton.innerHTML = 'Redirecionando... <svg class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>';
-                    window.location.href = checkoutLink;
-                };
-            } else {
+            btnMensal.addEventListener('click', () => renderPlan('mensal'));
+            btnAnual.addEventListener('click', () => renderPlan('anual'));
+
+            continueButton.addEventListener('click', () => {
                 continueButton.disabled = true;
-                continueButton.textContent = 'Link indisponível';
-                continueButton.style.opacity = '0.5';
-            }
+                continueButton.innerHTML = 'Redirecionando... <svg class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>';
+                window.location.href = plans[currentPlan].checkoutLink;
+            });
+
+            // Initialize
+            document.body.dataset.initialized = "true";
+            renderPlan('mensal');
         });
     </script>
 </body>
