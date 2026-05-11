@@ -3045,7 +3045,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
 function looksLikeTransactionLine(linha: string): boolean {
   const t = linha.trim();
   if (!t || t.length < 2) return false;
-  // Starts with a digit (most common: "40 netflix", "30,50 mercado")
+  // Starts with a digit: "40 netflix", "30,50 mercado"
   if (/^[\d]/.test(t)) return true;
   // Income: "+3000" or "+ 500"
   if (/^\+\s*[\d]/.test(t)) return true;
@@ -3054,6 +3054,8 @@ function looksLikeTransactionLine(linha: string): boolean {
   // Installment: "item Nx de valor" or "item N parcelas de valor"
   if (/^.+\s+\d{1,2}[xX]\s+[\d,.]+$/i.test(t)) return true;
   if (/^.+\s+\d{1,2}\s+parcelas?\s+de\s+[\d,.]+$/i.test(t)) return true;
+  // Description before value: "Mercado 120", "Sorvete 38", "Disney Plus 34"
+  if (/^[a-zA-ZÀ-ÿ][\w\sÀ-ÿ]+\s+[\d,.]+$/.test(t)) return true;
   return false;
 }
 
