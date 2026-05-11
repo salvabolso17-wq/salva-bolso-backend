@@ -189,20 +189,16 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   if (!_ativo) {
     const textoTrim    = message.texto.trim();
-    const tentativaOp  = parseTransaction(textoTrim);
     const comandoBloq  = isBlockedFreemium(textoTrim);
-    const comandoValid = isKnownCommand(textoTrim);
     
     // Leitura básica explícita é permitida. Tudo que altera o banco ou é premium é bloqueado.
-    const apenasLeituraBasica = /^(saldo|resumo|extrato\s+.*)$/i.test(textoTrim);
-    const ehTentativaDeUso = tentativaOp || comandoBloq || (comandoValid && !apenasLeituraBasica);
+    const apenasLeituraBasica = /^(saldo|resumo|hoje|semana|extrato|menu|ajuda)$/i.test(textoTrim) || /^(buscar|extrato)\s+/i.test(textoTrim);
 
-    log.webhook("acesso negado — verificando tipo acesso restrito", { textoTrim, tentativaOp: !!tentativaOp, comandoBloq, apenasLeituraBasica });
+    log.webhook("acesso negado — verificando tipo acesso restrito", { textoTrim, comandoBloq, apenasLeituraBasica });
 
-    const expirouEm = user.subscription_expires_at ?? user.trial_ends_at ?? new Date();
-    
-    // Tenta enviar o aviso completo (apenas 1 vez) se o usuário tentou usar
-    if (ehTentativaDeUso) {
+    if (!apenasLeituraBasica) {
+      const expirouEm = user.subscription_expires_at ?? user.trial_ends_at ?? new Date();
+      
       let mostrouAvisoInicial = false;
       try {
         mostrouAvisoInicial = await checkAndSendExpirationNotice(user.id, message.telefone, expirouEm);
@@ -214,10 +210,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       if (!mostrouAvisoInicial) {
         let txtCurto = "Atenção: acesso limitado.";
         
-        if (tentativaOp) {
-           txtCurto = `🔒 Registro de novos gastos disponível no Premium.\n\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
-        } else if (comandoBloq || (comandoValid && !apenasLeituraBasica)) {
+        if (comandoBloq) {
            txtCurto = `🔒 Função exclusiva do Premium.\n\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+        } else {
+           txtCurto = `🔒 Registro de novos gastos disponível no Premium.\n\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
         }
         
         try {
