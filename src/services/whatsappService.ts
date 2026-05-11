@@ -2715,7 +2715,7 @@ async function checkAndSendExpirationNotice(userId: number, telefone: string, ex
   try {
     const ins = await pool.query(
       `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
-       VALUES ($1, 'expiracao_aviso_clean', 1, $2::date)
+       VALUES ($1, 'expiracao_aviso_v3', 1, $2::date)
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
       [userId, expirouEmDate]
     );
