@@ -15,11 +15,18 @@ function isAuthorized(req: import("express").Request): boolean {
   return header === token || query === token;
 }
 
-async function checkDatabase(): Promise<{ ok: boolean; latencyMs: number; erro?: string }> {
+async function checkDatabase(): Promise<{ ok: boolean; latencyMs: number; database?: string; host?: string; erro?: string }> {
   const start = Date.now();
   try {
-    await pool.query("SELECT 1");
-    return { ok: true, latencyMs: Date.now() - start };
+    const r = await pool.query<{ db: string; host: string }>(
+      `SELECT current_database() AS db, inet_server_addr()::text AS host`
+    );
+    return {
+      ok:       true,
+      latencyMs: Date.now() - start,
+      database: r.rows[0]?.db,
+      host:     r.rows[0]?.host,
+    };
   } catch (err) {
     return { ok: false, latencyMs: Date.now() - start, erro: String(err) };
   }
@@ -153,7 +160,7 @@ router.get("/", async (req, res) => {
     build: BUILD,
     timestamp: new Date().toISOString(),
     checks: {
-      banco: { ok: db.ok, latencyMs: db.latencyMs, ...(db.erro ? { erro: db.erro } : {}) },
+      banco: { ok: db.ok, latencyMs: db.latencyMs, database: db.database, host: db.host, ...(db.erro ? { erro: db.erro } : {}) },
       plans: { ok: plans.ok, planos: plans.planos, ...(plans.erro ? { erro: plans.erro } : {}) },
       colunas_users: { ok: columns.ok, colunas: columns.colunas },
       cron_expiracao: {
