@@ -15,6 +15,7 @@ import reportsRoutes from "./routes/reports";
 import webhooksRoutes from "./routes/webhooks";
 import insightsRoutes from "./routes/insights";
 import healthDeepRoutes from "./routes/healthDeep";
+import * as path from 'path';
 
 const app = express();
 
@@ -22,7 +23,7 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 // Serve static files from the 'public' directory
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, '../public')));
 
 app.use("/auth", authRoutes);
 app.use("/users", usersRoutes);
