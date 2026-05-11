@@ -2897,6 +2897,15 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     return await handleRecorrentesTotalCommand(user, telefone);
   }
 
+  // "quanto gasto por mês?" sem mencionar recorrentes — usa lastContext para desambiguar
+  if (
+    !temNumero &&
+    /quanto\s+(eu\s+)?(gasto|pago|saem?|[eéè])\s+por\s+m[eê]s[?!.]*$/.test(t) &&
+    getLastContext(user.id) === "recurring"
+  ) {
+    return await handleRecorrentesTotalCommand(user, telefone);
+  }
+
   return null;
 }
 
