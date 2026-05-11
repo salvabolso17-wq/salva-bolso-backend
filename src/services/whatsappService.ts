@@ -756,6 +756,45 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     descricao: parsed.descricao,
   });
 
+  // ── Checagem de recorrente duplicado ─────────────────────────────────────
+  if (parsed.tipo === "saida") {
+    try {
+      const recRows = await pool.query<{ nome: string; valor: string }>(
+        `SELECT nome, valor FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE`,
+        [user.id]
+      );
+      const descNorm = parsed.descricao.toLowerCase().trim();
+      const hit = recRows.rows.find(r => {
+        const n = r.nome.toLowerCase().trim();
+        return n === descNorm || descNorm.startsWith(n) || n.startsWith(descNorm);
+      });
+      if (hit) {
+        const recValor = parseFloat(hit.valor);
+        const nome     = capitalizeFirst(hit.nome);
+        if (Math.abs(recValor - parsed.valor) < 0.50) {
+          await whatsapp.sendText({ to: message.telefone, text: `${nome} já está nos seus recorrentes 🙂\nNão precisou registrar — já acompanho automaticamente.` });
+          return { success: false, userId: user.id, erro: "gasto duplica recorrente" };
+        } else {
+          await whatsapp.sendText({
+            to:   message.telefone,
+            text: `${nome} já é recorrente por ${fmtValor(recValor)}.\nQuer atualizar para ${fmtValor(parsed.valor)}?`,
+          });
+          await pool.query(
+            `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+             VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
+             ON CONFLICT (user_id) DO UPDATE
+               SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+                   selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+            [user.id, JSON.stringify({ update: true, nome: hit.nome, novoValor: parsed.valor })]
+          );
+          return { success: false, userId: user.id, erro: "recorrente valor diferente, aguardando confirmacao" };
+        }
+      }
+    } catch (err) {
+      log.error("falha na checagem de recorrente duplicado", err, { userId: user.id });
+    }
+  }
+
   // ── Salvar no banco ───────────────────────────────────────────────────────
   log.db("inserindo transacao", { user_id: user.id, tipo: parsed.tipo, valor: parsed.valor, categoria: parsed.categoria });
 
@@ -1103,6 +1142,22 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
 async function handleConfirmarRecorrente(user: UserRow, telefone: string, txIds: unknown): Promise<ProcessResult> {
   try {
     await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+    // Atualização de valor de recorrente existente
+    if (!Array.isArray(txIds) && (txIds as Record<string, unknown>).update === true) {
+      const data = txIds as { update: true; nome: string; novoValor: number };
+      await pool.query(
+        `UPDATE recurring_expenses SET valor = $1 WHERE user_id = $2 AND LOWER(TRIM(nome)) = LOWER(TRIM($3))`,
+        [data.novoValor, user.id, data.nome]
+      );
+      recordAction(user.id, "created_recurring");
+      setLastContext(user.id, "recurring");
+      await whatsapp.sendText({
+        to:   telefone,
+        text: `Atualizado 🙂 ${capitalizeFirst(data.nome)} agora é ${fmtValor(data.novoValor)} por mês.`,
+      });
+      return { success: false, userId: user.id, erro: "Recorrente atualizado" };
+    }
 
     // Array → confirmação de lista multi-line
     if (Array.isArray(txIds)) {
@@ -3008,7 +3063,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
 
   if (
     !temNumero &&
-    /^(minhas?\s+metas?|meus?\s+objetivos?|metas?\s+que\s+eu\s+tenho)[\?!.]*$/i.test(t)
+    /^(e\s+)?(minhas?\s+metas?|meus?\s+objetivos?|metas?\s+que\s+eu\s+tenho|metas?|objetivos?|sonhos?|o\s+que\s+(estou?|t[oô])\s+guardando|quanto\s+(guardei|juntei|pousei|economizei\s+at[eé]?\s+agora)|onde\s+est[aã]o\s+(minhas?\s+)?metas?|quais?\s+(s[aã]o\s+)?(minhas?\s+)?metas?)[\?!.]*$/i.test(t)
   ) {
     setLastCommand(user.id, "metas");
     return await handleMetasCommand(user, telefone);
