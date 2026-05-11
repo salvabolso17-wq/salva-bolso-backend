@@ -126,12 +126,32 @@ router.post("/asaas", async (req, res) => {
     const body    = req.body as Record<string, unknown>;
     const event   = body.event as string | undefined;
     const payment = body.payment as Record<string, unknown> | undefined;
+    const paymentId = payment?.id as string | undefined;
 
-    console.error("[ASAAS] event:", event, "paymentId:", payment?.id);
+    console.error("[ASAAS] event:", event, "paymentId:", paymentId);
 
     if (event !== "PAYMENT_CONFIRMED" && event !== "PAYMENT_RECEIVED") {
       res.status(200).json({ received: true, ignored: true, event });
       return;
+    }
+    
+    if (paymentId) {
+      try {
+        const dedup = await pool.query(
+          `INSERT INTO processed_messages (message_id, telefone)
+           VALUES ($1, $2)
+           ON CONFLICT (message_id) DO NOTHING`,
+          [`asaas_payment_${paymentId}`, "webhook_asaas"]
+        );
+
+        if (dedup.rowCount === 0) {
+          console.error("[ASAAS] webhook duplicado/já processado para o paymentId:", paymentId);
+          res.status(200).json({ received: true, ignored: true, reason: "duplicate" });
+          return;
+        }
+      } catch (err) {
+        console.error("[ASAAS] erro na verificacao de duplicidade asaas", err);
+      }
     }
 
     let telefoneRaw = payment?.externalReference as string | undefined;
@@ -214,9 +234,7 @@ router.post("/asaas", async (req, res) => {
     console.error("[ASAAS] usuario ativado:", user.id, user.telefone, isRenovacao ? "(renovacao)" : "(novo)");
     log.webhook("asaas: usuario ativado", { userId: user.id, telefone: user.telefone, paymentId: payment?.id, isRenovacao });
 
-    const texto = isRenovacao
-      ? `🎉 *Assinatura Renovada!* 🎉\n\nBoas notícias! Sua assinatura do Salva Bolso foi renovada com sucesso. Você já pode continuar a gerenciar suas finanças com tranquilidade.\n\n✅ Tudo pronto para você seguir no controle!`
-      : `✨ *Bem-vindo(a) ao Salva Bolso Premium!* ✨\n\nSua assinatura foi ativada com sucesso. Prepare-se para ter o controle total das suas finanças de forma inteligente e intuitiva.\n\n🚀 Comece agora a registrar seus gastos e descubra um novo nível de organização financeira!`;
+    const texto = `🎉 Premium ativado com sucesso!\n\nAgora você tem acesso completo ao Salva Bolso:\n💰 registro ilimitado de gastos\n📊 relatórios financeiros detalhados\n🎯 metas personalizadas\n🔄 controle de gastos recorrentes\n📅 acompanhamento mensal completo\n👀 consulta de saldo e histórico\n⚡ acesso total aos recursos Premium\n\nPode continuar usando normalmente ✨`;
 
     try {
       await whatsapp.sendText({ to: user.telefone, text: texto });
