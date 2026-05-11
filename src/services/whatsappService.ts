@@ -1075,8 +1075,34 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
 
 async function handleConfirmarRecorrente(user: UserRow, telefone: string, txIds: unknown): Promise<ProcessResult> {
   try {
-    const data = txIds as { nome: string; valor: number; frequencia: string };
     await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+    // Array → confirmação de lista multi-line
+    if (Array.isArray(txIds)) {
+      const items = txIds as { nome: string; valor: number; frequencia: string }[];
+      for (const item of items) {
+        await pool.query(
+          `INSERT INTO recurring_expenses (user_id, nome, valor, frequencia)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id, nome)
+           DO UPDATE SET valor = $3, frequencia = $4, ativo = TRUE`,
+          [user.id, item.nome, item.valor, item.frequencia]
+        );
+      }
+      recordAction(user.id, "created_recurring");
+      setLastCommand(user.id, "recorrentes");
+      setLastContext(user.id, "recurring");
+      const nomes = items.map(i => capitalizeFirst(i.nome)).join(", ");
+      await whatsapp.sendText({
+        to:   telefone,
+        text: `Perfeito 🙂\nVou acompanhar ${nomes} automaticamente.`,
+      });
+      log.whatsapp("recorrentes confirmados (lista)", { to: telefone, userId: user.id, count: items.length });
+      return { success: false, userId: user.id, erro: "Recorrentes confirmados" };
+    }
+
+    // Objeto único → fluxo original
+    const data = txIds as { nome: string; valor: number; frequencia: string };
     await pool.query(
       `INSERT INTO recurring_expenses (user_id, nome, valor, frequencia)
        VALUES ($1, $2, $3, $4)
@@ -3116,16 +3142,34 @@ async function handleMultiLineTransactions(
     log.error("falha ao enviar confirmação multilinha", err, { to: telefone });
   }
 
-  // Verifica recorrentes nos itens de saída — para no primeiro que disparar
+  // Verifica recorrentes nos itens de saída — sem gate de cooldown (lista é sinal explícito)
   const saidas = resultados.filter(r => r.tipo === "saida");
-  if (saidas.length > 0 && canSendInsight(user.id)) {
+  if (saidas.length >= 2) {
     setTimeout(async () => {
       try {
+        // Tenta individual (serviços óbvios: netflix, spotify etc.)
+        let disparou = false;
         for (const r of saidas) {
           if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor)) {
             recordInsightSent(user.id);
+            disparou = true;
             break;
           }
+        }
+
+        // Fallback genérico: pergunta sobre a lista toda
+        if (!disparou) {
+          await whatsapp.sendText({ to: telefone, text: "Algum desses acontece todo mês? 🔁" });
+          const payload = saidas.map(r => ({ nome: r.descricao, valor: r.valor, frequencia: "mensal" }));
+          await pool.query(
+            `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+             VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
+             ON CONFLICT (user_id) DO UPDATE
+               SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+                   selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
+            [user.id, JSON.stringify(payload)]
+          );
+          recordInsightSent(user.id);
         }
       } catch (err) {
         log.error("falha ao verificar recorrentes multilinha", err, { userId: user.id });
