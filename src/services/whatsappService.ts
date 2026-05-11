@@ -2723,7 +2723,7 @@ async function checkAndSendExpirationNotice(userId: number, telefone: string, ex
   } catch { /* continua */ }
 
   if (fullNovo) {
-    const mensagem = `✨ Seu teste grátis terminou.\n\nAgora você pode apenas:\n👀 consultar saldo\n📊 visualizar registros do mês\n\nPara continuar usando tudo:\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+    const mensagem = `✨ Seu teste grátis terminou.\n\nVocê ainda pode:\n👀 consultar saldo\n📊 visualizar registros do mês\n\nDesbloqueie todos os recursos:\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
     await whatsapp.sendText({ to: telefone, text: mensagem });
     return true;
   }
