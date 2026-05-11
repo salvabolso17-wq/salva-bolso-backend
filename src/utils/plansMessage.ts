@@ -81,8 +81,9 @@ export async function buildPlansBlock(): Promise<string> {
     lines.push(planLine);
     if (plan.link && plan.preco !== null) {
       const checkoutUrl = `/checkout-premium?plan=${encodeURIComponent(plan.nome)}`;
-      lines.push(`🚀 Assine agora: ${process.env.PUBLIC_URL ?? ''}${checkoutUrl}`);
-      log.webhook(`[PLANS_LOG] Generated checkout URL for ${plan.nome}:`, { url: `${process.env.PUBLIC_URL ?? ''}${checkoutUrl}` });
+      const fullUrl = `https://salva-bolso-backend-salvabolso.h5prml.easypanel.host${checkoutUrl}`;
+      lines.push(`🚀 Assine agora: ${fullUrl}`);
+      log.webhook(`[PLANS_LOG] Generated checkout URL for ${plan.nome}:`, { url: fullUrl });
     } else {
       log.webhook(`[PLANS_LOG] Skipping link for ${plan.nome}:`, { link: plan.link, price: plan.preco });
     }
