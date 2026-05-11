@@ -3116,6 +3116,23 @@ async function handleMultiLineTransactions(
     log.error("falha ao enviar confirmação multilinha", err, { to: telefone });
   }
 
+  // Verifica recorrentes nos itens de saída — para no primeiro que disparar
+  const saidas = resultados.filter(r => r.tipo === "saida");
+  if (saidas.length > 0 && canSendInsight(user.id)) {
+    setTimeout(async () => {
+      try {
+        for (const r of saidas) {
+          if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor)) {
+            recordInsightSent(user.id);
+            break;
+          }
+        }
+      } catch (err) {
+        log.error("falha ao verificar recorrentes multilinha", err, { userId: user.id });
+      }
+    }, 1200);
+  }
+
   return {
     success:      true,
     userId:       user.id,
