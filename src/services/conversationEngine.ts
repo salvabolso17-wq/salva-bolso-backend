@@ -33,6 +33,8 @@ export interface InstallmentCtx {
   valor: number;
   totalParcelas: number;
   parcelaAtual: number;
+  dbId?: number;
+  valorTotal?: number;
 }
 
 export interface GoalCtx {

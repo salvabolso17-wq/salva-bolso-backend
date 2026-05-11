@@ -200,8 +200,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente";
-    step: "waiting_selection" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "registrar_parcela";
+    step: "waiting_selection" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -281,6 +281,16 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         });
         return { success: false, userId: user.id, erro: "Aguardando confirmação recorrente" };
       }
+    } else if (pending.action === "registrar_parcela" && pending.step === "waiting_parcela_valor") {
+      if (!isKnownCommand(textoTrim)) {
+        return await handleRegistrarParcelaValor(
+          user,
+          message.telefone,
+          textoTrim,
+          pending.tx_ids as { item: string; totalParcelas: number; valorTotal: number },
+        );
+      }
+      await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     }
   }
 
@@ -495,7 +505,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Progresso de parcela ─────────────────────────────────────────────────
   // Self-contained: "paguei N de M" / "já paguei N de M"
-  // Context-aware : all natural phrasings, require lastInstallment in session
+  // Context-aware : all natural phrasings, require lastInstallment in session or DB
   {
     const t = message.texto.trim();
 
@@ -504,7 +514,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     if (pmExplicit) {
       const pago   = parseInt(pmExplicit[1], 10);
       const total  = parseInt(pmExplicit[2], 10);
-      const inst   = getLastInstallment(user.id);
+      const inst   = getLastInstallment(user.id) ?? await getInstallmentFromDb(user.id);
       const faltam = total - pago;
 
       let txt: string;
@@ -512,7 +522,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         txt = faltam > 0
           ? `Perfeito 🙂\nFaltam ${faltam} parcela${faltam > 1 ? "s" : ""} do ${inst.item}.`
           : `Ótimo 🙂\n${inst.item} — quitado!`;
-        setLastInstallment(user.id, { ...inst, parcelaAtual: pago + 1 });
+        const newInst = { ...inst, parcelaAtual: pago + 1 };
+        setLastInstallment(user.id, newInst);
+        if (inst.dbId) {
+          await pool.query(
+            `UPDATE installments SET parcelas_pagas = $1 WHERE id = $2`,
+            [pago, inst.dbId]
+          ).catch(() => null);
+        }
       } else {
         txt = faltam > 0
           ? `Certo 🙂\n${pago} de ${total} pagas.`
@@ -527,34 +544,56 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       return { success: false, userId: user.id, erro: "progresso parcela" };
     }
 
-    // Context-aware: any natural phrasing — only fires if we know which installment
-    const inst = getLastInstallment(user.id);
-    if (inst) {
-      const progress = detectInstallmentProgress(t);
-      if (progress !== null) {
-        const txt = buildInstallmentProgressText(progress, inst);
+    // Context-aware: any natural phrasing — session first, then DB fallback
+    const progress = detectInstallmentProgress(t);
+    if (progress !== null) {
+      const inst = getLastInstallment(user.id) ?? await getInstallmentFromDb(user.id);
 
-        if (progress.type === "pago" && progress.pago !== undefined) {
-          setLastInstallment(user.id, { ...inst, parcelaAtual: progress.pago + 1 });
-        } else if (progress.type === "current") {
-          setLastInstallment(user.id, { ...inst, parcelaAtual: progress.atual + 1 });
-        }
-
+      if (!inst) {
+        // Orphan: detected progress phrasing but no installment found anywhere
         try {
-          await whatsapp.sendText({ to: message.telefone, text: txt });
+          await whatsapp.sendText({
+            to:   message.telefone,
+            text: "De qual compra? Me manda assim:\n\niphone 12x de 250",
+          });
         } catch (err) {
-          log.error("falha ao enviar progresso parcela", err, { to: message.telefone });
+          log.error("falha ao enviar orphan hint", err, { to: message.telefone });
         }
-        return { success: false, userId: user.id, erro: "progresso parcela" };
+        return { success: false, userId: user.id, erro: "progresso parcela sem contexto" };
       }
+
+      const txt = buildInstallmentProgressText(progress, inst);
+
+      let newParcelaAtual = inst.parcelaAtual;
+      if (progress.type === "pago" && progress.pago !== undefined) {
+        newParcelaAtual = progress.pago + 1;
+      } else if (progress.type === "current") {
+        newParcelaAtual = progress.atual + 1;
+      }
+      setLastInstallment(user.id, { ...inst, parcelaAtual: newParcelaAtual });
+
+      if (inst.dbId && (progress.type === "pago" || progress.type === "current")) {
+        const pagas = newParcelaAtual - 1;
+        await pool.query(
+          `UPDATE installments SET parcelas_pagas = $1 WHERE id = $2`,
+          [pagas, inst.dbId]
+        ).catch(() => null);
+      }
+
+      try {
+        await whatsapp.sendText({ to: message.telefone, text: txt });
+      } catch (err) {
+        log.error("falha ao enviar progresso parcela", err, { to: message.telefone });
+      }
+      return { success: false, userId: user.id, erro: "progresso parcela" };
     }
   }
 
   // ── Parcela context follow-ups ───────────────────────────────────────────
   // Responde perguntas sobre a parcela ativa sem exigir frase exata.
-  // Só dispara quando o lastContext é "installment" E lastInstallment existe.
+  // Só dispara quando o lastContext é "installment" E lastInstallment existe (sessão ou DB).
   {
-    const inst = getLastInstallment(user.id);
+    const inst = getLastInstallment(user.id) ?? (getLastContext(user.id) === "installment" ? await getInstallmentFromDb(user.id) : null);
     if (inst && getLastContext(user.id) === "installment") {
       const tq = message.texto.trim().toLowerCase();
 
@@ -658,6 +697,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // Installment pattern takes priority over generic parser
   const installment = detectInstallment(textoParsear);
   if (installment) {
+    if (installment.needsParcela) {
+      return await handleInstallmentNeedsParcela(user, message.telefone, installment);
+    }
     return await handleInstallmentRegistration(user, message.telefone, installment);
   }
 
@@ -2949,8 +2991,9 @@ async function handleMultiLineTransactions(
     try {
       // Installment line: "iphone 12x de 345"
       const inst = detectInstallment(linha);
-      if (inst) {
+      if (inst && !inst.needsParcela) {
         const { item, valor, totalParcelas } = inst;
+        const total      = valor * totalParcelas;
         const tempParsed = parseTransaction(`${valor} ${item}`);
         const categoria  = tempParsed?.categoria ?? "Outros";
         const descricao  = capitalizeFirst(item);
@@ -2958,7 +3001,13 @@ async function handleMultiLineTransactions(
           `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao) VALUES ($1, 'saida', $2, $3, $4)`,
           [user.id, valor, categoria, descricao]
         );
-        setLastInstallment(user.id, { item: descricao, valor, totalParcelas, parcelaAtual: 1 });
+        const instResult = await pool.query<{ id: number }>(
+          `INSERT INTO installments (user_id, nome, valor_total, valor_parcela, total_parcelas, parcelas_pagas, categoria)
+           VALUES ($1, $2, $3, $4, $5, 1, $6) RETURNING id`,
+          [user.id, descricao, total, valor, totalParcelas, categoria]
+        );
+        const dbId = instResult.rows[0].id;
+        setLastInstallment(user.id, { item: descricao, valor, totalParcelas, parcelaAtual: 1, dbId, valorTotal: total });
         recordAction(user.id, "registered_transaction");
         resultados.push({ descricao: `${descricao} (${totalParcelas}×)`, valor, tipo: "saida" });
         continue;
@@ -3013,18 +3062,159 @@ async function handleMultiLineTransactions(
   };
 }
 
+// ── DB fallback for installment context ──────────────────────────────────────
+
+interface InstallmentDbRow {
+  id: number;
+  nome: string;
+  valor_parcela: number;
+  total_parcelas: number;
+  parcelas_pagas: number;
+  valor_total: number;
+}
+
+async function getInstallmentFromDb(userId: number): Promise<import("./conversationEngine").InstallmentCtx | null> {
+  try {
+    const r = await pool.query<InstallmentDbRow>(
+      `SELECT id, nome, valor_parcela, total_parcelas, parcelas_pagas, valor_total
+       FROM installments
+       WHERE user_id = $1 AND ativo = TRUE
+       ORDER BY criado_em DESC
+       LIMIT 1`,
+      [userId]
+    );
+    if (!r.rows[0]) return null;
+    const row = r.rows[0];
+    return {
+      item:          row.nome,
+      valor:         Number(row.valor_parcela),
+      totalParcelas: row.total_parcelas,
+      parcelaAtual:  row.parcelas_pagas + 1,
+      dbId:          row.id,
+      valorTotal:    Number(row.valor_total),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function handleInstallmentNeedsParcela(
+  user: UserRow,
+  telefone: string,
+  info: InstallmentInfo,
+): Promise<ProcessResult> {
+  const { item, totalParcelas, valorTotal } = info;
+  const descricao = capitalizeFirst(item);
+
+  const payload = JSON.stringify({ item: descricao, totalParcelas, valorTotal: valorTotal ?? 0 });
+
+  try {
+    await pool.query(
+      `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+       VALUES ($1, 'registrar_parcela', 'waiting_parcela_valor', $2::jsonb)
+       ON CONFLICT (user_id) DO UPDATE
+         SET action = 'registrar_parcela', step = 'waiting_parcela_valor', tx_ids = $2::jsonb,
+             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+      [user.id, payload]
+    );
+    const valorHint = valorTotal ? ` (total ${fmtValor(valorTotal)})` : "";
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `${descricao} — ${totalParcelas}×${valorHint}\n\nQual o valor de cada parcela?`,
+    });
+  } catch (err) {
+    log.error("falha em handleInstallmentNeedsParcela", err, { userId: user.id });
+  }
+
+  return { success: false, userId: user.id, erro: "aguardando valor parcela" };
+}
+
+async function handleRegistrarParcelaValor(
+  user: UserRow,
+  telefone: string,
+  textoTrim: string,
+  payload: { item: string; totalParcelas: number; valorTotal: number },
+): Promise<ProcessResult> {
+  const valorParcela = parseFloat(textoTrim.replace(",", "."));
+
+  if (isNaN(valorParcela) || valorParcela <= 0) {
+    try {
+      await whatsapp.sendText({ to: telefone, text: "Quanto é cada parcela? Ex: 250" });
+    } catch (err) {
+      log.error("falha ao pedir valor parcela", err, { to: telefone });
+    }
+    return { success: false, userId: user.id, erro: "valor parcela invalido" };
+  }
+
+  const { item, totalParcelas, valorTotal } = payload;
+  const total      = valorTotal > 0 ? valorTotal : valorParcela * totalParcelas;
+  const tempParsed = parseTransaction(`${valorParcela} ${item}`);
+  const categoria  = tempParsed?.categoria ?? "Outros";
+  const descricao  = capitalizeFirst(item);
+
+  let transacaoRow: Record<string, unknown> = {};
+  try {
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+    const txResult = await pool.query(
+      `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+       VALUES ($1, 'saida', $2, $3, $4)
+       RETURNING *`,
+      [user.id, valorParcela, categoria, descricao]
+    );
+    transacaoRow = txResult.rows[0] as Record<string, unknown>;
+
+    const instResult = await pool.query<{ id: number }>(
+      `INSERT INTO installments (user_id, nome, valor_total, valor_parcela, total_parcelas, parcelas_pagas, categoria)
+       VALUES ($1, $2, $3, $4, $5, 1, $6)
+       RETURNING id`,
+      [user.id, descricao, total, valorParcela, totalParcelas, categoria]
+    );
+    const dbId = instResult.rows[0].id;
+
+    recordAction(user.id, "registered_transaction");
+    setLastInstallment(user.id, { item: descricao, valor: valorParcela, totalParcelas, parcelaAtual: 1, dbId, valorTotal: total });
+    log.db("parcela salva (confirmada)", { installmentId: dbId, user_id: user.id });
+  } catch (err) {
+    log.error("falha ao salvar parcela confirmada", err, { user_id: user.id });
+    return { success: false, userId: user.id, erro: "Erro ao salvar parcela" };
+  }
+
+  const linhas = [
+    `✅ ${fmtValor(valorParcela)} — ${descricao}`,
+    ``,
+    `${totalParcelas} parcelas de ${fmtValor(valorParcela)}`,
+    `Total: ${fmtValor(total)}`,
+  ];
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+  } catch (err) {
+    log.error("falha ao confirmar parcela", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    transacaoRow,
+    interpretado: { tipo: "parcela", item: descricao, valor: valorParcela, totalParcelas },
+  };
+}
+
 // ── Installment parser ────────────────────────────────────────────────────────
 
 interface InstallmentInfo {
   item:          string;
   valor:         number;
   totalParcelas: number;
+  needsParcela?: boolean;
+  valorTotal?:   number;
 }
 
 function detectInstallment(texto: string): InstallmentInfo | null {
   const t = texto.trim();
 
-  // "iphone 12x de 755" or "tv 10x 230" (with optional "de")
+  // Pattern A: "iphone 12x de 755" or "tv 10x 230" — per-installment value given
   let m = t.match(/^(.+?)\s+(\d{1,2})\s*[xX]\s+(?:de\s+)?([\d,.]+)$/i);
   if (m) {
     const item          = m[1].trim();
@@ -3035,7 +3225,7 @@ function detectInstallment(texto: string): InstallmentInfo | null {
     }
   }
 
-  // "celular 12 parcelas de 300"
+  // Pattern B: "celular 12 parcelas de 300"
   m = t.match(/^(.+?)\s+(\d{1,2})\s+parcelas?\s+de\s+([\d,.]+)$/i);
   if (m) {
     const item          = m[1].trim();
@@ -3043,6 +3233,17 @@ function detectInstallment(texto: string): InstallmentInfo | null {
     const valor         = parseFloat(m[3].replace(",", "."));
     if (!(/^\d/.test(item)) && item.length >= 2 && totalParcelas >= 2 && totalParcelas <= 72 && valor > 0) {
       return { item, valor, totalParcelas };
+    }
+  }
+
+  // Pattern C: "iphone 3000 12x" — total given, per-installment unknown → ask
+  m = t.match(/^(.+?)\s+([\d,.]+)\s+(\d{1,2})\s*[xX]$/i);
+  if (m) {
+    const item          = m[1].trim();
+    const valorTotal    = parseFloat(m[2].replace(",", "."));
+    const totalParcelas = parseInt(m[3], 10);
+    if (!(/^\d/.test(item)) && item.length >= 2 && totalParcelas >= 2 && totalParcelas <= 72 && valorTotal > 0) {
+      return { item, valor: 0, totalParcelas, needsParcela: true, valorTotal };
     }
   }
 
@@ -3436,21 +3637,31 @@ async function handleInstallmentRegistration(
   const categoria  = tempParsed?.categoria ?? "Outros";
   const descricao  = capitalizeFirst(item);
 
+  const total = valor * totalParcelas;
   log.parser("parcela detectada", { item, valor, totalParcelas, categoria });
 
-  // Save as expense transaction
+  // Save as expense transaction + installment record
   let transacaoRow: Record<string, unknown>;
   try {
-    const result = await pool.query(
+    const txResult = await pool.query(
       `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
        VALUES ($1, 'saida', $2, $3, $4)
        RETURNING *`,
       [user.id, valor, categoria, descricao]
     );
-    transacaoRow = result.rows[0] as Record<string, unknown>;
+    transacaoRow = txResult.rows[0] as Record<string, unknown>;
+
+    const instResult = await pool.query<{ id: number }>(
+      `INSERT INTO installments (user_id, nome, valor_total, valor_parcela, total_parcelas, parcelas_pagas, categoria)
+       VALUES ($1, $2, $3, $4, $5, 1, $6)
+       RETURNING id`,
+      [user.id, descricao, total, valor, totalParcelas, categoria]
+    );
+    const dbId = instResult.rows[0].id;
+
     recordAction(user.id, "registered_transaction");
-    setLastInstallment(user.id, { item: descricao, valor, totalParcelas, parcelaAtual: 1 });
-    log.db("parcela salva", { id: transacaoRow.id, user_id: user.id });
+    setLastInstallment(user.id, { item: descricao, valor, totalParcelas, parcelaAtual: 1, dbId, valorTotal: total });
+    log.db("parcela salva", { id: transacaoRow.id, installmentId: dbId, user_id: user.id });
   } catch (err) {
     log.error("falha ao salvar parcela", err, { user_id: user.id });
     return { success: false, userId: user.id, erro: "Erro ao salvar parcela" };
@@ -3460,7 +3671,6 @@ async function handleInstallmentRegistration(
   const aviso = await checkLimiteCategoria(user.id, categoria).catch(() => null);
 
   // Natural confirmation with installment context
-  const total  = valor * totalParcelas;
   const linhas = [
     `✅ ${fmtValor(valor)} — ${descricao}`,
     ``,
