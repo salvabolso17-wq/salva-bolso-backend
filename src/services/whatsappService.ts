@@ -2672,20 +2672,32 @@ async function handleExtratoCommand(user: UserRow, telefone: string, texto: stri
   };
 }
 
-// Comandos que exigem assinatura Premium
-function isPremiumCommand(texto: string): boolean {
-  return /^(ranking|comparar|previs[aã]o|categorias|desafio|metas|recorrentes|pr[oó]ximas|top\s*gastos|parcelas|relat[oó]rios?|insights?)$/i.test(texto);
+// ── Controle de Acesso Pós-Trial ────────────────────────────────────────
+
+function isBlockedFreemium(texto: string): boolean {
+  const t = texto.trim().toLowerCase();
+  
+  if (/^(ranking|comparar|previs[aã]o|categorias|desafio|metas|recorrentes|pr[oó]ximas|top\s*gastos|parcelas|relat[oó]rios?|insights?|apagar|corrigir)$/i.test(t)) return true;
+  if (/^(meta|guardar|recorrente|limite)\s+/i.test(t)) return true;
+  
+  if (/quero\s+apagar|apagar\s+o\s+[uú]ltimo|remover\s+(o\s+)?[uú]ltimo|deletar\s+(o\s+)?[uú]ltimo/.test(t)) return true;
+  if (/registrei\s+errado|coloquei\s+errado|lancei\s+errado/.test(t)) return true;
+  if (/(qual\s+(é\s+o\s+)?meu\s+maior\s+gasto|onde\s+gastei\s+mais|onde\s+vai\s+(meu\s+)?dinheiro|maior\s+gasto\s+do\s+m[eê]s)/i.test(t)) return true;
+  
+  if (detectGoalIntent(texto) !== null) return true;
+  
+  return false;
 }
 
-// Envia aviso amigável de expiração apenas uma vez
-async function checkAndSendExpirationNotice(userId: number, telefone: string, expirouEm: Date): Promise<void> {
+// Envia aviso limpo de expiração apenas uma vez
+async function checkAndSendExpirationNotice(userId: number, telefone: string, expirouEm: Date): Promise<boolean> {
   const expirouEmDate = new Date(Date.UTC(expirouEm.getUTCFullYear(), expirouEm.getUTCMonth(), expirouEm.getUTCDate()));
 
   let fullNovo = false;
   try {
     const ins = await pool.query(
       `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
-       VALUES ($1, 'expiracao_aviso_freemium', 1, $2::date)
+       VALUES ($1, 'expiracao_aviso_clean', 1, $2::date)
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
       [userId, expirouEmDate]
     );
@@ -2693,16 +2705,11 @@ async function checkAndSendExpirationNotice(userId: number, telefone: string, ex
   } catch { /* continua */ }
 
   if (fullNovo) {
-    const plansBlock = await buildPlansBlock();
-    const mensagem = `✨ *Seu teste grátis terminou.*\n\nVocê ainda pode usar as funções básicas (registrar gastos e ver saldo) normalmente.\n\nPara desbloquear relatórios avançados, metas e análises completas, ative o Premium:\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+    const mensagem = `✨ Seu teste grátis terminou.\n\nAgora você pode apenas:\n👀 consultar saldo\n📊 visualizar registros do mês\n\nPara continuar usando tudo:\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
     await whatsapp.sendText({ to: telefone, text: mensagem });
+    return true;
   }
-}
-
-// Envia mensagem quando tenta usar comando Premium
-async function sendPremiumUpsell(telefone: string): Promise<void> {
-  const mensagem = `⭐ *Função Premium*\n\nEssa funcionalidade faz parte do Salva Bolso Premium (relatórios avançados, metas, rankings e mais).\n\nDesbloqueie agora para usar:\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
-  await whatsapp.sendText({ to: telefone, text: mensagem });
+  return false;
 }
 
 function isSubscriptionActive(user: UserRow): boolean {
