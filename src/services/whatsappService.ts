@@ -188,26 +188,28 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   });
 
   if (!_ativo) {
-    const textoTrim    = message.texto.trim();
-    const tentativaOp  = parseTransaction(textoTrim);
-    const apenasLeitura = isReadOnlyCommand(textoTrim);
-    log.webhook("acesso negado — verificando tipo", { textoTrim, tentativaOp: !!tentativaOp, apenasLeitura });
+    const textoTrim = message.texto.trim();
+    const ehPremium = isPremiumCommand(textoTrim);
+    log.webhook("acesso negado — verificando tipo freemium", { textoTrim, ehPremium });
 
-    if (tentativaOp || !apenasLeitura) {
-      // Operação de escrita bloqueada — modo limitado
-      const statusNorm  = (user.subscription_status ?? "").trim().toLowerCase();
-      const eraTrialUser =
-        statusNorm === "trial" ||
-        (statusNorm === "expired" && !user.subscription_expires_at);
-      const expirouEm = user.subscription_expires_at ?? user.trial_ends_at ?? new Date();
-      try {
-        await sendExpirationBlock(user.id, message.telefone, eraTrialUser, expirouEm);
-      } catch (err) {
-        log.error("falha no expiracao block", err, { userId: user.id });
-      }
-      return { success: false, userId: user.id, erro: "Acesso limitado" };
+    const expirouEm = user.subscription_expires_at ?? user.trial_ends_at ?? new Date();
+    
+    // Sempre verifica e envia aviso de expiração amigável se for a primeira vez
+    try {
+      await checkAndSendExpirationNotice(user.id, message.telefone, expirouEm);
+    } catch (err) {
+      log.error("falha no expiracao notice freemium", err, { userId: user.id });
     }
-    // Comandos de leitura passam — o usuário continua vendo seus dados
+
+    if (ehPremium) {
+      try {
+        await sendPremiumUpsell(message.telefone);
+      } catch (err) {
+        log.error("falha no envio de premium upsell", err, { userId: user.id });
+      }
+      return { success: false, userId: user.id, erro: "Acesso Premium necessário" };
+    }
+    // Funcionalidades básicas passam normalmente no plano Freemium!
   }
 
   // ── Pending action check ──────────────────────────────────────────────────
@@ -2670,24 +2672,20 @@ async function handleExtratoCommand(user: UserRow, telefone: string, texto: stri
   };
 }
 
-// Comandos de consulta permitidos em modo limitado (trial/assinatura expirados)
-function isReadOnlyCommand(texto: string): boolean {
-  return /^(saldo|resumo|hoje|semana|ranking|comparar|previs[aã]o|categorias|desafio|ajuda|menu|metas|recorrentes|pr[oó]ximas|top\s*gastos|extrato|parcelas)$/i.test(texto)
-      || /^(buscar|extrato)\s+/i.test(texto);
+// Comandos que exigem assinatura Premium
+function isPremiumCommand(texto: string): boolean {
+  return /^(ranking|comparar|previs[aã]o|categorias|desafio|metas|recorrentes|pr[oó]ximas|top\s*gastos|parcelas|relat[oó]rios?|insights?)$/i.test(texto);
 }
 
-// Envia mensagem de expiração:
-//   primeira vez no ciclo (marco 1) → mensagem completa com contexto
-//   demais vezes → versão curta com link do plano (sem silêncio)
-async function sendExpirationBlock(userId: number, telefone: string, eraTrialUser: boolean, expirouEm: Date): Promise<void> {
-  const plansBlock = await buildPlansBlock();
+// Envia aviso amigável de expiração apenas uma vez
+async function checkAndSendExpirationNotice(userId: number, telefone: string, expirouEm: Date): Promise<void> {
   const expirouEmDate = new Date(Date.UTC(expirouEm.getUTCFullYear(), expirouEm.getUTCMonth(), expirouEm.getUTCDate()));
 
   let fullNovo = false;
   try {
     const ins = await pool.query(
       `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
-       VALUES ($1, 'expiracao_aviso', 1, $2::date)
+       VALUES ($1, 'expiracao_aviso_freemium', 1, $2::date)
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
       [userId, expirouEmDate]
     );
@@ -2695,30 +2693,16 @@ async function sendExpirationBlock(userId: number, telefone: string, eraTrialUse
   } catch { /* continua */ }
 
   if (fullNovo) {
-    const intro = eraTrialUser
-      ? "🚨 *Seu período gratuito do Salva Bolso chegou ao fim.*"
-      : "🚨 *Sua assinatura do Salva Bolso expirou.*";
-    const callToAction = eraTrialUser
-      ? "Para continuar aproveitando todos os benefícios e manter seus registros atualizados, escolha um plano abaixo e assine agora:" 
-      : "Para reativar seu acesso e continuar gerenciando suas finanças sem interrupções, reative seu plano:";
-
-    const linhas = [
-      intro,
-      "",
-      "Seus dados estão seguros e aguardando você!",
-      "",
-      callToAction,
-    ];
-    if (plansBlock) linhas.push("", plansBlock);
-    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-    return;
+    const plansBlock = await buildPlansBlock();
+    const mensagem = `✨ *Seu teste grátis terminou.*\n\nVocê ainda pode usar as funções básicas (registrar gastos e ver saldo) normalmente.\n\nPara desbloquear relatórios avançados, metas e análises completas, ative o Premium:\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+    await whatsapp.sendText({ to: telefone, text: mensagem });
   }
+}
 
-  // Versão curta — sempre (sem silêncio)
-  const curto = plansBlock
-    ? `Atenção: seu acesso está limitado. Escolha um plano para continuar.\n\n${plansBlock}`
-    : "Atenção: seu acesso está limitado. Ative um plano para continuar usando o Salva Bolso.";
-  await whatsapp.sendText({ to: telefone, text: curto });
+// Envia mensagem quando tenta usar comando Premium
+async function sendPremiumUpsell(telefone: string): Promise<void> {
+  const mensagem = `⭐ *Função Premium*\n\nEssa funcionalidade faz parte do Salva Bolso Premium (relatórios avançados, metas, rankings e mais).\n\nDesbloqueie agora para usar:\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+  await whatsapp.sendText({ to: telefone, text: mensagem });
 }
 
 function isSubscriptionActive(user: UserRow): boolean {
