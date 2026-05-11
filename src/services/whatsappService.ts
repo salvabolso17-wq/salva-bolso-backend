@@ -1824,7 +1824,7 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
       "Extras:",
       "meta viagem 5000",
       "limite alimentação 800",
-      "recorrente 39 netflix mensal",
+      "recorrente 39 netflix mensal — cadastrar conta fixa",
     ];
   } else {
     linhas = [
@@ -1833,7 +1833,8 @@ async function handleAjudaCommand(user: UserRow, telefone: string): Promise<Proc
       "",
       "Consultas:",
       "saldo  •  resumo  •  hoje  •  semana",
-      "ranking  •  previsão  •  recorrentes  •  próximas",
+      "ranking  •  previsão  •  próximas",
+      "recorrentes — suas contas fixas do mês",
       "apagar  •  corrigir",
       "",
       "Extras:",
@@ -2626,7 +2627,7 @@ function buildFeaturesMenuText(): string {
     "",
     "📊 saldo  •  resumo  •  ranking",
     "💳 parcelas — iphone 12x de 755",
-    "🔁 recorrentes  •  próximas",
+    "🔁 recorrentes — contas fixas (netflix, aluguel...)",
     "🎯 metas  •  limites",
     "✏️ corrigir  •  apagar",
     "",
