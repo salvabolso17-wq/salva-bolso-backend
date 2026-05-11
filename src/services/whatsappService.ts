@@ -1,5 +1,5 @@
 import pool from "../db/client";
-import { parseTransaction } from "../utils/parseTransaction";
+import { parseTransaction, parseValor } from "../utils/parseTransaction";
 import { fetchPeriodMetrics } from "./reportService";
 import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
@@ -1306,7 +1306,7 @@ async function handleLimiteCommand(user: UserRow, telefone: string, texto: strin
   }
 
   const categoria   = normalizarCategoria(match[1]);
-  const valorLimite = parseFloat(match[2].replace(",", "."));
+  const valorLimite = parseValor(match[2]);
 
   await pool.query(
     `INSERT INTO category_limits (user_id, categoria, valor_limite)
@@ -1627,7 +1627,7 @@ async function handleGuardarCommand(user: UserRow, telefone: string, texto: stri
     return { success: false, userId: user.id, erro: "Formato inválido" };
   }
 
-  const valor   = parseFloat(match[1].replace(",", "."));
+  const valor   = parseValor(match[1]);
   const rawNome = match[2].replace(/^(?:na?|no|em|pra?|para|pro?)\s+/i, "").trim();
   const nome    = rawNome.charAt(0).toUpperCase() + rawNome.slice(1).toLowerCase();
 
@@ -1705,7 +1705,7 @@ async function handleMetaCommand(user: UserRow, telefone: string, texto: string)
   }
 
   const nome      = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
-  const valorMeta = parseFloat(match[2].replace(",", "."));
+  const valorMeta = parseValor(match[2]);
 
   await pool.query(
     `INSERT INTO user_goals (user_id, nome, valor_meta)
@@ -3193,7 +3193,7 @@ async function handleRegistrarParcelaValor(
   textoTrim: string,
   payload: { item: string; totalParcelas: number; valorTotal: number },
 ): Promise<ProcessResult> {
-  const valorParcela = parseFloat(textoTrim.replace(",", "."));
+  const valorParcela = parseValor(textoTrim);
 
   if (isNaN(valorParcela) || valorParcela <= 0) {
     try {
@@ -3277,7 +3277,7 @@ function detectInstallment(texto: string): InstallmentInfo | null {
   if (m) {
     const item          = m[1].trim();
     const totalParcelas = parseInt(m[2], 10);
-    const valor         = parseFloat(m[3].replace(",", "."));
+    const valor         = parseValor(m[3]);
     if (!(/^\d/.test(item)) && item.length >= 2 && totalParcelas >= 2 && totalParcelas <= 72 && valor > 0) {
       return { item, valor, totalParcelas };
     }
@@ -3288,7 +3288,7 @@ function detectInstallment(texto: string): InstallmentInfo | null {
   if (m) {
     const item          = m[1].trim();
     const totalParcelas = parseInt(m[2], 10);
-    const valor         = parseFloat(m[3].replace(",", "."));
+    const valor         = parseValor(m[3]);
     if (!(/^\d/.test(item)) && item.length >= 2 && totalParcelas >= 2 && totalParcelas <= 72 && valor > 0) {
       return { item, valor, totalParcelas };
     }
@@ -3298,7 +3298,7 @@ function detectInstallment(texto: string): InstallmentInfo | null {
   m = t.match(/^(.+?)\s+([\d,.]+)\s+(\d{1,2})\s*[xX]$/i);
   if (m) {
     const item          = m[1].trim();
-    const valorTotal    = parseFloat(m[2].replace(",", "."));
+    const valorTotal    = parseValor(m[2]);
     const totalParcelas = parseInt(m[3], 10);
     if (!(/^\d/.test(item)) && item.length >= 2 && totalParcelas >= 2 && totalParcelas <= 72 && valorTotal > 0) {
       return { item, valor: 0, totalParcelas, needsParcela: true, valorTotal };
@@ -3427,15 +3427,15 @@ function detectGoalIntent(texto: string): GoalIntent | null {
   // ── adicionar ─────────────────────────────────────────────────────────
   // "consegui guardar mais 50 pra viagem"
   m = t.match(/^consegui\s+(?:guard|poup|junt|separ|coloc)(?:ar|a)\s+(?:mais\s+)?([\d,.]+)\s*(?:(?:na?|no|pra?|para|pro?|em)\s+(.+))?$/i);
-  if (m) return { type: "adicionar", valor: parseFloat(m[1].replace(",", ".")), nome: m[2]?.trim() || undefined };
+  if (m) return { type: "adicionar", valor: parseValor(m[1]), nome: m[2]?.trim() || undefined };
 
   // "quero guardar 200", "separa 100 pra viagem", "poupa 150", "guardar 300 na meta viagem"
   m = t.match(/^(?:quero\s+)?(?:guard|poup|junt|separ|coloc|bot|adicion)(?:ar|a)\s+([\d,.]+)\s*(?:(?:na?|no|pra?|para|pro?|em)\s+(.+))?$/i);
-  if (m) return { type: "adicionar", valor: parseFloat(m[1].replace(",", ".")), nome: m[2]?.trim() || undefined };
+  if (m) return { type: "adicionar", valor: parseValor(m[1]), nome: m[2]?.trim() || undefined };
 
   // "já juntei 300", "guardei 200", "juntei 150 pra viagem"
   m = t.match(/^(?:j[aá]\s+)?(?:guard|poup|junt|separ|coloc)ei\s+([\d,.]+)\s*(?:(?:na?|no|pra?|para|em)\s+(.+))?$/i);
-  if (m) return { type: "adicionar", valor: parseFloat(m[1].replace(",", ".")), nome: m[2]?.trim() || undefined };
+  if (m) return { type: "adicionar", valor: parseValor(m[1]), nome: m[2]?.trim() || undefined };
 
   // ── consultas de progresso / contexto ─────────────────────────────────
   // "qual porcentagem?", "que percentual?", "qual o percentual?"
@@ -4005,9 +4005,7 @@ async function handleCorrigirNovoValor(user: UserRow, telefone: string, texto: s
 async function handleNovoMesRenda(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
   log.webhook("novo_mes renda recebida", { userId: user.id, texto });
 
-  const valor = parseFloat(
-    texto.replace(/R\$\s*/i, "").replace(/\./g, "").replace(",", ".").trim()
-  );
+  const valor = parseValor(texto.replace(/R\$\s*/i, "").trim());
 
   if (isNaN(valor) || valor <= 0) {
     await whatsapp.sendText({ to: telefone, text: "💡 Ex:\n3500" });

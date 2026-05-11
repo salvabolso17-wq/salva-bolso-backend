@@ -1,3 +1,38 @@
+const PALAVRAS_MIL: Record<string, number> = {
+  "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "três": 3,
+  "quatro": 4, "cinco": 5, "seis": 6, "sete": 7, "oito": 8, "nove": 9,
+  "dez": 10, "vinte": 20, "trinta": 30, "quarenta": 40, "cinquenta": 50,
+};
+
+export function parseValor(raw: string): number {
+  const s = raw.trim();
+
+  // "20mil", "20 mil", "1.5mil", "1,5 mil"
+  const milNum = s.match(/^([\d.,]+)\s*mil$/i);
+  if (milNum) return parseValorBase(milNum[1]) * 1000;
+
+  // "dois mil", "três mil", "cinco mil"
+  const milWord = s.match(/^([a-záéíóúãõâêôç]+)\s+mil$/i);
+  if (milWord) {
+    const n = PALAVRAS_MIL[milWord[1].toLowerCase()];
+    if (n) return n * 1000;
+  }
+
+  return parseValorBase(s);
+}
+
+function parseValorBase(s: string): number {
+  const t = s.trim();
+  // PT-BR: "1.500" or "1.500,50"
+  if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(t))
+    return parseFloat(t.replace(/\./g, "").replace(",", "."));
+  // US: "1,500" or "1,500.50"
+  if (/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(t))
+    return parseFloat(t.replace(/,/g, ""));
+  // Simple comma-decimal or plain
+  return parseFloat(t.replace(",", "."));
+}
+
 export interface ParsedTransaction {
   valor: number;
   descricao: string;
@@ -337,11 +372,13 @@ export function parseTransaction(texto: string): ParsedTransaction | null {
   const isEntrada  = textoNorm.startsWith("+");
   const textoParse = isEntrada ? textoNorm.slice(1).trim() : textoNorm;
 
-  // Extrai valor: suporta 120, 120.50, 120,50, R$120, R$ 120
-  const valorMatch = textoParse.match(/R?\$?\s*(\d+(?:[.,]\d{1,2})?)/i);
+  // Extrai valor: suporta 1.500, 1500,50, 120.50, 20mil, R$120
+  const valorMatch = textoParse.match(
+    /R?\$?\s*(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?\s*mil|\d+(?:[.,]\d{1,2})?)/i
+  );
   if (!valorMatch) return null;
 
-  const valor = parseFloat(valorMatch[1].replace(",", "."));
+  const valor = parseValor(valorMatch[1]);
   if (isNaN(valor) || valor <= 0) return null;
 
   const descricao  = normalizeDescricao(cleanDescricao(
