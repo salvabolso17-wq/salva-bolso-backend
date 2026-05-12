@@ -315,7 +315,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
       await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     } else if (pending.action === "confirmar_recorrente" && pending.step === "waiting_confirmation") {
-      const isAffirmative = /^(sim|s|yes|pode|quero|claro|ótimo|otimo|isso|exato|afirm|ok|beleza|bora|vai|certo|perfeito|tá|ta)[\?!.]*$/i.test(textoTrim);
+      const isAffirmative = /^(sim|s|yes|pode|quero|claro|ótimo|otimo|isso|exato|afirm|ok|beleza|bora|vai|certo|perfeito|tá|ta|todos|tudo|todas)[\?!.]*$/i.test(textoTrim);
       const isNegative    = /^(não|nao|n|no|agora\s*não|agora\s*nao|depois|por\s+enquanto|dispenso|obrigad[ao])[\?!.]*$/i.test(textoTrim);
 
       if (isAffirmative) {
@@ -3328,24 +3328,41 @@ async function handleMultiLineTransactions(
   if (saidas.length >= 2) {
     setTimeout(async () => {
       try {
-        // Tenta individual (serviços óbvios: netflix, spotify etc.)
-        let disparou = false;
+        const LIFETIME = new Date("2000-01-01");
+
+        // Coleta todos os candidatos a recorrente: passam no score e ainda não estão cadastrados
+        const candidatos: Resultado[] = [];
         for (const r of saidas) {
-          if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor, r.categoria)) {
-            recordInsightSent(user.id);
-            disparou = true;
-            break;
-          }
+          if (!isLikelyRecurring(r.descricao, r.valor, r.categoria)) continue;
+          const jaRec = await pool.query(
+            `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(TRIM(nome)) = $2 LIMIT 1`,
+            [user.id, r.descricao.toLowerCase().trim()]
+          );
+          if (jaRec.rows.length === 0) candidatos.push(r);
         }
 
-        // Fallback genérico: pergunta sobre a lista toda com numeração
-        if (!disparou) {
-          const listaOpcoes = saidas.map((r, i) => `${i + 1}. ${r.descricao}`).join("\n");
-          await whatsapp.sendText({ 
-            to: telefone, 
-            text: `Quais desses gastos acontecem todo mês? (ex: 1 e 3, ou todos)\n\n${listaOpcoes}` 
+        if (candidatos.length === 1) {
+          // Um candidato → pergunta individual (preserva lógica de sentinel)
+          if (await checkAndSuggestRecorrente(user.id, telefone, candidatos[0].descricao, candidatos[0].valor, candidatos[0].categoria)) {
+            recordInsightSent(user.id);
+          }
+        } else if (candidatos.length >= 2) {
+          // Múltiplos candidatos → pergunta agrupada (evita perguntas em sequência)
+          for (const c of candidatos) {
+            const sentinel = `rec_suggest_${c.descricao.toLowerCase().trim().replace(/\s+/g, "_").slice(0, 40)}`;
+            await pool.query(
+              `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+               VALUES ($1, $2, 1, $3)
+               ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+              [user.id, sentinel, LIFETIME]
+            );
+          }
+          const lista = candidatos.map((r, i) => `${i + 1}. ${capitalizeFirst(r.descricao)} — ${fmtValor(r.valor)}`).join("\n");
+          await whatsapp.sendText({
+            to: telefone,
+            text: `Algum desses acontece todo mês? 🔁\n\n${lista}\n\n(diz os números ou "todos")`,
           });
-          const payload = saidas.map(r => ({ nome: r.descricao, valor: r.valor, frequencia: "mensal" }));
+          const payload = candidatos.map(r => ({ nome: r.descricao, valor: r.valor, frequencia: "mensal" }));
           await pool.query(
             `INSERT INTO pending_actions (user_id, action, step, tx_ids)
              VALUES ($1, 'confirmar_recorrente_multi', 'waiting_selection_multi', $2::jsonb)
@@ -3355,6 +3372,14 @@ async function handleMultiLineTransactions(
             [user.id, JSON.stringify(payload)]
           );
           recordInsightSent(user.id);
+        } else {
+          // Nenhum candidato por score → tenta padrão histórico item a item
+          for (const r of saidas) {
+            if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor, r.categoria)) {
+              recordInsightSent(user.id);
+              break;
+            }
+          }
         }
       } catch (err) {
         log.error("falha ao verificar recorrentes multilinha", err, { userId: user.id });
@@ -3515,7 +3540,7 @@ async function handleConfirmarRecorrenteMulti(user: UserRow, telefone: string, t
   
   let selectedIndices: number[] = [];
   
-  if (t.includes("todo") || t.includes("tudo") || t.includes("ambos") || t.includes("os dois") || t.includes("as duas")) {
+  if (t.includes("todo") || t.includes("tudo") || t.includes("ambos") || t.includes("os dois") || t.includes("as duas") || /^(sim|s|yes|pode|quero|claro|ok|beleza|bora|certo|perfeito|tá|ta)[\?!.]*$/.test(t)) {
     selectedIndices = items.map((_, i) => i);
   } else {
     // Parse numbers
@@ -3554,8 +3579,7 @@ async function handleConfirmarRecorrenteMulti(user: UserRow, telefone: string, t
   for (const item of selectedItems) {
     linhas.push(`• ${capitalizeFirst(item.nome)} — ${fmtValor(item.valor)}`);
   }
-  linhas.push("", `Total mensal fixo:`);
-  linhas.push(fmtValor(totalFixo));
+  linhas.push("", `Total fixo por mês: ${fmtValor(totalFixo)}`);
   
   await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
   return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "confirmar_recorrente_multi" } };
