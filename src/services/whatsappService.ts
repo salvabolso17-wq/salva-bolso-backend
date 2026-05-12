@@ -822,7 +822,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     if (recMatch !== null) {
       const { nome, recValor, sameValue } = recMatch;
       if (sameValue) {
-        try { await whatsapp.sendText({ to: message.telefone, text: `${nome} já está nos seus recorrentes 🙂` }); } catch (_) { /* silent */ }
+        try { await whatsapp.sendText({ to: message.telefone, text: `${nome} já está nas suas contas fixas 🙂` }); } catch (_) { /* silent */ }
         return { success: false, userId: user.id, erro: "gasto duplica recorrente" };
       } else {
         try {
@@ -2602,7 +2602,7 @@ async function handleRecorrentesCommand(user: UserRow, telefone: string): Promis
     };
   }
 
-  const linhas = ["🔁 Seus recorrentes", ""];
+  const linhas = ["🔄 Assinaturas e contas fixas", ""];
   let totalMensal = 0;
 
   for (const row of result.rows) {
@@ -3550,7 +3550,7 @@ async function handleConfirmarRecorrenteMulti(user: UserRow, telefone: string, t
   setLastCommand(user.id, "recorrentes");
   setLastContext(user.id, "recurring");
   
-  const linhas = ["📌 Recorrentes salvos.", ""];
+  const linhas = ["📌 Salvei nas contas fixas.", ""];
   for (const item of selectedItems) {
     linhas.push(`• ${capitalizeFirst(item.nome)} — ${fmtValor(item.valor)}`);
   }
@@ -3978,12 +3978,12 @@ async function handleRecorrentesTotalCommand(user: UserRow, telefone: string): P
   );
 
   if (result.rows.length === 0) {
-    await whatsapp.sendText({ to: telefone, text: "Você não tem recorrentes cadastrados." });
+    await whatsapp.sendText({ to: telefone, text: "Você ainda não tem contas fixas cadastradas." });
     return { success: false, userId: user.id, erro: "Sem recorrentes" };
   }
 
   const total = result.rows.reduce((sum, row) => sum + Number(row.valor), 0);
-  const linhas = [`Total em recorrentes: ${fmtValor(total)}`, ""];
+  const linhas = [`Total fixo por mês: ${fmtValor(total)}`, ""];
   result.rows.forEach(row => linhas.push(`${row.nome} — ${fmtValor(Number(row.valor))}`));
 
   try {
