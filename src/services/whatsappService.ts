@@ -295,9 +295,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         } catch (_) { /* silent */ }
         return { success: false, userId: user.id, erro: "renda ignorada pelo usuario" };
       }
-      // Gasto explícito cancela o contexto de renda e processa normalmente
+      // Gasto explícito (com descrição) cancela o contexto de renda e processa normalmente
+      // Número puro (ex: "3000") é renda, não gasto — cai em handleNovoMesRenda abaixo
       const parsedAsExpense = parseTransaction(textoTrim);
-      if (parsedAsExpense && parsedAsExpense.tipo === "saida") {
+      const isPureNumber = /^\d[\d,.]*$/.test(textoTrim);
+      if (parsedAsExpense && parsedAsExpense.tipo === "saida" && !isPureNumber) {
         await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
         // fall through para registro normal
       } else if (!isKnownCommand(textoTrim)) {
@@ -790,6 +792,15 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       return await handleInstallmentNeedsParcela(user, message.telefone, installment);
     }
     return await handleInstallmentRegistration(user, message.telefone, installment);
+  }
+
+  // Guard: frases com intenção futura/condicional não devem ser registradas como gastos
+  if (
+    /\d/.test(textoParsear) &&
+    /\b(tenho\s+que\s+pagar|vou\s+pagar|preciso\s+pagar|falta\s+pagar|ainda\s+n[aã]o\s+paguei|a\s+pagar\b)\b/i.test(textoParsear)
+  ) {
+    log.parser("mencao futura ignorada", { texto: textoParsear });
+    return { success: false, userId: user.id, erro: "mencao futura ignorada" };
   }
 
   const parsed = parseTransaction(textoParsear);
@@ -3486,7 +3497,7 @@ async function handleInstallmentNeedsParcela(
        VALUES ($1, 'registrar_parcela', 'waiting_parcela_valor', $2::jsonb)
        ON CONFLICT (user_id) DO UPDATE
          SET action = 'registrar_parcela', step = 'waiting_parcela_valor', tx_ids = $2::jsonb,
-             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '30 minutes'`,
       [user.id, payload]
     );
     const valorHint = valorTotal ? ` (total ${fmtValor(valorTotal)})` : "";
