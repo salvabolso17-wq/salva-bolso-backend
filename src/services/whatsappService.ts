@@ -401,6 +401,15 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
+  // ── Intenção de histórico/registros — redireciona para extrato ──────────
+  if (
+    !parseTransaction(message.texto.trim()) &&
+    /tudo\s+que\s+(j[aá]\s+)?(anotei|registrei|lan[cç]ei)|ver\s+(meus?\s+)?(registros?|lan[cç]amentos?|hist[oó]rico|anotat?[uú]?)|meus?\s+(lan[cç]amentos?|registros?|hist[oó]rico de\s+gastos?)|hist[oó]rico\s+de\s+gastos?/i.test(message.texto.trim())
+  ) {
+    const mesAtual = MESES_NOME[new Date().getMonth() + 1];
+    return await handleExtratoCommand(user, message.telefone, `extrato ${mesAtual}`);
+  }
+
   // ── Curiosidade sobre funcionalidades (linguagem natural) ────────────────
   if (isCuriosityPhrase(message.texto.trim())) {
     try {
@@ -1986,49 +1995,12 @@ async function handleMetasCommand(user: UserRow, telefone: string): Promise<Proc
 
 async function handleAjudaCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando ajuda", { userId: user.id });
-
-  const nRow = await pool.query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
-    [user.id]
-  );
-  const n = Number(nRow.rows[0].count);
-
-  let linhas: string[];
-
-  linhas = [
-    "👋 Posso te ajudar com:",
-    "",
-    "💸 *Gastos*",
-    "• 50 mercado",
-    "• +3000 salário",
-    "",
-    "📊 *Consultas*",
-    "• saldo",
-    "• resumo",
-    "• ranking",
-    "",
-    "🎯 *Metas*",
-    "• meta viagem 5000",
-    "• guardar 200 viagem",
-    "",
-    "📦 *Parcelas*",
-    "• iphone 12x de 345",
-    "",
-    "🔁 *Recorrentes*",
-    "• netflix 39 mensal",
-    "",
-    "✏️ *Ajustes*",
-    "• apagar",
-    "• corrigir",
-  ];
-
   try {
-    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-    log.whatsapp("ajuda enviado", { to: telefone, n });
+    await whatsapp.sendText({ to: telefone, text: buildFeaturesMenuText() });
+    log.whatsapp("ajuda enviado", { to: telefone });
   } catch (err) {
     log.error("falha ao enviar ajuda", err, { to: telefone });
   }
-
   return {
     success:      true,
     userId:       user.id,
@@ -2803,16 +2775,24 @@ function isCuriosityPhrase(texto: string): boolean {
 
 function buildFeaturesMenuText(): string {
   return [
-    "O que consigo fazer:",
+    "📌 O que posso fazer:",
     "",
     "📊 Saldo e resumo do mês",
-    "💸 Registrar gastos — 50 mercado, 35 uber",
-    "💳 Parcelamentos — iphone 12x de 755",
-    "🔁 Contas fixas — netflix, aluguel, academia",
-    "🎯 Metas e limites de gasto",
+    "",
+    "💸 Registrar gastos",
+    "Ex: mercado, uber, farmácia",
+    "",
+    "💳 Parcelamentos",
+    "Ex: iPhone em 12x",
+    "",
+    "🔄 Contas fixas",
+    "Ex: Netflix, aluguel, academia",
+    "",
+    "🎯 Metas e limites",
+    "",
     "✏️ Corrigir ou apagar lançamentos",
     "",
-    "Pode me perguntar do seu jeito 💬",
+    "💬 Pode me perguntar do seu jeito 🙂",
   ].join("\n");
 }
 
