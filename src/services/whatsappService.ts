@@ -356,8 +356,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const _isNew   = !!user.criado_em
       && Date.now() - new Date(user.criado_em).getTime() < 10 * 60 * 1000;
 
-    // Silence new users in onboarding window for casual/unknown messages
-    if (_isNew && _session.txCount === 0 && (_intent === "casual" || _intent === "unknown")) {
+    // Silence new users in onboarding window for pure chit-chat only
+    // "unknown" is intentionally excluded — unknown messages may be installments or natural-language expenses
+    if (_isNew && _session.txCount === 0 && _intent === "casual") {
       log.webhook("conv engine: silencio onboarding", { userId: user.id, intent: _intent });
       return { success: false, userId: user.id, erro: "Conv engine: silencio onboarding" };
     }
@@ -436,7 +437,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     if (count === 0) {
       // Onboarding enviado há menos de 5 min → silêncio (evita spam de boas-vindas repetidas)
       const criadoHaPouco = user.criado_em
-        && (Date.now() - new Date(user.criado_em).getTime()) < 5 * 60 * 1000;
+        && (Date.now() - new Date(user.criado_em).getTime()) < 2 * 60 * 1000;
       if (criadoHaPouco) {
         return { success: false, userId: user.id, erro: "Onboarding recente — silencio" };
       }
