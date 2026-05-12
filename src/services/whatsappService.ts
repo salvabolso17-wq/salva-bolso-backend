@@ -1137,6 +1137,51 @@ const NEVER_RECURRING = [
   "bicicleta",
 ];
 
+// Pequena base auxiliar de serviços/contas reconhecidamente mensais
+const RECURRING_SERVICE_HINTS = [
+  // Streaming
+  "netflix", "spotify", "disney", "hbomax", "primevideo", "youtube", "appletv",
+  "paramount", "crunchyroll", "telecine", "globoplay",
+  // Cloud / produtividade
+  "icloud", "dropbox", "notion", "figma", "canva", "adobe", "github",
+  "chatgpt", "openai", "midjourney", "linkedin", "zoom", "slack",
+  // Telecoms
+  "claro", "vivo", "tim", "nextel",
+  // Contas mensais comuns
+  "internet", "aluguel", "academia", "condominio", "mei",
+  "contador", "hospedagem", "dominio",
+];
+
+function normalizeForHint(s: string): string {
+  return s.toLowerCase().trim()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, "");
+}
+
+function editDistance(a: string, b: string): number {
+  const n = b.length;
+  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const temp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(dp[j], dp[j - 1], prev);
+      prev = temp;
+    }
+  }
+  return dp[n];
+}
+
+function matchesKnownService(descricao: string): boolean {
+  const d = normalizeForHint(descricao);
+  for (const hint of RECURRING_SERVICE_HINTS) {
+    if (d === hint || d.includes(hint) || hint.includes(d)) return true;
+    if (hint.length >= 5 && Math.abs(d.length - hint.length) <= 2 && editDistance(d, hint) <= 2) return true;
+  }
+  return false;
+}
+
 // Detecta se um gasto tem perfil de recorrente sem depender de lista de serviços
 function isLikelyRecurring(descricao: string, valor: number, categoria: string): boolean {
   const desc = descricao.toLowerCase().trim();
@@ -1146,6 +1191,9 @@ function isLikelyRecurring(descricao: string, valor: number, categoria: string):
   if (NEVER_RECURRING.some(w => desc.includes(w))) return false;
 
   let score = 0;
+
+  // Nome bate com serviço/conta mensal conhecida (fuzzy — tolera typos)
+  if (matchesKnownService(descricao)) score += 2;
 
   // Categoria indica recorrência estrutural
   if (["Moradia", "Educação"].includes(categoria)) score += 2;
@@ -3577,9 +3625,9 @@ async function handleConfirmarRecorrenteMulti(user: UserRow, telefone: string, t
   setLastCommand(user.id, "recorrentes");
   setLastContext(user.id, "recurring");
   
-  const linhas = ["📌 Salvei nas contas fixas.", ""];
+  const linhas = ["🔄 Perfeito!", "Vou acompanhar essas contas automaticamente:", ""];
   for (const item of selectedItems) {
-    linhas.push(`• ${capitalizeFirst(item.nome)} — ${fmtValor(item.valor)}`);
+    linhas.push(`• ${capitalizeFirst(item.nome)}`);
   }
   linhas.push("", `Total fixo por mês: ${fmtValor(totalFixo)}`);
   
