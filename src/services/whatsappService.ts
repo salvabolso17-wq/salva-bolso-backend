@@ -3377,8 +3377,6 @@ async function handleMultiLineTransactions(
   if (saidas.length >= 2) {
     setTimeout(async () => {
       try {
-        const LIFETIME = new Date("2000-01-01");
-
         // Coleta todos os candidatos a recorrente: passam no score e ainda não estão cadastrados
         const candidatos: Resultado[] = [];
         for (const r of saidas) {
@@ -3397,18 +3395,8 @@ async function handleMultiLineTransactions(
             recordInsightSent(user.id);
           }
         } else if (candidatos.length >= 2) {
-          // Múltiplos candidatos → pergunta agrupada (evita perguntas em sequência)
-          for (const c of candidatos) {
-            const sentinel = `rec_suggest_${c.descricao.toLowerCase().trim().replace(/\s+/g, "_").slice(0, 40)}`;
-            await pool.query(
-              `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
-               VALUES ($1, $2, 1, $3)
-               ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
-              [user.id, sentinel, LIFETIME]
-            );
-          }
+          // Múltiplos candidatos → salva pending primeiro, depois envia pergunta
           const payload = candidatos.map(r => ({ nome: r.descricao, valor: r.valor, frequencia: "mensal" }));
-          // Salva pending ANTES de enviar — evita race condition onde usuário responde antes do INSERT
           await pool.query(
             `INSERT INTO pending_actions (user_id, action, step, tx_ids)
              VALUES ($1, 'confirmar_recorrente_multi', 'waiting_selection_multi', $2::jsonb)
