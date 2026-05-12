@@ -1244,7 +1244,8 @@ function isLikelyRecurring(descricao: string, valor: number, categoria: string):
 async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string, valor: number, categoria: string, textoOriginal?: string): Promise<boolean> {
   try {
     const descNorm = descricao.toLowerCase().trim();
-    const LIFETIME = new Date("2000-01-01");
+    const now = new Date();
+    const mesAtual = new Date(now.getFullYear(), now.getMonth(), 1);
     const sentinel = `rec_suggest_${descNorm.replace(/\s+/g, "_").slice(0, 40)}`;
 
     // Não sugerir se já é recorrente cadastrado
@@ -1265,7 +1266,7 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
         `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
          VALUES ($1, $2, 1, $3)
          ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
-        [userId, sentinel, LIFETIME]
+        [userId, sentinel, mesAtual]
       );
       if ((inserted.rowCount ?? 0) === 0) return false;
 
@@ -1303,7 +1304,7 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
       `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
        VALUES ($1, $2, 1, $3)
        ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
-      [userId, sentinel, LIFETIME]
+      [userId, sentinel, mesAtual]
     );
     if ((inserted.rowCount ?? 0) === 0) return false;
 
@@ -3405,10 +3406,22 @@ async function handleMultiLineTransactions(
     log.error("falha ao enviar confirmação multilinha", err, { to: telefone });
   }
 
+  // Notifica itens já salvos como recorrentes
+  const jaFixos = resultados.filter(r => r.descricao.toLowerCase().includes("(recorrente)"));
+  if (jaFixos.length > 0) {
+    try {
+      const nomes = jaFixos.map(r => capitalizeFirst(r.descricao.replace(/\s*\(recorrente\)/i, "")));
+      const lista = nomes.length === 1 ? nomes[0] : nomes.slice(0, -1).join(", ") + " e " + nomes[nomes.length - 1];
+      await whatsapp.sendText({ to: telefone, text: `${lista} já está${nomes.length > 1 ? "m" : ""} nas suas contas fixas 🙂` });
+    } catch (err) {
+      log.error("falha ao notificar recorrentes já salvos", err, { userId: user.id });
+    }
+  }
+
   // Verifica recorrentes nos itens de saída — sem gate de cooldown (lista é sinal explícito)
   const saidas = resultados.filter(r => r.tipo === "saida");
   log.webhook("multilinha: saidas detectadas", { userId: user.id, count: saidas.length, descricoes: saidas.map(r => r.descricao) });
-  if (saidas.length >= 2) {
+  if (saidas.length >= 1) {
     setTimeout(async () => {
       try {
         // Coleta todos os candidatos a recorrente: passam no score e ainda não estão cadastrados
@@ -3418,9 +3431,8 @@ async function handleMultiLineTransactions(
             log.webhook("multilinha: skip recorrente conhecido", { userId: user.id, desc: r.descricao });
             continue;
           }
-          const score = isLikelyRecurring(r.descricao, r.valor, r.categoria);
-          if (!score) {
-            log.webhook("multilinha: skip score baixo", { userId: user.id, desc: r.descricao });
+          if (NEVER_RECURRING.some(w => r.descricao.toLowerCase().includes(w))) {
+            log.webhook("multilinha: skip never recurring", { userId: user.id, desc: r.descricao });
             continue;
           }
           const jaRec = await pool.query(
