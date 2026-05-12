@@ -1127,6 +1127,13 @@ const NEVER_RECURRING = [
   "cinema", "teatro", "show", "ingresso", "boliche", "karting",
   "hotel", "pousada", "hostel", "airbnb", "viagem",
   "presente",
+  // Compras típicas parceladas (nunca são assinaturas mensais)
+  "iphone", "ipad", "macbook", "airpods",
+  "notebook", "laptop", "computador", "celular", "smartphone",
+  "geladeira", "fogão", "fogao", "microondas", "lavadora",
+  "televisão", "televisao",
+  "sofá", "sofa", "cama", "colchão", "colchao", "móveis", "moveis", "armário", "armario",
+  "bicicleta",
 ];
 
 // Detecta se um gasto tem perfil de recorrente sem depender de lista de serviços
@@ -2783,7 +2790,7 @@ function buildFeaturesMenuText(): string {
     "Ex: mercado, uber, farmácia",
     "",
     "💳 Parcelamentos",
-    "Ex: iPhone em 12x",
+    "Ex: iPhone 12x de 300",
     "",
     "🔄 Contas fixas",
     "Ex: Netflix, aluguel, academia",
@@ -3595,6 +3602,17 @@ function detectInstallment(texto: string): InstallmentInfo | null {
     const totalParcelas = parseInt(m[3], 10);
     if (!(/^\d/.test(item)) && item.length >= 2 && totalParcelas >= 2 && totalParcelas <= 72 && valorTotal > 0) {
       return { item, valor: 0, totalParcelas, needsParcela: true, valorTotal };
+    }
+  }
+
+  // Pattern D: "iphone 12x" / "iphone em 12x" — sem valor nenhum → pede valor da parcela
+  m = t.match(/^(.+?)\s+(\d{1,2})\s*[xX]$/i);
+  if (m) {
+    const rawItem       = m[1].trim();
+    const item          = rawItem.replace(/\s+(?:em|no|na|de|para|por)\s*$/i, "").trim();
+    const totalParcelas = parseInt(m[2], 10);
+    if (!(/^\d/.test(item)) && item.length >= 2 && totalParcelas >= 2 && totalParcelas <= 72) {
+      return { item, valor: 0, totalParcelas, needsParcela: true };
     }
   }
 
