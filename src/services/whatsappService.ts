@@ -891,8 +891,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   const linhasConfirmacao = parsed.tipo === "entrada"
-    ? [`💰 ${fmtValor(parsed.valor)} — ${capitalizeFirst(parsed.descricao)}`]
-    : [`✅ ${fmtValor(parsed.valor)} — ${capitalizeFirst(parsed.descricao)}`];
+    ? [`💰 Anotado!\n${fmtValor(parsed.valor)} • ${capitalizeFirst(parsed.descricao)}`]
+    : [`✅ Anotado!\n${fmtValor(parsed.valor)} • ${capitalizeFirst(parsed.descricao)}`];
 
   if (parsed.tipo === "saida") {
     const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
@@ -3302,8 +3302,8 @@ async function handleMultiLineTransactions(
   });
 
   const header = resultados.length === 1
-    ? "✅ Lançamento registrado:"
-    : `✅ ${resultados.length} lançamentos:`;
+    ? "✅ Anotado!"
+    : `✅ ${resultados.length} anotados:`;
 
   const partes = [header, "", ...itens];
   if (falhas.length > 0) {
