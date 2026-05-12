@@ -947,7 +947,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         if (await sendContextualMicroInsight(user.id, message.telefone, parsed.categoria)) {
           recordInsightSent(user.id); return;
         }
-        if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao, parsed.valor, parsed.categoria)) {
+        if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao, parsed.valor, parsed.categoria, message.texto)) {
           recordInsightSent(user.id); return;
         }
         if (await checkAndDetectInstallment(user.id, message.telefone, parsed.descricao, message.texto, parsed.valor)) {
@@ -1148,6 +1148,23 @@ const NEVER_RECURRING = [
   "bicicleta",
 ];
 
+// Detecta sinais de frequência mensal/contínua no texto original da mensagem
+function detectFrequencyIntent(texto: string): boolean {
+  const t = texto.toLowerCase();
+  return [
+    "todo mês", "todo mes", "todos os meses",
+    "mensalidade", "mensalmente",
+    "por mês", "por mes", "/mês", "/mes",
+    "sempre pago", "sempre vem",
+    "conta fixa", "gasto fixo", "valor fixo",
+    "débito automático", "debito automatico",
+    "todo mês pago", "pago todo mês", "pago todo mes",
+    "assinatura",
+    "recorrente", "recorrência", "recorrencia",
+    "plano mensal",
+  ].some(s => t.includes(s));
+}
+
 // Pequena base auxiliar de serviços/contas reconhecidamente mensais
 const RECURRING_SERVICE_HINTS = [
   // Streaming
@@ -1224,7 +1241,7 @@ function isLikelyRecurring(descricao: string, valor: number, categoria: string):
 }
 
 // Detecta recorrentes por sinal contextual (1ª ocorrência) ou por padrão histórico (2+ meses)
-async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string, valor: number, categoria: string): Promise<boolean> {
+async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string, valor: number, categoria: string, textoOriginal?: string): Promise<boolean> {
   try {
     const descNorm = descricao.toLowerCase().trim();
     const LIFETIME = new Date("2000-01-01");
@@ -1238,7 +1255,12 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
     if (jaRecorrente.rows.length > 0) return false;
 
     // ── Strategy A: sinais contextuais → pergunta na 1ª ocorrência ───────────
-    if (isLikelyRecurring(descricao, valor, categoria)) {
+    // Dispara por score de perfil OU por sinal de frequência no texto original
+    const freqSignal = textoOriginal != null
+      && detectFrequencyIntent(textoOriginal)
+      && !NEVER_RECURRING.some(w => descNorm.includes(w));
+
+    if (isLikelyRecurring(descricao, valor, categoria) || freqSignal) {
       const inserted = await pool.query(
         `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
          VALUES ($1, $2, 1, $3)
@@ -3303,7 +3325,7 @@ async function handleMultiLineTransactions(
   telefone: string,
   linhas: string[],
 ): Promise<ProcessResult> {
-  type Resultado = { descricao: string; valor: number; tipo: string; categoria: string };
+  type Resultado = { descricao: string; valor: number; tipo: string; categoria: string; textoOriginal?: string };
   const resultados: Resultado[] = [];
   const falhas: string[]        = [];
 
@@ -3351,7 +3373,7 @@ async function handleMultiLineTransactions(
         [user.id, parsed.tipo, parsed.valor, parsed.categoria, parsed.descricao]
       );
       recordAction(user.id, "registered_transaction");
-      resultados.push({ descricao: parsed.descricao, valor: parsed.valor, tipo: parsed.tipo, categoria: parsed.categoria });
+      resultados.push({ descricao: parsed.descricao, valor: parsed.valor, tipo: parsed.tipo, categoria: parsed.categoria, textoOriginal: linha });
     } catch (err) {
       log.error("falha ao processar linha multilinha", err, { linha, userId: user.id });
       falhas.push(linha);
@@ -3416,7 +3438,7 @@ async function handleMultiLineTransactions(
 
         if (candidatos.length === 1) {
           // Um candidato → pergunta individual (preserva lógica de sentinel)
-          if (await checkAndSuggestRecorrente(user.id, telefone, candidatos[0].descricao, candidatos[0].valor, candidatos[0].categoria)) {
+          if (await checkAndSuggestRecorrente(user.id, telefone, candidatos[0].descricao, candidatos[0].valor, candidatos[0].categoria, candidatos[0].textoOriginal)) {
             recordInsightSent(user.id);
           }
         } else if (candidatos.length >= 2) {
@@ -3442,7 +3464,7 @@ async function handleMultiLineTransactions(
           // Nenhum candidato novo → tenta padrão histórico, mas só para itens sem "(recorrente)"
           const novasSaidas = saidas.filter(r => !r.descricao.toLowerCase().includes("(recorrente)"));
           for (const r of novasSaidas) {
-            if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor, r.categoria)) {
+            if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor, r.categoria, r.textoOriginal)) {
               recordInsightSent(user.id);
               break;
             }
