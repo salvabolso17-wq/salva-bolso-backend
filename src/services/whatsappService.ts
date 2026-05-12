@@ -3333,6 +3333,7 @@ async function handleMultiLineTransactions(
         // Coleta todos os candidatos a recorrente: passam no score e ainda não estão cadastrados
         const candidatos: Resultado[] = [];
         for (const r of saidas) {
+          if (r.descricao.toLowerCase().includes("(recorrente)")) continue;
           if (!isLikelyRecurring(r.descricao, r.valor, r.categoria)) continue;
           const jaRec = await pool.query(
             `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(TRIM(nome)) = $2 LIMIT 1`,
