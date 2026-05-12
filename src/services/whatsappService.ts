@@ -3385,20 +3385,34 @@ async function handleMultiLineTransactions(
 
   // Verifica recorrentes nos itens de saída — sem gate de cooldown (lista é sinal explícito)
   const saidas = resultados.filter(r => r.tipo === "saida");
+  log.webhook("multilinha: saidas detectadas", { userId: user.id, count: saidas.length, descricoes: saidas.map(r => r.descricao) });
   if (saidas.length >= 2) {
     setTimeout(async () => {
       try {
         // Coleta todos os candidatos a recorrente: passam no score e ainda não estão cadastrados
         const candidatos: Resultado[] = [];
         for (const r of saidas) {
-          if (r.descricao.toLowerCase().includes("(recorrente)")) continue;
-          if (!isLikelyRecurring(r.descricao, r.valor, r.categoria)) continue;
+          if (r.descricao.toLowerCase().includes("(recorrente)")) {
+            log.webhook("multilinha: skip recorrente conhecido", { userId: user.id, desc: r.descricao });
+            continue;
+          }
+          const score = isLikelyRecurring(r.descricao, r.valor, r.categoria);
+          if (!score) {
+            log.webhook("multilinha: skip score baixo", { userId: user.id, desc: r.descricao });
+            continue;
+          }
           const jaRec = await pool.query(
             `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(TRIM(nome)) = $2 LIMIT 1`,
             [user.id, r.descricao.toLowerCase().trim()]
           );
-          if (jaRec.rows.length === 0) candidatos.push(r);
+          if (jaRec.rows.length > 0) {
+            log.webhook("multilinha: skip ja recorrente no db", { userId: user.id, desc: r.descricao });
+            continue;
+          }
+          candidatos.push(r);
         }
+
+        log.webhook("multilinha: candidatos", { userId: user.id, count: candidatos.length, nomes: candidatos.map(r => r.descricao) });
 
         if (candidatos.length === 1) {
           // Um candidato → pergunta individual (preserva lógica de sentinel)
@@ -3408,6 +3422,7 @@ async function handleMultiLineTransactions(
         } else if (candidatos.length >= 2) {
           // Múltiplos candidatos → salva pending primeiro, depois envia pergunta
           const payload = candidatos.map(r => ({ nome: r.descricao, valor: r.valor, frequencia: "mensal" }));
+          log.webhook("multilinha: inserindo pending", { userId: user.id });
           await pool.query(
             `INSERT INTO pending_actions (user_id, action, step, tx_ids)
              VALUES ($1, 'confirmar_recorrente_multi', 'waiting_selection_multi', $2::jsonb)
@@ -3416,6 +3431,7 @@ async function handleMultiLineTransactions(
                    selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
             [user.id, JSON.stringify(payload)]
           );
+          log.webhook("multilinha: pending inserido, enviando pergunta", { userId: user.id });
           const lista = candidatos.map((r, i) => `${i + 1}. ${capitalizeFirst(r.descricao)} — ${fmtValor(r.valor)}`).join("\n");
           await whatsapp.sendText({
             to: telefone,
@@ -3423,8 +3439,9 @@ async function handleMultiLineTransactions(
           });
           recordInsightSent(user.id);
         } else {
-          // Nenhum candidato por score → tenta padrão histórico item a item
-          for (const r of saidas) {
+          // Nenhum candidato novo → tenta padrão histórico, mas só para itens sem "(recorrente)"
+          const novasSaidas = saidas.filter(r => !r.descricao.toLowerCase().includes("(recorrente)"));
+          for (const r of novasSaidas) {
             if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor, r.categoria)) {
               recordInsightSent(user.id);
               break;
