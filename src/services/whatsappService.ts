@@ -3407,12 +3407,8 @@ async function handleMultiLineTransactions(
               [user.id, sentinel, LIFETIME]
             );
           }
-          const lista = candidatos.map((r, i) => `${i + 1}. ${capitalizeFirst(r.descricao)} — ${fmtValor(r.valor)}`).join("\n");
-          await whatsapp.sendText({
-            to: telefone,
-            text: `Algum desses acontece todo mês? 🔁\n\n${lista}\n\n(diz os números ou "todos")`,
-          });
           const payload = candidatos.map(r => ({ nome: r.descricao, valor: r.valor, frequencia: "mensal" }));
+          // Salva pending ANTES de enviar — evita race condition onde usuário responde antes do INSERT
           await pool.query(
             `INSERT INTO pending_actions (user_id, action, step, tx_ids)
              VALUES ($1, 'confirmar_recorrente_multi', 'waiting_selection_multi', $2::jsonb)
@@ -3421,6 +3417,11 @@ async function handleMultiLineTransactions(
                    selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
             [user.id, JSON.stringify(payload)]
           );
+          const lista = candidatos.map((r, i) => `${i + 1}. ${capitalizeFirst(r.descricao)} — ${fmtValor(r.valor)}`).join("\n");
+          await whatsapp.sendText({
+            to: telefone,
+            text: `Algum desses acontece todo mês? 🔁\n\n${lista}\n\n(diz os números ou "todos")`,
+          });
           recordInsightSent(user.id);
         } else {
           // Nenhum candidato por score → tenta padrão histórico item a item
@@ -3585,7 +3586,11 @@ async function handleRegistrarParcelaValor(
 }
 
 async function handleConfirmarRecorrenteMulti(user: UserRow, telefone: string, texto: string, txIdsRaw: unknown): Promise<ProcessResult> {
-  const items = txIdsRaw as { nome: string; valor: number; frequencia: string }[];
+  const items = (Array.isArray(txIdsRaw) ? txIdsRaw : []) as { nome: string; valor: number; frequencia: string }[];
+  if (items.length === 0) {
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    return { success: false, userId: user.id, erro: "tx_ids vazio" };
+  }
   const t = texto.toLowerCase();
   
   let selectedIndices: number[] = [];
