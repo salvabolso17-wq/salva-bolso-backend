@@ -2866,6 +2866,16 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     return await handleAjudaCommand(user, telefone);
   }
 
+  // Correção ou deleção por linguagem natural (sem guard !temNumero — captura frases com valor)
+  const _naturalEdit = parseNaturalEdit(texto.trim());
+  if (_naturalEdit) {
+    if (_naturalEdit.tipo === "corrigir") {
+      return await handleNaturalCorrection(user, telefone, _naturalEdit.descBusca, _naturalEdit.novoValor);
+    } else {
+      return await handleNaturalDelete(user, telefone, _naturalEdit.descBusca);
+    }
+  }
+
   // Confusão leve → resposta curta, sem menu
   if (
     !temNumero &&
@@ -4072,6 +4082,131 @@ function buildContextualHint(texto: string): string {
     "Pode registrar um gasto ou pedir o saldo do mês.",
   ];
   return fallbacks[new Date().getHours() % fallbacks.length];
+}
+
+// ── Edição natural de lançamentos ─────────────────────────────────────────────
+
+function parseNaturalEdit(
+  texto: string,
+): { tipo: "corrigir"; descBusca: string; novoValor: number } | { tipo: "apagar"; descBusca: string } | null {
+  const t = texto.trim().toLowerCase();
+
+  // "apaga aquele uber", "remove a farmácia", "deleta o mercado"
+  const delM = t.match(
+    /^(?:apaga[r]?|remove[r]?|deleta[r]?|cancela[r]?)\s+(?:(?:esse[s]?|essa[s]?|aquele[s]?|aquela[s]?|o|a|os|as|um|uma)\s+)?([a-záéíóúãõâêôç][a-záéíóúãõâêôç\s]{0,30}?)[\?!.]*$/i,
+  );
+  if (delM) {
+    const desc = delM[1].trim();
+    if (desc.length >= 2 && !/^([uú]ltimo[s]?|[uú]ltima[s]?|gasto[s]?|lan[cç]amento[s]?|item|coisa)$/.test(desc))
+      return { tipo: "apagar", descBusca: desc };
+  }
+
+  // "corrige o mercado pra 80", "muda a academia para 150"
+  const corrM = t.match(
+    /(?:corri[gj]e[i]?|muda[r]?|atualiza[r]?)\s+(?:o\s+|a\s+)?([a-záéíóúãõâêôç][a-záéíóúãõâêôç\s]{0,25}?)\s+(?:pra?|para)\s+r?\$?\s*([\d,.]+)/i,
+  );
+  if (corrM) {
+    const valor = parseValor(corrM[2]);
+    if (!isNaN(valor) && valor > 0) return { tipo: "corrigir", descBusca: corrM[1].trim(), novoValor: valor };
+  }
+
+  // "o valor do aluguel foi 900", "o valor da academia era 150"
+  const valM = t.match(
+    /o\s+valor\s+d[oa]\s+([a-záéíóúãõâêôç][a-záéíóúãõâêôç\s]{0,25}?)\s+(?:foi|era|[eéè])\s+r?\$?\s*([\d,.]+)/i,
+  );
+  if (valM) {
+    const valor = parseValor(valM[2]);
+    if (!isNaN(valor) && valor > 0) return { tipo: "corrigir", descBusca: valM[1].trim(), novoValor: valor };
+  }
+
+  // "o ifood era 42 não 32"
+  const eraM = t.match(
+    /o\s+([a-záéíóúãõâêôç][a-záéíóúãõâêôç\s]{0,25}?)\s+era\s+r?\$?\s*([\d,.]+)\s+(?:n[aã]o|,\s*n[aã]o)/i,
+  );
+  if (eraM) {
+    const valor = parseValor(eraM[2]);
+    if (!isNaN(valor) && valor > 0) return { tipo: "corrigir", descBusca: eraM[1].trim(), novoValor: valor };
+  }
+
+  return null;
+}
+
+async function findRecentTxByDesc(
+  userId: number,
+  descBusca: string,
+): Promise<{ id: number; descricao: string; valor: number; categoria: string } | "multiple" | null> {
+  const desc = descBusca.toLowerCase().trim();
+
+  const exact = await pool.query<{ id: number; descricao: string; valor: string; categoria: string }>(
+    `SELECT id, descricao, valor, categoria FROM transactions
+     WHERE user_id = $1 AND LOWER(descricao) = $2 AND criado_em >= NOW() - INTERVAL '30 days'
+     ORDER BY criado_em DESC LIMIT 2`,
+    [userId, desc],
+  );
+  if (exact.rows.length === 1) {
+    const r = exact.rows[0];
+    return { id: r.id, descricao: r.descricao, valor: Number(r.valor), categoria: r.categoria };
+  }
+  if (exact.rows.length > 1) return "multiple";
+
+  const like = await pool.query<{ id: number; descricao: string; valor: string; categoria: string }>(
+    `SELECT id, descricao, valor, categoria FROM transactions
+     WHERE user_id = $1 AND LOWER(descricao) LIKE $2 AND criado_em >= NOW() - INTERVAL '30 days'
+     ORDER BY criado_em DESC LIMIT 2`,
+    [userId, `%${desc}%`],
+  );
+  if (like.rows.length === 1) {
+    const r = like.rows[0];
+    return { id: r.id, descricao: r.descricao, valor: Number(r.valor), categoria: r.categoria };
+  }
+  if (like.rows.length > 1) return "multiple";
+
+  return null;
+}
+
+async function handleNaturalCorrection(
+  user: UserRow, telefone: string, descBusca: string, novoValor: number,
+): Promise<ProcessResult> {
+  try {
+    const tx = await findRecentTxByDesc(user.id, descBusca);
+    if (tx === null || tx === "multiple") return await handleCorrigirCommand(user, telefone);
+    await pool.query(
+      `UPDATE transactions SET valor = $1 WHERE id = $2 AND user_id = $3`,
+      [novoValor, tx.id, user.id],
+    );
+    const nome = capitalizeFirst(tx.descricao);
+    try {
+      await whatsapp.sendText({ to: telefone, text: `✅ ${nome} atualizado para ${fmtValor(novoValor)}.` });
+      log.whatsapp("corrigir_natural ok", { to: telefone, userId: user.id, txId: tx.id, novoValor });
+    } catch (err) {
+      log.error("falha ao confirmar corrigir_natural", err, { userId: user.id });
+    }
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "corrigir_natural", txId: tx.id, novoValor } };
+  } catch (err) {
+    log.error("falha handleNaturalCorrection", err, { userId: user.id });
+    return await handleCorrigirCommand(user, telefone);
+  }
+}
+
+async function handleNaturalDelete(
+  user: UserRow, telefone: string, descBusca: string,
+): Promise<ProcessResult> {
+  try {
+    const tx = await findRecentTxByDesc(user.id, descBusca);
+    if (tx === null || tx === "multiple") return await handleApagarCommand(user, telefone);
+    await pool.query(`DELETE FROM transactions WHERE id = $1 AND user_id = $2`, [tx.id, user.id]);
+    const nome = capitalizeFirst(tx.descricao);
+    try {
+      await whatsapp.sendText({ to: telefone, text: `Pronto, ${nome} removido.` });
+      log.whatsapp("apagar_natural ok", { to: telefone, userId: user.id, txId: tx.id });
+    } catch (err) {
+      log.error("falha ao confirmar apagar_natural", err, { userId: user.id });
+    }
+    return { success: false, userId: user.id, erro: "apagar_natural_ok" };
+  } catch (err) {
+    log.error("falha handleNaturalDelete", err, { userId: user.id });
+    return await handleApagarCommand(user, telefone);
+  }
 }
 
 async function handleApagarCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
