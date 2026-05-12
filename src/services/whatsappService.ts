@@ -926,7 +926,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         if (await sendContextualMicroInsight(user.id, message.telefone, parsed.categoria)) {
           recordInsightSent(user.id); return;
         }
-        if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao, parsed.valor)) {
+        if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao, parsed.valor, parsed.categoria)) {
           recordInsightSent(user.id); return;
         }
         if (await checkAndDetectInstallment(user.id, message.telefone, parsed.descricao, message.texto, parsed.valor)) {
@@ -1101,28 +1101,54 @@ async function checkRecorrenteDuplicado(
   }
 }
 
-// Serviços de alta confiança: pergunta na 1ª ocorrência ─────────────────────
-const RECURRING_OBVIOUS_KEYWORDS = [
-  // Streaming e assinaturas digitais
-  "netflix", "spotify", "disney", "amazon prime", "prime video", "hbo",
-  "globoplay", "paramount", "crunchyroll", "apple tv", "youtube premium",
-  "deezer", "apple music", "chatgpt", "canva", "dropbox", "icloud",
-  // Fitness
-  "academia", "pilates", "natação", "natacao", "yoga", "crossfit",
-  // Moradia
-  "aluguel", "condomínio", "condominio",
-  // Serviços fixos
-  "internet", "banda larga",
-  "energia", "conta de luz", "conta de água",
-  "gás", "gas encanado",
-  // Educação
-  "faculdade", "escola", "mensalidade",
-  // Financeiro
-  "financiamento", "seguro", "plano de saúde", "plano de saude",
+// Coisas que nunca são recorrentes na 1ª ocorrência — exclusão por sinal negativo
+const NEVER_RECURRING = [
+  "mercado", "supermercado", "minimercado", "atacadão", "atacadao", "assaí", "assai", "hortifruti",
+  "padaria", "confeitaria", "açougue", "acougue",
+  "restaurante", "lanchonete", "cantina", "bistrô", "bistro",
+  "almoço", "almoco", "jantar", "lanche", "pizza", "hamburguer", "marmita", "comida",
+  "delivery", "ifood", "rappi", "uber eats", "ubereats",
+  "gasolina", "etanol", "combustível", "combustivel", "abastecimento", "gnv",
+  "uber", "táxi", "taxi", "99pop", "cabify", "passagem",
+  "estacionamento", "pedágio", "pedagio",
+  "farmácia", "farmacia", "drogaria", "remédio", "remedio", "medicamento",
+  "consulta", "exame", "dentista",
+  "compra", "compras", "roupa", "roupas", "sapato", "calçado", "calcado",
+  "posto", "oficina", "mecânico", "mecanico", "pneu", "funilaria",
+  "cinema", "teatro", "show", "ingresso", "boliche", "karting",
+  "hotel", "pousada", "hostel", "airbnb", "viagem",
+  "presente",
 ];
 
-// Detecta recorrentes por alta confiança (1ª ocorrência) ou por padrão histórico (2+ meses)
-async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string, valor: number): Promise<boolean> {
+// Detecta se um gasto tem perfil de recorrente sem depender de lista de serviços
+function isLikelyRecurring(descricao: string, valor: number, categoria: string): boolean {
+  const desc = descricao.toLowerCase().trim();
+  const words = desc.split(/\s+/).filter(w => w.length > 0);
+
+  // Bail imediato: padrões que nunca são assinaturas na 1ª ocorrência
+  if (NEVER_RECURRING.some(w => desc.includes(w))) return false;
+
+  let score = 0;
+
+  // Categoria indica recorrência estrutural
+  if (["Moradia", "Educação"].includes(categoria)) score += 2;
+  else if (["Lazer", "Saúde", "Investimentos"].includes(categoria)) score += 1;
+
+  // Valor com perfil de assinatura: inteiro ou terminando em .90/.99, entre R$9 e R$800
+  const cents = Math.round((valor % 1) * 100);
+  if ((cents === 0 || cents === 90 || cents === 99) && valor >= 9 && valor <= 800) score += 1;
+
+  // Descrição curta — nomes de serviço são concisos (1–3 palavras)
+  if (words.length >= 1 && words.length <= 3) score += 1;
+
+  // Parece nome de marca: inicial maiúscula (Adobe, Netflix) ou camelCase (iCloud, YouTube)
+  if (/^[A-Z]/.test(descricao) || /[a-z][A-Z]/.test(descricao)) score += 1;
+
+  return score >= 3;
+}
+
+// Detecta recorrentes por sinal contextual (1ª ocorrência) ou por padrão histórico (2+ meses)
+async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string, valor: number, categoria: string): Promise<boolean> {
   try {
     const descNorm = descricao.toLowerCase().trim();
     const LIFETIME = new Date("2000-01-01");
@@ -1135,10 +1161,8 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
     );
     if (jaRecorrente.rows.length > 0) return false;
 
-    // ── Strategy A: serviço óbvio → pergunta na 1ª ocorrência ────────────────
-    const isObvious = RECURRING_OBVIOUS_KEYWORDS.some(kw => descNorm.includes(kw));
-
-    if (isObvious) {
+    // ── Strategy A: sinais contextuais → pergunta na 1ª ocorrência ───────────
+    if (isLikelyRecurring(descricao, valor, categoria)) {
       const inserted = await pool.query(
         `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
          VALUES ($1, $2, 1, $3)
@@ -1147,9 +1171,10 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
       );
       if ((inserted.rowCount ?? 0) === 0) return false;
 
+      const nome = capitalizeFirst(descricao);
       await whatsapp.sendText({
         to:   telefone,
-        text: `Isso acontece todo mês? 🔁`,
+        text: `${nome} aparece todo mês? 🔁`,
       });
       await pool.query(
         `INSERT INTO pending_actions (user_id, action, step, tx_ids)
@@ -1159,7 +1184,7 @@ async function checkAndSuggestRecorrente(userId: number, telefone: string, descr
                selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
         [userId, JSON.stringify({ nome: descricao, valor, frequencia: "mensal" })]
       );
-      log.whatsapp("sugestao recorrente (obvio) enviada", { to: telefone, userId, descricao });
+      log.whatsapp("sugestao recorrente (sinal) enviada", { to: telefone, userId, descricao, categoria });
       return true;
     }
 
@@ -3221,7 +3246,7 @@ async function handleMultiLineTransactions(
   telefone: string,
   linhas: string[],
 ): Promise<ProcessResult> {
-  type Resultado = { descricao: string; valor: number; tipo: string };
+  type Resultado = { descricao: string; valor: number; tipo: string; categoria: string };
   const resultados: Resultado[] = [];
   const falhas: string[]        = [];
 
@@ -3247,7 +3272,7 @@ async function handleMultiLineTransactions(
         const dbId = instResult.rows[0].id;
         setLastInstallment(user.id, { item: descricao, valor, totalParcelas, parcelaAtual: 1, dbId, valorTotal: total });
         recordAction(user.id, "registered_transaction");
-        resultados.push({ descricao: `${descricao} (${totalParcelas}×)`, valor, tipo: "saida" });
+        resultados.push({ descricao: `${descricao} (${totalParcelas}×)`, valor, tipo: "saida", categoria });
         continue;
       }
 
@@ -3259,7 +3284,7 @@ async function handleMultiLineTransactions(
       if (parsed.tipo === "saida") {
         const recMatch = await checkRecorrenteDuplicado(user.id, parsed.descricao, parsed.valor);
         if (recMatch !== null) {
-          resultados.push({ descricao: `${recMatch.nome} (recorrente)`, valor: parsed.valor, tipo: "saida" });
+          resultados.push({ descricao: `${recMatch.nome} (recorrente)`, valor: parsed.valor, tipo: "saida", categoria: parsed.categoria });
           continue;
         }
       }
@@ -3269,7 +3294,7 @@ async function handleMultiLineTransactions(
         [user.id, parsed.tipo, parsed.valor, parsed.categoria, parsed.descricao]
       );
       recordAction(user.id, "registered_transaction");
-      resultados.push({ descricao: parsed.descricao, valor: parsed.valor, tipo: parsed.tipo });
+      resultados.push({ descricao: parsed.descricao, valor: parsed.valor, tipo: parsed.tipo, categoria: parsed.categoria });
     } catch (err) {
       log.error("falha ao processar linha multilinha", err, { linha, userId: user.id });
       falhas.push(linha);
@@ -3309,7 +3334,7 @@ async function handleMultiLineTransactions(
         // Tenta individual (serviços óbvios: netflix, spotify etc.)
         let disparou = false;
         for (const r of saidas) {
-          if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor)) {
+          if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor, r.categoria)) {
             recordInsightSent(user.id);
             disparou = true;
             break;
