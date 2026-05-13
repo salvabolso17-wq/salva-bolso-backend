@@ -88,34 +88,36 @@ async function handleOnboardingFixas(user, telefone, texto) {
     if (parsed && parsed.tipo === "saida") {
         // Insere como recorrente
         const descricao = parsed.descricao || "conta fixa";
-        await client_1.default.query(`INSERT INTO recurrings (user_id, tipo, valor, categoria, descricao, dia_vencimento)
-       VALUES ($1, 'saida', $2, $3, $4, 10)`, // Chutando dia 10 como default para o onboarding
-        [user.id, parsed.valor, parsed.categoria || 'Outros', descricao]);
+        try {
+            await client_1.default.query(`INSERT INTO recurring_expenses (user_id, nome, valor, frequencia)
+         VALUES ($1, $2, $3, 'mensal')`, [user.id, descricao, parsed.valor]);
+        }
+        catch (e) {
+            logger_1.log.error("erro ao inserir recurring_expenses no onboarding", e);
+        }
         const msg = [
-            `✅ Perfeito! Salvei *${capitalizeFirst(descricao)} (${(0, formatting_1.fmtValor)(parsed.valor)})* como conta fixa recorrente.`,
+            `✅ Salvei *${capitalizeFirst(descricao)}* (${(0, formatting_1.fmtValor)(parsed.valor)}) como conta fixa.`,
             "",
-            "Tudo pronto! 🎉 Sua configuração está completa.",
+            "Tudo pronto! Sua configuração está completa.",
             "",
-            "Agora, o *Salva Bolso* é o seu bloco de notas inteligente 🧠✨",
-            "Sempre que gastar algo na rua, é só me mandar:",
-            "🛒 _50 mercado_  •  🚗 _35 uber_  •  💊 _120 farmácia_",
+            "A partir de agora, é só me mandar seus gastos:",
+            "Ex: _50 mercado_ ou _35 uber_",
             "",
-            "Que tal tentar? Mande o seu *primeiro gasto* de hoje! 👇"
+            "Mande seu primeiro gasto de hoje para testar! 👇"
         ].join("\n");
         await whatsapp_1.whatsapp.sendText({ to: telefone, text: msg });
         return { success: false, userId: user.id, erro: "onboarding finalizado (com fixa)" };
     }
     // Se não conseguir parsear, apenas finaliza
     const msgFalha = [
-        "Não consegui identificar o valor, mas não tem problema! 😌 Você pode adicionar depois mandando: _'recorrente 1200 aluguel'_.",
+        "Sem problemas! Você pode adicionar contas fixas depois mandando: _'recorrente 1200 aluguel'_.",
         "",
-        "Tudo pronto! 🎉 Sua configuração está completa.",
+        "Tudo pronto! Sua configuração está completa.",
         "",
-        "Agora, o *Salva Bolso* é o seu bloco de notas inteligente 🧠✨",
-        "Sempre que gastar algo na rua, é só me mandar:",
-        "🛒 _50 mercado_  •  🚗 _35 uber_",
+        "A partir de agora, é só me mandar seus gastos:",
+        "Ex: _50 mercado_ ou _35 uber_",
         "",
-        "Que tal tentar? Mande o seu *primeiro gasto* de hoje! 👇"
+        "Mande seu primeiro gasto de hoje para testar! 👇"
     ].join("\n");
     await whatsapp_1.whatsapp.sendText({ to: telefone, text: msgFalha });
     return { success: false, userId: user.id, erro: "onboarding finalizado (falha fixa)" };
