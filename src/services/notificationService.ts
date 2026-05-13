@@ -592,8 +592,46 @@ export async function runWeeklyNotifications(): Promise<void> {
   }
 }
 
+// Usuários criados há ~24h que não interagiram recentemente (onboarding_nudge)
+async function sendPostOnboardingNudge(): Promise<void> {
+  // Marco simples do dia atual para evitar duplicidade
+  const sentinel = new Date();
+  sentinel.setUTCHours(0, 0, 0, 0);
+
+  const { rows } = await pool.query<{ id: number; telefone: string }>(`
+    SELECT u.id, u.telefone
+    FROM users u
+    WHERE u.criado_em BETWEEN NOW() - INTERVAL '48 hours' AND NOW() - INTERVAL '24 hours'
+      AND (
+        (SELECT MAX(criado_em) FROM transactions WHERE user_id = u.id) IS NULL
+        OR
+        (SELECT MAX(criado_em) FROM transactions WHERE user_id = u.id) < NOW() - INTERVAL '24 hours'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM sent_insights
+        WHERE user_id = u.id AND categoria = 'notif_onboarding_nudge'
+      )
+  `);
+
+  for (const user of rows) {
+    if (!(await tryMarkSent(user.id, "notif_onboarding_nudge", sentinel))) continue;
+    try {
+      const msg = [
+        "👋 Como foi seu dia hoje?",
+        "",
+        "Pode me mandar qualquer gasto que eu organizo tudo pra você 🙂"
+      ].join("\n");
+      await whatsapp.sendText({ to: user.telefone, text: msg });
+      log.whatsapp("notif onboarding nudge enviada", { to: user.telefone, userId: user.id });
+    } catch (err) {
+      log.error("falha ao enviar notif onboarding nudge", err, { userId: user.id });
+    }
+  }
+}
+
 export async function runDailyNotifications(): Promise<void> {
   log.webhook("iniciando notificações diárias");
+  try { await sendPostOnboardingNudge(); }              catch (err) { log.error("falha nudge onboarding", err); }
   try { await sendSubscriptionReminders(); }            catch (err) { log.error("falha sub reminders", err); }
   try { await sendTrialReminders(); }                   catch (err) { log.error("falha trial reminders", err); }
   try { await sendRecorrentesAlert(); }                 catch (err) { log.error("falha alerta recorrentes", err); }

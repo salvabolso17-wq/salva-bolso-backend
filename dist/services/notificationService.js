@@ -534,8 +534,50 @@ async function runWeeklyNotifications() {
         }
     }
 }
+// Usuários criados há ~24h que não interagiram recentemente (onboarding_nudge)
+async function sendPostOnboardingNudge() {
+    // Marco simples do dia atual para evitar duplicidade
+    const sentinel = new Date();
+    sentinel.setUTCHours(0, 0, 0, 0);
+    const { rows } = await client_1.default.query(`
+    SELECT u.id, u.telefone
+    FROM users u
+    WHERE u.criado_em BETWEEN NOW() - INTERVAL '48 hours' AND NOW() - INTERVAL '24 hours'
+      AND (
+        (SELECT MAX(criado_em) FROM transactions WHERE user_id = u.id) IS NULL
+        OR
+        (SELECT MAX(criado_em) FROM transactions WHERE user_id = u.id) < NOW() - INTERVAL '24 hours'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM sent_insights
+        WHERE user_id = u.id AND categoria = 'notif_onboarding_nudge'
+      )
+  `);
+    for (const user of rows) {
+        if (!(await tryMarkSent(user.id, "notif_onboarding_nudge", sentinel)))
+            continue;
+        try {
+            const msg = [
+                "👋 Como foi seu dia hoje?",
+                "",
+                "Pode me mandar qualquer gasto que eu organizo tudo pra você 🙂"
+            ].join("\n");
+            await whatsapp_1.whatsapp.sendText({ to: user.telefone, text: msg });
+            logger_1.log.whatsapp("notif onboarding nudge enviada", { to: user.telefone, userId: user.id });
+        }
+        catch (err) {
+            logger_1.log.error("falha ao enviar notif onboarding nudge", err, { userId: user.id });
+        }
+    }
+}
 async function runDailyNotifications() {
     logger_1.log.webhook("iniciando notificações diárias");
+    try {
+        await sendPostOnboardingNudge();
+    }
+    catch (err) {
+        logger_1.log.error("falha nudge onboarding", err);
+    }
     try {
         await sendSubscriptionReminders();
     }
