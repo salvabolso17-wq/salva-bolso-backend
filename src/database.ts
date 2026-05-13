@@ -119,12 +119,19 @@ export async function createTables() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pending_actions (
         user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-        action         VARCHAR(30)  NOT NULL,
-        step           VARCHAR(30)  NOT NULL,
+        action         VARCHAR(100) NOT NULL,
+        step           VARCHAR(100) NOT NULL,
         tx_ids         JSONB        NOT NULL DEFAULT '[]',
         selected_tx_id INTEGER,
         expires_at     TIMESTAMPTZ  NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes')
       );
+    `);
+
+    // Migração: garante a expansão de colunas antigas (caso a tabela tenha sido criada com tamanho menor)
+    await pool.query(`
+      ALTER TABLE pending_actions 
+        ALTER COLUMN action TYPE VARCHAR(100),
+        ALTER COLUMN step TYPE VARCHAR(100);
     `);
 
     await pool.query(`
