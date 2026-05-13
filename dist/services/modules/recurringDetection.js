@@ -9,6 +9,7 @@ exports.normalizeForHint = normalizeForHint;
 exports.editDistance = editDistance;
 exports.matchesKnownService = matchesKnownService;
 exports.isLikelyRecurring = isLikelyRecurring;
+exports.checkHistoricalPattern = checkHistoricalPattern;
 exports.checkAndSuggestRecorrente = checkAndSuggestRecorrente;
 exports.upsertRecorrente = upsertRecorrente;
 exports.checkRecorrenteDuplicado = checkRecorrenteDuplicado;
@@ -127,6 +128,23 @@ function isLikelyRecurring(descricao, valor, categoria) {
     if (/^[A-Z]/.test(descricao) || /[a-z][A-Z]/.test(descricao))
         score += 1;
     return score >= 3;
+}
+async function checkHistoricalPattern(userId, descricao) {
+    try {
+        const descNorm = descricao.toLowerCase().trim();
+        const patternRow = await client_1.default.query(`SELECT COUNT(DISTINCT DATE_TRUNC('month', criado_em)) AS meses
+       FROM transactions
+       WHERE user_id = $1
+         AND tipo = 'saida'
+         AND LOWER(descricao) = $2
+         AND criado_em >= NOW() - INTERVAL '4 months'`, [userId, descNorm]);
+        const mesesDistintos = Number(patternRow.rows[0]?.meses ?? 0);
+        return mesesDistintos >= 2;
+    }
+    catch (err) {
+        logger_1.log.error("falha checkHistoricalPattern", err, { userId, descricao });
+        return false;
+    }
 }
 // Detecta recorrentes por sinal contextual (1ª ocorrência) ou por padrão histórico (2+ meses)
 async function checkAndSuggestRecorrente(userId, telefone, descricao, valor, categoria, textoOriginal) {

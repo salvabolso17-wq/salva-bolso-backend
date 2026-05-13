@@ -23,14 +23,14 @@ async function handleOnboardingRenda(user, telefone, texto) {
            expires_at = NOW() + INTERVAL '1 hour'
        WHERE user_id = $1`, [user.id]);
         const msg = [
-            "Sem problemas! Você pode informar sua renda depois mandando: 'recebo 3000'.",
+            "Sem problemas! ⏭️ Você pode informar sua renda depois mandando: _'recebo 3000'_.",
             "",
-            "E você tem alguma conta fixa mensal? (Aluguel, luz, internet, etc)",
+            "E você tem alguma *conta fixa mensal*? 📅 (Aluguel, luz, internet, etc)",
             "",
-            "Se tiver, me manda uma agora para eu lembrar você:",
-            "Ex: aluguel 1200",
+            "Se tiver, me manda a principal para eu já deixar agendada:",
+            "💡 _Ex: aluguel 1200_",
             "",
-            "Ou mande 'pular' para começar a usar."
+            "_(Ou mande 'pular' para começar a usar 🚀)_"
         ].join("\n");
         await whatsapp_1.whatsapp.sendText({ to: telefone, text: msg });
         return { success: false, userId: user.id, erro: "onboarding renda skip" };
@@ -44,7 +44,7 @@ async function handleOnboardingRenda(user, telefone, texto) {
             await client_1.default.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
             return { success: false, userId: user.id, erro: "onboarding abortado (gasto)" };
         }
-        await whatsapp_1.whatsapp.sendText({ to: telefone, text: "Não entendi o valor 🤔\nEx: 3500 ou 'pular'" });
+        await whatsapp_1.whatsapp.sendText({ to: telefone, text: "Hum, não entendi o valor 🤔\n💡 _Ex: 3500_ ou digite _'pular'_" });
         return { success: false, userId: user.id, erro: "onboarding renda invalida" };
     }
     // Atualizar renda e mover para a próxima etapa
@@ -54,14 +54,14 @@ async function handleOnboardingRenda(user, telefone, texto) {
          expires_at = NOW() + INTERVAL '1 hour'
      WHERE user_id = $1`, [user.id]);
     const msg = [
-        `💰 Boa! Renda de ${(0, formatting_1.fmtValor)(valor)} registrada.`,
+        `💰 Boa! Renda de *${(0, formatting_1.fmtValor)(valor)}* registrada com sucesso.`,
         "",
-        "Você tem alguma conta fixa mensal? (Aluguel, luz, internet, celular...)",
+        "Agora, você tem alguma *conta fixa mensal*? 📅 (Aluguel, luz, internet, celular...)",
         "",
-        "Me manda a principal:",
-        "Ex: aluguel 1200",
+        "Me manda a principal para eu já deixar agendada:",
+        "💡 _Ex: aluguel 1200_",
         "",
-        "Ou mande 'pular'."
+        "_(Ou mande 'pular' ⏭️)_"
     ].join("\n");
     await whatsapp_1.whatsapp.sendText({ to: telefone, text: msg });
     return { success: false, userId: user.id, erro: "onboarding fixas_ask" };
@@ -72,12 +72,13 @@ async function handleOnboardingFixas(user, telefone, texto) {
     await client_1.default.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     if (skipFixas) {
         const msg = [
-            "Tudo pronto! 🚀",
+            "Tudo pronto! 🎉 Sua configuração está completa.",
             "",
-            "Sempre que gastar algo, é só me mandar:",
-            "50 mercado  •  35 uber  •  120 farmácia",
+            "Agora, o *Salva Bolso* é o seu bloco de notas inteligente 🧠✨",
+            "Sempre que gastar algo na rua, é só me mandar:",
+            "🛒 _50 mercado_  •  🚗 _35 uber_  •  💊 _120 farmácia_",
             "",
-            "Pode mandar o seu primeiro gasto!"
+            "Que tal tentar? Mande o seu *primeiro gasto* de hoje! 👇"
         ].join("\n");
         await whatsapp_1.whatsapp.sendText({ to: telefone, text: msg });
         return { success: false, userId: user.id, erro: "onboarding finalizado (skip fixas)" };
@@ -91,26 +92,30 @@ async function handleOnboardingFixas(user, telefone, texto) {
        VALUES ($1, 'saida', $2, $3, $4, 10)`, // Chutando dia 10 como default para o onboarding
         [user.id, parsed.valor, parsed.categoria || 'Outros', descricao]);
         const msg = [
-            `✅ Perfeito! Salvei ${capitalizeFirst(descricao)} (${(0, formatting_1.fmtValor)(parsed.valor)}) como conta fixa.`,
+            `✅ Perfeito! Salvei *${capitalizeFirst(descricao)} (${(0, formatting_1.fmtValor)(parsed.valor)})* como conta fixa recorrente.`,
             "",
-            "Sua configuração está completa 🚀",
+            "Tudo pronto! 🎉 Sua configuração está completa.",
             "",
-            "Agora, o Salva Bolso é seu bloco de notas inteligente. Quando gastar, me manda:",
-            "Ex: 50 mercado",
+            "Agora, o *Salva Bolso* é o seu bloco de notas inteligente 🧠✨",
+            "Sempre que gastar algo na rua, é só me mandar:",
+            "🛒 _50 mercado_  •  🚗 _35 uber_  •  💊 _120 farmácia_",
             "",
-            "Tenta lançar seu primeiro gasto de hoje!"
+            "Que tal tentar? Mande o seu *primeiro gasto* de hoje! 👇"
         ].join("\n");
         await whatsapp_1.whatsapp.sendText({ to: telefone, text: msg });
         return { success: false, userId: user.id, erro: "onboarding finalizado (com fixa)" };
     }
     // Se não conseguir parsear, apenas finaliza
     const msgFalha = [
-        "Não consegui identificar o valor, mas não tem problema. Você pode adicionar depois mandando: 'recorrente 1200 aluguel'.",
+        "Não consegui identificar o valor, mas não tem problema! 😌 Você pode adicionar depois mandando: _'recorrente 1200 aluguel'_.",
         "",
-        "Sua configuração está completa 🚀",
+        "Tudo pronto! 🎉 Sua configuração está completa.",
         "",
-        "Sempre que gastar algo, me manda:",
-        "50 mercado  •  35 uber"
+        "Agora, o *Salva Bolso* é o seu bloco de notas inteligente 🧠✨",
+        "Sempre que gastar algo na rua, é só me mandar:",
+        "🛒 _50 mercado_  •  🚗 _35 uber_",
+        "",
+        "Que tal tentar? Mande o seu *primeiro gasto* de hoje! 👇"
     ].join("\n");
     await whatsapp_1.whatsapp.sendText({ to: telefone, text: msgFalha });
     return { success: false, userId: user.id, erro: "onboarding finalizado (falha fixa)" };

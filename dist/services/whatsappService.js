@@ -425,13 +425,13 @@ async function processWhatsAppMessage(message) {
             const saudacao = nome ? `Oi, ${nome}! 👋` : `Oi! 👋`;
             const boas_vindas = [
                 saudacao,
-                "Bem-vindo ao Salva Bolso.",
+                "Bem-vindo ao *Salva Bolso*! 🐷✨",
                 "",
-                "Para eu te ajudar a controlar seu dinheiro, qual a sua renda mensal aproximada?",
+                "Para eu te ajudar a controlar seu dinheiro, qual a sua *renda mensal aproximada*? 💰",
                 "",
-                "Ex: 3500",
+                "💡 _Ex: 3500_",
                 "",
-                "(Se não quiser informar agora, só mandar 'pular')"
+                "_(Se não quiser informar agora, é só mandar 'pular' ⏭️)_"
             ].join("\n");
             await client_1.default.query(`INSERT INTO pending_actions (user_id, action, step, tx_ids)
          VALUES ($1, 'onboarding', 'waiting_onboarding_renda', '[]'::jsonb)

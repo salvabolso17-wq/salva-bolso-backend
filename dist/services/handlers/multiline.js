@@ -148,9 +148,15 @@ async function handleMultiLineTransactions(user, telefone, linhas) {
                         logger_1.log.webhook("multilinha: skip ja recorrente no db", { userId: user.id, desc: r.descricao });
                         continue;
                     }
-                    candidatos.push(r);
+                    // Avalia se o item tem perfil de recorrente: por sinal explícito/score ou por padrão histórico
+                    const freqSignal = r.textoOriginal != null && (0, recurringDetection_1.detectFrequencyIntent)(r.textoOriginal);
+                    const hasScore = (0, recurringDetection_1.isLikelyRecurring)(r.descricao, r.valor, r.categoria) || freqSignal;
+                    const hasHistory = await (0, recurringDetection_1.checkHistoricalPattern)(user.id, r.descricao);
+                    if (hasScore || hasHistory) {
+                        candidatos.push(r);
+                    }
                 }
-                logger_1.log.webhook("multilinha: candidatos", { userId: user.id, count: candidatos.length, nomes: candidatos.map(r => r.descricao) });
+                logger_1.log.webhook("multilinha: candidatos confirmados", { userId: user.id, count: candidatos.length, nomes: candidatos.map(r => r.descricao) });
                 if (candidatos.length === 1) {
                     // Um candidato — pergunta direta, sem gate de sentinel (lista é sinal explícito)
                     const r = candidatos[0];
@@ -195,16 +201,6 @@ async function handleMultiLineTransactions(user, telefone, linhas) {
                             (0, conversationEngine_1.recordInsightSent)(user.id);
                         }
                         catch { /* silencioso */ }
-                    }
-                }
-                else {
-                    // Nenhum candidato novo → tenta padrão histórico, mas só para itens sem "(recorrente)"
-                    const novasSaidas = saidas.filter(r => !r.descricao.toLowerCase().includes("(recorrente)"));
-                    for (const r of novasSaidas) {
-                        if (await (0, recurringDetection_1.checkAndSuggestRecorrente)(user.id, telefone, r.descricao, r.valor, r.categoria, r.textoOriginal)) {
-                            (0, conversationEngine_1.recordInsightSent)(user.id);
-                            break;
-                        }
                     }
                 }
             }
