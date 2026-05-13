@@ -204,29 +204,14 @@ export async function handleMultiLineTransactions(
             });
             recordInsightSent(user.id);
           } catch (multiErr) {
-            log.error("falha ao inserir pending recorrente multi — tentando fallback", multiErr, { userId: user.id });
-            // Fallback: pergunta sobre o primeiro candidato individualmente
-            const r        = candidatos[0];
-            const descNorm = r.descricao.toLowerCase().trim();
-            const jaRecDB  = await pool.query(
-              `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(TRIM(nome)) = $2 LIMIT 1`,
-              [user.id, descNorm]
-            );
-            if (jaRecDB.rows.length === 0) {
-              await pool.query(
-                `INSERT INTO pending_actions (user_id, action, step, tx_ids)
-                 VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
-                 ON CONFLICT (user_id) DO UPDATE
-                   SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
-                       selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
-                [user.id, JSON.stringify({ nome: r.descricao, valor: r.valor, frequencia: "mensal" })]
-              );
+            log.error("falha no fluxo recorrente multi", multiErr, { userId: user.id });
+            try {
               await whatsapp.sendText({
                 to: telefone,
-                text: `${capitalizeFirst(r.descricao)} aparece todo mês? 🔁`,
+                text: `Algum desses acontece todo mês? 🔁\n\n${lista}\n\n(diz os números ou "todos")`,
               });
               recordInsightSent(user.id);
-            }
+            } catch { /* silencioso */ }
           }
         } else {
           // Nenhum candidato novo → tenta padrão histórico, mas só para itens sem "(recorrente)"
