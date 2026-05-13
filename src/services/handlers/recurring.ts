@@ -74,7 +74,11 @@ export async function handleConfirmarRecorrenteMulti(user: UserRow, telefone: st
 
   let selectedIndices: number[] = [];
 
-  if (t.includes("todo") || t.includes("tudo") || t.includes("ambos") || t.includes("os dois") || t.includes("as duas") || /^(sim|s|yes|pode|quero|claro|ok|beleza|bora|certo|perfeito|tá|ta)[\?!.]*$/.test(t)) {
+  // Intenção forte de "todos/todas" (ou simulação de "sim" absoluto num contexto onde a lista foi mostrada)
+  const isTodos = /^(todos?|todas|sim\s+todos?|todos?\s+eles|as\s+duas|os\s+dois|ambos|tudo)[\?!.]*$/i.test(t.trim());
+  const isSim = /^(sim|s|yes|pode|quero|claro|ok|beleza|bora|certo|perfeito|tá|ta)[\?!.]*$/i.test(t.trim());
+
+  if (isTodos || isSim) {
     selectedIndices = items.map((_, i) => i);
   } else {
     // Parse numbers
