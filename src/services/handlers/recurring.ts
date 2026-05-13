@@ -141,16 +141,16 @@ export async function handleRecorrentesCommand(user: UserRow, telefone: string):
     };
   }
 
-  const linhas = ["🔄 Assinaturas e contas fixas", ""];
+  const linhas = ["📌 Seus gastos fixos:", ""];
   let totalMensal = 0;
 
   for (const row of result.rows) {
     const valor = Number(row.valor);
     totalMensal += valor;
-    linhas.push(`${row.nome} — ${fmtValor(valor)}`);
+    linhas.push(`• ${row.nome} — ${fmtValor(valor)}`);
   }
 
-  linhas.push("", `Total: ${fmtValor(totalMensal)}/mês`);
+  linhas.push("", `Total mensal: ${fmtValor(totalMensal)}`);
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });

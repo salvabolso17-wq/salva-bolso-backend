@@ -371,7 +371,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   // "meus recorrentes" / "minhas metas" → shortcuts naturais
   if (
     !temNumero &&
-    /^(meus?\s+recorrentes?|minhas?\s+recorrentes?|recorrentes?\s+que\s+eu\s+tenho)[\?!.]*$/i.test(t)
+    /^(meus?\s+)?(recorrentes?|gastos\s+fixos?|contas\s+fixas?|contas\s+mensais|recorrentes?\s+que\s+eu\s+tenho)[?!.]*$/i.test(t)
   ) {
     setLastCommand(user.id, "recorrentes");
     return await handleRecorrentesCommand(user, telefone);
