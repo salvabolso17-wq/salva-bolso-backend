@@ -531,10 +531,15 @@ async function processWhatsAppMessage(message) {
         }
         else if (pending.action === "confirmar_recorrente_multi" && pending.step === "waiting_selection_multi") {
             const isNegative = /^(não|nao|n|no|agora\s*não|agora\s*nao|depois|nenhum|nenhuma|nada|por\s+enquanto|dispenso|obrigad[ao])[\?!.]*$/i.test(textoTrim);
+            const isTodos = /^(todos?|todas|sim\s+todos?|todos?\s+eles|as\s+duas|os\s+dois|ambos|tudo|sim|s|yes|pode|quero|claro|ok|beleza|bora|certo|perfeito|tá|ta)[\?!.]*$/i.test(textoTrim);
+            const hasNumbers = /\d+/.test(textoTrim);
             if (isNegative) {
                 await client_1.default.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
                 await whatsapp_1.whatsapp.sendText({ to: message.telefone, text: "Tudo bem 🙂" });
                 return { success: false, userId: user.id, erro: "Recorrentes rejeitados" };
+            }
+            else if (isTodos || hasNumbers) {
+                return await (0, recurring_1.handleConfirmarRecorrenteMulti)(user, message.telefone, textoTrim, pending.tx_ids);
             }
             else if ((0, menuBuilder_1.isKnownCommand)(textoTrim)) {
                 await client_1.default.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
