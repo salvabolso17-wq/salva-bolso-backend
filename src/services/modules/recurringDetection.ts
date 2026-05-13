@@ -94,7 +94,6 @@ export function matchesKnownService(descricao: string): boolean {
 // Detecta se um gasto tem perfil de recorrente sem depender de lista de serviços
 export function isLikelyRecurring(descricao: string, valor: number, categoria: string): boolean {
   const desc = descricao.toLowerCase().trim();
-  const words = desc.split(/\s+/).filter(w => w.length > 0);
 
   // Bail imediato: padrões que nunca são assinaturas na 1ª ocorrência
   if (NEVER_RECURRING.some(w => desc.includes(w))) return false;
@@ -102,22 +101,21 @@ export function isLikelyRecurring(descricao: string, valor: number, categoria: s
   let score = 0;
 
   // Nome bate com serviço/conta mensal conhecida (fuzzy — tolera typos)
-  if (matchesKnownService(descricao)) score += 2;
+  if (matchesKnownService(descricao)) score += 3;
 
   // Categoria indica recorrência estrutural
   if (["Moradia", "Educação"].includes(categoria)) score += 2;
-  else if (["Lazer", "Saúde", "Investimentos"].includes(categoria)) score += 1;
+  else if (["Saúde", "Investimentos"].includes(categoria)) score += 1;
 
   // Valor com perfil de assinatura: inteiro ou terminando em .90/.99, entre R$9 e R$800
   const cents = Math.round((valor % 1) * 100);
   if ((cents === 0 || cents === 90 || cents === 99) && valor >= 9 && valor <= 800) score += 1;
 
-  // Descrição curta — nomes de serviço são concisos (1–3 palavras)
-  if (words.length >= 1 && words.length <= 3) score += 1;
+  // Penalidade heurística para impulsos típicos que escaparam do NEVER_RECURRING
+  const IMPULSO = ["sorvete", "doce", "bar", "chopp", "cerveja", "balada", "festa", "ingresso", "bolo", "salgado", "cafe", "café", "pao", "pão"];
+  if (IMPULSO.some(w => desc.includes(w))) score -= 2;
 
-  // Parece nome de marca: inicial maiúscula (Adobe, Netflix) ou camelCase (iCloud, YouTube)
-  if (/^[A-Z]/.test(descricao) || /[a-z][A-Z]/.test(descricao)) score += 1;
-
+  // Exige um score maior para passar, já que removemos bônus genéricos
   return score >= 3;
 }
 
