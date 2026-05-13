@@ -10,7 +10,7 @@ import type { UserRow, ProcessResult } from "./types";
 // ── Modules ───────────────────────────────────────────────────────────────────
 import { isSubscriptionActive, isBlockedFreemium, checkAndSendExpirationNotice } from "./modules/premiumGuard";
 import { isCuriosityPhrase, buildFeaturesMenuText, isKnownCommand, isAmbiguousIntent, buildContextualHint, handleAjudaCommand, handleSpendingConcern, handleNextStepSuggestion } from "./modules/menuBuilder";
-import { checkAndSuggestRecorrente, checkRecorrenteDuplicado } from "./modules/recurringDetection";
+import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente } from "./modules/recurringDetection";
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip } from "./modules/insightsEngine";
 import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas } from "./modules/onboarding";
 
@@ -1152,6 +1152,37 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       text: buildContextualHint(message.texto),
     });
     return { success: false, userId: user.id, erro: "Mensagem ambígua" };
+  }
+
+  // ── Interceptação Contextual de Recorrência ───────────────────────────────
+  if (detectFrequencyIntent(message.texto.trim()) && !parseTransaction(message.texto.trim())) {
+    try {
+      const recentTx = await pool.query(
+        `SELECT descricao, valor, categoria FROM transactions 
+         WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= NOW() - INTERVAL '5 minutes'
+         ORDER BY criado_em DESC`,
+        [user.id]
+      );
+
+      if (recentTx.rows.length === 1) {
+        const tx = recentTx.rows[0];
+        await upsertRecorrente(user.id, tx.descricao, Number(tx.valor), "mensal");
+        await whatsapp.sendText({
+          to: message.telefone,
+          text: `Perfeito 👍\nVou acompanhar *${capitalizeFirst(tx.descricao)}* automaticamente todo mês.`
+        });
+        log.whatsapp("recorrencia contextual ativada", { to: message.telefone, userId: user.id, tx: tx.descricao });
+        return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "contexto_recorrente" } };
+      } else if (recentTx.rows.length > 1) {
+        await whatsapp.sendText({
+          to: message.telefone,
+          text: "Qual desses gastos recentes é mensal? Me mande o nome dele."
+        });
+        return { success: false, userId: user.id, erro: "contexto recorrente ambiguo" };
+      }
+    } catch (err) {
+      log.error("falha na interceptacao de recorrencia contextual", err, { userId: user.id });
+    }
   }
 
   // ── Parser ────────────────────────────────────────────────────────────────
