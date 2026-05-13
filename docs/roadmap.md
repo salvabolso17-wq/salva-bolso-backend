@@ -19,15 +19,15 @@
 - [x] Conexão da VPS ao GitHub via SSH
 
 ---
-
 ## Fase 2 — CRUD Completo
 
-- [ ] `GET /users/:id` — buscar usuário por ID
-- [ ] `PUT /users/:id` — atualizar dados do usuário (nome, renda, renda_extra)
-- [ ] `POST /transactions` — registrar nova transação (entrada ou saída)
-- [ ] `GET /transactions/:userId` — listar transações do usuário
-- [ ] `DELETE /transactions/:id` — remover transação
-- [ ] Validação dos campos obrigatórios nas rotas
+- [x] `GET /users/:id` — buscar usuário por ID
+- [x] `PUT /users/:id` — atualizar dados do usuário (nome, renda, renda_extra)
+- [x] `POST /transactions` — registrar nova transação (entrada ou saída)
+- [x] `GET /transactions/:userId` — listar transações do usuário
+- [x] `DELETE /transactions/:id` — remover transação
+- [x] Validação dos campos obrigatórios nas rotas
+
 
 ---
 

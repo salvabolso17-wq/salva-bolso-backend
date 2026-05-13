@@ -1,0 +1,224 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.RECURRING_SERVICE_HINTS = exports.NEVER_RECURRING = void 0;
+exports.detectFrequencyIntent = detectFrequencyIntent;
+exports.normalizeForHint = normalizeForHint;
+exports.editDistance = editDistance;
+exports.matchesKnownService = matchesKnownService;
+exports.isLikelyRecurring = isLikelyRecurring;
+exports.checkAndSuggestRecorrente = checkAndSuggestRecorrente;
+exports.upsertRecorrente = upsertRecorrente;
+exports.checkRecorrenteDuplicado = checkRecorrenteDuplicado;
+const client_1 = __importDefault(require("../../db/client"));
+const whatsapp_1 = require("../whatsapp");
+const logger_1 = require("../../utils/logger");
+const formatting_1 = require("../../utils/formatting");
+// Coisas que nunca são recorrentes na 1ª ocorrência — exclusão por sinal negativo
+exports.NEVER_RECURRING = [
+    "mercado", "supermercado", "minimercado", "atacadão", "atacadao", "assaí", "assai", "hortifruti",
+    "padaria", "confeitaria", "açougue", "acougue",
+    "restaurante", "lanchonete", "cantina", "bistrô", "bistro",
+    "almoço", "almoco", "jantar", "lanche", "pizza", "hamburguer", "marmita", "comida",
+    "delivery", "ifood", "rappi", "uber eats", "ubereats",
+    "gasolina", "etanol", "combustível", "combustivel", "abastecimento", "gnv",
+    "uber", "táxi", "taxi", "99pop", "cabify", "passagem",
+    "estacionamento", "pedágio", "pedagio",
+    "farmácia", "farmacia", "drogaria", "remédio", "remedio", "medicamento",
+    "consulta", "exame", "dentista",
+    "compra", "compras", "roupa", "roupas", "sapato", "calçado", "calcado",
+    "posto", "oficina", "mecânico", "mecanico", "pneu", "funilaria",
+    "cinema", "teatro", "show", "ingresso", "boliche", "karting",
+    "hotel", "pousada", "hostel", "airbnb", "viagem",
+    "presente",
+    // Compras típicas parceladas (nunca são assinaturas mensais)
+    "iphone", "ipad", "macbook", "airpods",
+    "notebook", "laptop", "computador", "celular", "smartphone",
+    "geladeira", "fogão", "fogao", "microondas", "lavadora",
+    "televisão", "televisao",
+    "sofá", "sofa", "cama", "colchão", "colchao", "móveis", "moveis", "armário", "armario",
+    "bicicleta",
+];
+// Pequena base auxiliar de serviços/contas reconhecidamente mensais
+exports.RECURRING_SERVICE_HINTS = [
+    // Streaming
+    "netflix", "spotify", "disney", "hbomax", "primevideo", "youtube", "appletv",
+    "paramount", "crunchyroll", "telecine", "globoplay",
+    // Cloud / produtividade
+    "icloud", "dropbox", "notion", "figma", "canva", "adobe", "github",
+    "chatgpt", "openai", "midjourney", "linkedin", "zoom", "slack",
+    // Telecoms
+    "claro", "vivo", "tim", "nextel",
+    // Contas mensais comuns
+    "internet", "aluguel", "academia", "condominio", "mei",
+    "contador", "hospedagem", "dominio",
+];
+// Detecta sinais de frequência mensal/contínua no texto original da mensagem
+function detectFrequencyIntent(texto) {
+    const t = texto.toLowerCase();
+    return [
+        "todo mês", "todo mes", "todos os meses",
+        "mensalidade", "mensalmente",
+        "por mês", "por mes", "/mês", "/mes",
+        "sempre pago", "sempre vem",
+        "conta fixa", "gasto fixo", "valor fixo",
+        "débito automático", "debito automatico",
+        "todo mês pago", "pago todo mês", "pago todo mes",
+        "assinatura",
+        "recorrente", "recorrência", "recorrencia",
+        "plano mensal",
+    ].some(s => t.includes(s));
+}
+function normalizeForHint(s) {
+    return s.toLowerCase().trim()
+        .normalize("NFD").replace(/[̀-ͯ]/g, "")
+        .replace(/\s+/g, "");
+}
+function editDistance(a, b) {
+    const n = b.length;
+    const dp = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+        let prev = dp[0];
+        dp[0] = i;
+        for (let j = 1; j <= n; j++) {
+            const temp = dp[j];
+            dp[j] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(dp[j], dp[j - 1], prev);
+            prev = temp;
+        }
+    }
+    return dp[n];
+}
+function matchesKnownService(descricao) {
+    const d = normalizeForHint(descricao);
+    for (const hint of exports.RECURRING_SERVICE_HINTS) {
+        if (d === hint || d.includes(hint) || hint.includes(d))
+            return true;
+        if (hint.length >= 5 && Math.abs(d.length - hint.length) <= 2 && editDistance(d, hint) <= 2)
+            return true;
+    }
+    return false;
+}
+// Detecta se um gasto tem perfil de recorrente sem depender de lista de serviços
+function isLikelyRecurring(descricao, valor, categoria) {
+    const desc = descricao.toLowerCase().trim();
+    const words = desc.split(/\s+/).filter(w => w.length > 0);
+    // Bail imediato: padrões que nunca são assinaturas na 1ª ocorrência
+    if (exports.NEVER_RECURRING.some(w => desc.includes(w)))
+        return false;
+    let score = 0;
+    // Nome bate com serviço/conta mensal conhecida (fuzzy — tolera typos)
+    if (matchesKnownService(descricao))
+        score += 2;
+    // Categoria indica recorrência estrutural
+    if (["Moradia", "Educação"].includes(categoria))
+        score += 2;
+    else if (["Lazer", "Saúde", "Investimentos"].includes(categoria))
+        score += 1;
+    // Valor com perfil de assinatura: inteiro ou terminando em .90/.99, entre R$9 e R$800
+    const cents = Math.round((valor % 1) * 100);
+    if ((cents === 0 || cents === 90 || cents === 99) && valor >= 9 && valor <= 800)
+        score += 1;
+    // Descrição curta — nomes de serviço são concisos (1–3 palavras)
+    if (words.length >= 1 && words.length <= 3)
+        score += 1;
+    // Parece nome de marca: inicial maiúscula (Adobe, Netflix) ou camelCase (iCloud, YouTube)
+    if (/^[A-Z]/.test(descricao) || /[a-z][A-Z]/.test(descricao))
+        score += 1;
+    return score >= 3;
+}
+// Detecta recorrentes por sinal contextual (1ª ocorrência) ou por padrão histórico (2+ meses)
+async function checkAndSuggestRecorrente(userId, telefone, descricao, valor, categoria, textoOriginal) {
+    try {
+        const descNorm = descricao.toLowerCase().trim();
+        const now = new Date();
+        const mesAtual = new Date(now.getFullYear(), now.getMonth(), 1);
+        const sentinel = `rec_suggest_${descNorm.replace(/\s+/g, "_").slice(0, 40)}`;
+        // Não sugerir se já é recorrente cadastrado
+        const jaRecorrente = await client_1.default.query(`SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(nome) = $2 LIMIT 1`, [userId, descNorm]);
+        if (jaRecorrente.rows.length > 0)
+            return false;
+        // ── Strategy A: sinais contextuais → pergunta na 1ª ocorrência ───────────
+        // Dispara por score de perfil OU por sinal de frequência no texto original
+        const freqSignal = textoOriginal != null
+            && detectFrequencyIntent(textoOriginal)
+            && !exports.NEVER_RECURRING.some(w => descNorm.includes(w));
+        if (isLikelyRecurring(descricao, valor, categoria) || freqSignal) {
+            const inserted = await client_1.default.query(`INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+         VALUES ($1, $2, 1, $3)
+         ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`, [userId, sentinel, mesAtual]);
+            if ((inserted.rowCount ?? 0) === 0)
+                return false;
+            const nome = (0, formatting_1.capitalizeFirst)(descricao);
+            await whatsapp_1.whatsapp.sendText({
+                to: telefone,
+                text: `${nome} aparece todo mês? 🔁`,
+            });
+            await client_1.default.query(`INSERT INTO pending_actions (user_id, action, step, tx_ids)
+         VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
+         ON CONFLICT (user_id) DO UPDATE
+           SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+               selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`, [userId, JSON.stringify({ nome: descricao, valor, frequencia: "mensal" })]);
+            logger_1.log.whatsapp("sugestao recorrente (sinal) enviada", { to: telefone, userId, descricao, categoria });
+            return true;
+        }
+        // ── Strategy B: padrão histórico → mesmo nome em 2+ meses diferentes ─────
+        const patternRow = await client_1.default.query(`SELECT COUNT(DISTINCT DATE_TRUNC('month', criado_em)) AS meses
+       FROM transactions
+       WHERE user_id = $1
+         AND tipo = 'saida'
+         AND LOWER(descricao) = $2
+         AND criado_em >= NOW() - INTERVAL '4 months'`, [userId, descNorm]);
+        const mesesDistintos = Number(patternRow.rows[0]?.meses ?? 0);
+        if (mesesDistintos < 2)
+            return false;
+        const inserted = await client_1.default.query(`INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, $2, 1, $3)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`, [userId, sentinel, mesAtual]);
+        if ((inserted.rowCount ?? 0) === 0)
+            return false;
+        const nome = (0, formatting_1.capitalizeFirst)(descricao);
+        await whatsapp_1.whatsapp.sendText({
+            to: telefone,
+            text: `Percebi que ${nome} aparece todo mês. Isso é recorrente? 🔁`,
+        });
+        await client_1.default.query(`INSERT INTO pending_actions (user_id, action, step, tx_ids)
+       VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
+       ON CONFLICT (user_id) DO UPDATE
+         SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`, [userId, JSON.stringify({ nome: descricao, valor, frequencia: "mensal" })]);
+        logger_1.log.whatsapp("sugestao recorrente (padrao) enviada", { to: telefone, userId, descricao });
+        return true;
+    }
+    catch (err) {
+        logger_1.log.error("falha sugestao recorrente", err, { userId });
+        return false;
+    }
+}
+// Upsert case-insensitive: UPDATE primeiro, INSERT só se nenhuma linha existir com mesmo nome (qualquer casing)
+async function upsertRecorrente(userId, nome, valor, frequencia) {
+    const upd = await client_1.default.query(`UPDATE recurring_expenses SET valor = $1, frequencia = $2, ativo = TRUE
+     WHERE user_id = $3 AND LOWER(TRIM(nome)) = LOWER(TRIM($4))`, [valor, frequencia, userId, nome]);
+    if ((upd.rowCount ?? 0) === 0) {
+        await client_1.default.query(`INSERT INTO recurring_expenses (user_id, nome, valor, frequencia) VALUES ($1, $2, $3, $4)`, [userId, nome, valor, frequencia]);
+    }
+}
+async function checkRecorrenteDuplicado(userId, descricao, valor) {
+    try {
+        const res = await client_1.default.query(`SELECT nome, valor FROM recurring_expenses
+       WHERE user_id = $1 AND ativo = TRUE
+         AND LOWER(TRIM(nome)) = LOWER(TRIM($2))
+       LIMIT 1`, [userId, descricao]);
+        if (!res.rows.length)
+            return null;
+        const row = res.rows[0];
+        const recValor = parseFloat(row.valor);
+        const sameValue = Math.abs(recValor - valor) < 0.50;
+        return { nome: (0, formatting_1.capitalizeFirst)(row.nome), nomeOriginal: row.nome, recValor, sameValue };
+    }
+    catch (err) {
+        logger_1.log.error("checkRecorrenteDuplicado falhou", err, { userId });
+        return null;
+    }
+}

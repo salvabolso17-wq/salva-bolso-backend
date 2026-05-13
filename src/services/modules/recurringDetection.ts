@@ -121,6 +121,26 @@ export function isLikelyRecurring(descricao: string, valor: number, categoria: s
   return score >= 3;
 }
 
+export async function checkHistoricalPattern(userId: number, descricao: string): Promise<boolean> {
+  try {
+    const descNorm = descricao.toLowerCase().trim();
+    const patternRow = await pool.query<{ meses: string }>(
+      `SELECT COUNT(DISTINCT DATE_TRUNC('month', criado_em)) AS meses
+       FROM transactions
+       WHERE user_id = $1
+         AND tipo = 'saida'
+         AND LOWER(descricao) = $2
+         AND criado_em >= NOW() - INTERVAL '4 months'`,
+      [userId, descNorm]
+    );
+    const mesesDistintos = Number(patternRow.rows[0]?.meses ?? 0);
+    return mesesDistintos >= 2;
+  } catch (err) {
+    log.error("falha checkHistoricalPattern", err, { userId, descricao });
+    return false;
+  }
+}
+
 // Detecta recorrentes por sinal contextual (1ª ocorrência) ou por padrão histórico (2+ meses)
 export async function checkAndSuggestRecorrente(userId: number, telefone: string, descricao: string, valor: number, categoria: string, textoOriginal?: string): Promise<boolean> {
   try {

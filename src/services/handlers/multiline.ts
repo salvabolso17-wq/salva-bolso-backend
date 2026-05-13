@@ -4,7 +4,7 @@ import { log } from "../../utils/logger";
 import { fmtValor, capitalizeFirst } from "../../utils/formatting";
 import { parseTransaction } from "../../utils/parseTransaction";
 import { recordAction, setLastInstallment, recordInsightSent } from "../conversationEngine";
-import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, NEVER_RECURRING } from "../modules/recurringDetection";
+import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, NEVER_RECURRING, isLikelyRecurring, detectFrequencyIntent, checkHistoricalPattern } from "../modules/recurringDetection";
 import { handleInstallmentRegistration, detectInstallment } from "./installments";
 import type { UserRow, ProcessResult } from "../types";
 
@@ -157,10 +157,18 @@ export async function handleMultiLineTransactions(
             log.webhook("multilinha: skip ja recorrente no db", { userId: user.id, desc: r.descricao });
             continue;
           }
-          candidatos.push(r);
+
+          // Avalia se o item tem perfil de recorrente: por sinal explícito/score ou por padrão histórico
+          const freqSignal = r.textoOriginal != null && detectFrequencyIntent(r.textoOriginal);
+          const hasScore   = isLikelyRecurring(r.descricao, r.valor, r.categoria) || freqSignal;
+          const hasHistory = await checkHistoricalPattern(user.id, r.descricao);
+
+          if (hasScore || hasHistory) {
+            candidatos.push(r);
+          }
         }
 
-        log.webhook("multilinha: candidatos", { userId: user.id, count: candidatos.length, nomes: candidatos.map(r => r.descricao) });
+        log.webhook("multilinha: candidatos confirmados", { userId: user.id, count: candidatos.length, nomes: candidatos.map(r => r.descricao) });
 
         if (candidatos.length === 1) {
           // Um candidato — pergunta direta, sem gate de sentinel (lista é sinal explícito)
@@ -212,15 +220,6 @@ export async function handleMultiLineTransactions(
               });
               recordInsightSent(user.id);
             } catch { /* silencioso */ }
-          }
-        } else {
-          // Nenhum candidato novo → tenta padrão histórico, mas só para itens sem "(recorrente)"
-          const novasSaidas = saidas.filter(r => !r.descricao.toLowerCase().includes("(recorrente)"));
-          for (const r of novasSaidas) {
-            if (await checkAndSuggestRecorrente(user.id, telefone, r.descricao, r.valor, r.categoria, r.textoOriginal)) {
-              recordInsightSent(user.id);
-              break;
-            }
           }
         }
       } catch (err) {

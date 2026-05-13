@@ -119,12 +119,31 @@ export async function createTables() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pending_actions (
         user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-        action         VARCHAR(20)  NOT NULL,
+        action         VARCHAR(30)  NOT NULL,
         step           VARCHAR(30)  NOT NULL,
         tx_ids         JSONB        NOT NULL DEFAULT '[]',
         selected_tx_id INTEGER,
         expires_at     TIMESTAMPTZ  NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes')
       );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS installments (
+        id             SERIAL PRIMARY KEY,
+        user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        nome           TEXT NOT NULL,
+        valor_total    NUMERIC(10,2) NOT NULL DEFAULT 0,
+        valor_parcela  NUMERIC(10,2) NOT NULL,
+        total_parcelas INTEGER NOT NULL,
+        parcelas_pagas INTEGER NOT NULL DEFAULT 0,
+        categoria      TEXT NOT NULL DEFAULT 'Outros',
+        criado_em      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        ativo          BOOLEAN NOT NULL DEFAULT TRUE
+      );
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS installments_user_id_idx ON installments(user_id);
     `);
 
     await pool.query(`

@@ -12,7 +12,7 @@ import { isSubscriptionActive, isBlockedFreemium, checkAndSendExpirationNotice }
 import { isCuriosityPhrase, buildFeaturesMenuText, isKnownCommand, isAmbiguousIntent, buildContextualHint, handleAjudaCommand, handleSpendingConcern, handleNextStepSuggestion } from "./modules/menuBuilder";
 import { checkAndSuggestRecorrente, checkRecorrenteDuplicado } from "./modules/recurringDetection";
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip } from "./modules/insightsEngine";
-import { handleNovoMesRenda, handleNovoMesCarryover } from "./modules/onboarding";
+import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas } from "./modules/onboarding";
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria } from "./handlers/reports";
@@ -493,89 +493,75 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const textoNew       = message.texto.trim();
     const parsedFirst    = parseTransaction(textoNew);
     const isCommandFirst = isKnownCommand(textoNew);
-    const ehPergunta     = isCuriosityPhrase(textoNew);
-
-    // Qualquer mensagem de texto de um novo usuário entra no fluxo de onboarding
 
     try {
       const nomeNovo = firstNameOf(message.pushName);
       if (nomeNovo) {
-        await pool.query(
+        const insertRes = await pool.query(
           `INSERT INTO users (telefone, nome, trial_ends_at)
            VALUES ($1, $2, NOW() + INTERVAL '7 days')
-           ON CONFLICT (telefone) DO UPDATE SET nome = $2 WHERE users.nome IS DISTINCT FROM $2`,
+           ON CONFLICT (telefone) DO UPDATE SET nome = $2 WHERE users.nome IS DISTINCT FROM $2
+           RETURNING id`,
           [message.telefone, nomeNovo]
         );
+        user = insertRes.rows[0] as UserRow;
       } else {
-        await pool.query(
+        const insertRes = await pool.query(
           `INSERT INTO users (telefone, trial_ends_at)
            VALUES ($1, NOW() + INTERVAL '7 days')
-           ON CONFLICT (telefone) DO NOTHING`,
+           ON CONFLICT (telefone) DO NOTHING
+           RETURNING id`,
           [message.telefone]
         );
+        user = insertRes.rows[0] as UserRow;
       }
     } catch (err) {
       log.error("falha ao criar usuario no onboarding", err, { telefone: message.telefone });
       return { success: false, erro: "Erro ao criar usuário" };
     }
 
+    if (!user) {
+       // Just in case it existed but `ON CONFLICT DO NOTHING` returned nothing (shouldn't happen with our query, but good to be safe)
+       try { user = await findUserByTelefone(message.telefone); } catch (e) {}
+       if (!user) return { success: false, erro: "Erro ao carregar usuário" };
+    }
+
     if (parsedFirst || isCommandFirst) {
       // Fast-track: usuário já sabe o que quer → processa direto, sem tutorial
-      try {
-        user = await findUserByTelefone(message.telefone);
-      } catch (err) {
-        return { success: false, erro: "Erro ao carregar usuário" };
-      }
-      if (!user) return { success: false, erro: "Erro ao criar usuário" };
       log.user("fast-track onboarding — processando direto", { telefone: message.telefone, userId: user.id });
       // Continua no fluxo normal abaixo
     } else {
-      // Guided: welcome sempre igual + convite ou menu dependendo da intenção
+      // Flow guiado: Boas-vindas -> pede renda
       const nome      = firstNameOf(message.pushName);
-      const saudacao  = nome ? `Oi, ${nome} 👋` : `Oi 👋`;
+      const saudacao  = nome ? `Oi, ${nome}! 👋` : `Oi! 👋`;
       const boas_vindas = [
         saudacao,
-        "",
         "Bem-vindo ao Salva Bolso.",
         "",
-        "Me manda um gasto pra começar:",
-        "50 mercado  •  35 uber  •  120 farmácia",
+        "Para eu te ajudar a controlar seu dinheiro, qual a sua renda mensal aproximada?",
         "",
-        "Você tem 7 dias grátis 🙂",
+        "Ex: 3500",
+        "",
+        "(Se não quiser informar agora, só mandar 'pular')"
       ].join("\n");
+
+      await pool.query(
+        `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+         VALUES ($1, 'onboarding', 'waiting_onboarding_renda', '[]'::jsonb)
+         ON CONFLICT (user_id) DO UPDATE
+           SET action = 'onboarding', step = 'waiting_onboarding_renda', tx_ids = '[]'::jsonb,
+               selected_tx_id = NULL, expires_at = NOW() + INTERVAL '1 hour'`,
+        [user.id]
+      );
 
       try {
         await whatsapp.sendText({ to: message.telefone, text: boas_vindas });
-        log.whatsapp("onboarding welcome enviado", { to: message.telefone });
+        log.whatsapp("onboarding guiado welcome enviado", { to: message.telefone });
       } catch (err) {
-        log.error("falha ao enviar welcome", err, { to: message.telefone });
+        log.error("falha ao enviar welcome guiado", err, { to: message.telefone });
       }
 
-      if (ehPergunta) {
-        try {
-          await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText() });
-          log.whatsapp("onboarding menu enviado", { to: message.telefone });
-        } catch (err) {
-          log.error("falha ao enviar menu onboarding", err, { to: message.telefone });
-        }
-      } else {
-        const convite = [
-          "Quer que eu te mostre tudo que consigo acompanhar por aqui?",
-          "",
-          "Pode responder algo como:",
-          `• "quero ver"`,
-          `• "como funciona?"`,
-          `• "me mostra"`,
-        ].join("\n");
-        try {
-          await whatsapp.sendText({ to: message.telefone, text: convite });
-          log.whatsapp("onboarding convite enviado", { to: message.telefone });
-        } catch (err) {
-          log.error("falha ao enviar convite onboarding", err, { to: message.telefone });
-        }
-      }
-
-      return { success: false, userId: undefined, erro: "Onboarding iniciado" };
+      return { success: false, userId: user.id, erro: "Onboarding guiado iniciado" };
     }
   }
 
@@ -630,8 +616,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela";
-    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -645,13 +631,18 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const pending   = pendingRow.rows[0];
     const textoTrim = message.texto.trim();
 
-    if (/^cancelar$/i.test(textoTrim)) {
+    // Skip onboarding cancel - users shouldn't "cancel" the guided onboarding using the command, they can "pular" instead, which is handled in the handler
+    if (/^cancelar$/i.test(textoTrim) && pending.action !== "onboarding") {
       await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
       await whatsapp.sendText({ to: message.telefone, text: "Ação cancelada." });
       return { success: false, userId: user.id, erro: "Ação cancelada" };
     }
 
-    if (pending.step === "waiting_selection") {
+    if (pending.action === "onboarding" && pending.step === "waiting_onboarding_renda") {
+       return await handleOnboardingRenda(user, message.telefone, textoTrim);
+    } else if (pending.action === "onboarding" && pending.step === "waiting_onboarding_fixas") {
+       return await handleOnboardingFixas(user, message.telefone, textoTrim);
+    } else if (pending.step === "waiting_selection") {
       const txIds = pending.tx_ids as number[];
       const num   = parseInt(textoTrim, 10);
       if (!isNaN(num) && num >= 1 && num <= txIds.length) {
