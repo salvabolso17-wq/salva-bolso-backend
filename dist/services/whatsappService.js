@@ -495,6 +495,7 @@ async function processWhatsAppMessage(message) {
     const pendingRow = await client_1.default.query(`SELECT action, step, tx_ids, selected_tx_id
      FROM pending_actions
      WHERE user_id = $1 AND expires_at > NOW()`, [user.id]);
+    logger_1.log.webhook("DEBUG_PENDING_STATE", { userId: user.id, hasPending: pendingRow.rows.length > 0, pending: pendingRow.rows[0] });
     if (pendingRow.rows.length > 0) {
         const pending = pendingRow.rows[0];
         const textoTrim = message.texto.trim();
@@ -530,6 +531,7 @@ async function processWhatsAppMessage(message) {
             await client_1.default.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
         }
         else if (pending.action === "confirmar_recorrente_multi" && pending.step === "waiting_selection_multi") {
+            logger_1.log.webhook("DEBUG_PENDING_MULTI_REACHED", { userId: user.id, textoTrim });
             const isNegative = /^(não|nao|n|no|agora\s*não|agora\s*nao|depois|nenhum|nenhuma|nada|por\s+enquanto|dispenso|obrigad[ao])[\?!.]*$/i.test(textoTrim);
             const isTodos = /^(todos?|todas|sim\s+todos?|todos?\s+eles|as\s+duas|os\s+dois|ambos|tudo|sim|s|yes|pode|quero|claro|ok|beleza|bora|certo|perfeito|tá|ta)[\?!.]*$/i.test(textoTrim);
             const hasNumbers = /\d+/.test(textoTrim);
@@ -539,6 +541,7 @@ async function processWhatsAppMessage(message) {
                 return { success: false, userId: user.id, erro: "Recorrentes rejeitados" };
             }
             else if (isTodos || hasNumbers) {
+                logger_1.log.webhook("DEBUG_PENDING_CALLING_HANDLER", { userId: user.id, isTodos, hasNumbers });
                 return await (0, recurring_1.handleConfirmarRecorrenteMulti)(user, message.telefone, textoTrim, pending.tx_ids);
             }
             else if ((0, menuBuilder_1.isKnownCommand)(textoTrim)) {
