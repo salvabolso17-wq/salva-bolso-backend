@@ -163,29 +163,71 @@ export async function handleMultiLineTransactions(
         log.webhook("multilinha: candidatos", { userId: user.id, count: candidatos.length, nomes: candidatos.map(r => r.descricao) });
 
         if (candidatos.length === 1) {
-          // Um candidato → pergunta individual (preserva lógica de sentinel)
-          if (await checkAndSuggestRecorrente(user.id, telefone, candidatos[0].descricao, candidatos[0].valor, candidatos[0].categoria, candidatos[0].textoOriginal)) {
+          // Um candidato — pergunta direta, sem gate de sentinel (lista é sinal explícito)
+          const r        = candidatos[0];
+          const descNorm = r.descricao.toLowerCase().trim();
+          const jaRecDB  = await pool.query(
+            `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(TRIM(nome)) = $2 LIMIT 1`,
+            [user.id, descNorm]
+          );
+          if (jaRecDB.rows.length === 0) {
+            await pool.query(
+              `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+               VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
+               ON CONFLICT (user_id) DO UPDATE
+                 SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+                     selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
+              [user.id, JSON.stringify({ nome: r.descricao, valor: r.valor, frequencia: "mensal" })]
+            );
+            await whatsapp.sendText({
+              to: telefone,
+              text: `${capitalizeFirst(r.descricao)} aparece todo mês? 🔁`,
+            });
             recordInsightSent(user.id);
           }
         } else if (candidatos.length >= 2) {
-          // Múltiplos candidatos → salva pending primeiro, depois envia pergunta
+          // Múltiplos candidatos — insere pending e envia pergunta
           const payload = candidatos.map(r => ({ nome: r.descricao, valor: r.valor, frequencia: "mensal" }));
-          log.webhook("multilinha: inserindo pending", { userId: user.id });
-          await pool.query(
-            `INSERT INTO pending_actions (user_id, action, step, tx_ids)
-             VALUES ($1, 'confirmar_recorrente_multi', 'waiting_selection_multi', $2::jsonb)
-             ON CONFLICT (user_id) DO UPDATE
-               SET action = 'confirmar_recorrente_multi', step = 'waiting_selection_multi', tx_ids = $2::jsonb,
-                   selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
-            [user.id, JSON.stringify(payload)]
-          );
-          log.webhook("multilinha: pending inserido, enviando pergunta", { userId: user.id });
-          const lista = candidatos.map((r, i) => `${i + 1}. ${capitalizeFirst(r.descricao)} — ${fmtValor(r.valor)}`).join("\n");
-          await whatsapp.sendText({
-            to: telefone,
-            text: `Algum desses acontece todo mês? 🔁\n\n${lista}\n\n(diz os números ou "todos")`,
-          });
-          recordInsightSent(user.id);
+          const lista   = candidatos.map((r, i) => `${i + 1}. ${capitalizeFirst(r.descricao)} — ${fmtValor(r.valor)}`).join("\n");
+          try {
+            await pool.query(
+              `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+               VALUES ($1, 'confirmar_recorrente_multi', 'waiting_selection_multi', $2::jsonb)
+               ON CONFLICT (user_id) DO UPDATE
+                 SET action = 'confirmar_recorrente_multi', step = 'waiting_selection_multi', tx_ids = $2::jsonb,
+                     selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
+              [user.id, JSON.stringify(payload)]
+            );
+            await whatsapp.sendText({
+              to: telefone,
+              text: `Algum desses acontece todo mês? 🔁\n\n${lista}\n\n(diz os números ou "todos")`,
+            });
+            recordInsightSent(user.id);
+          } catch (multiErr) {
+            log.error("falha ao inserir pending recorrente multi — tentando fallback", multiErr, { userId: user.id });
+            // Fallback: pergunta sobre o primeiro candidato individualmente
+            const r        = candidatos[0];
+            const descNorm = r.descricao.toLowerCase().trim();
+            const jaRecDB  = await pool.query(
+              `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(TRIM(nome)) = $2 LIMIT 1`,
+              [user.id, descNorm]
+            );
+            if (jaRecDB.rows.length === 0) {
+              await pool.query(
+                `INSERT INTO pending_actions (user_id, action, step, tx_ids)
+                 VALUES ($1, 'confirmar_recorrente', 'waiting_confirmation', $2::jsonb)
+                 ON CONFLICT (user_id) DO UPDATE
+                   SET action = 'confirmar_recorrente', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+                       selected_tx_id = NULL, expires_at = NOW() + INTERVAL '48 hours'`,
+                [user.id, JSON.stringify({ nome: r.descricao, valor: r.valor, frequencia: "mensal" })]
+              );
+              await whatsapp.sendText({
+                to: telefone,
+                text: `${capitalizeFirst(r.descricao)} aparece todo mês? 🔁`,
+              });
+              recordInsightSent(user.id);
+            }
+          }
         } else {
           // Nenhum candidato novo → tenta padrão histórico, mas só para itens sem "(recorrente)"
           const novasSaidas = saidas.filter(r => !r.descricao.toLowerCase().includes("(recorrente)"));
