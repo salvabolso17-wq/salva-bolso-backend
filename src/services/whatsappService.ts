@@ -673,8 +673,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         return await handleConfirmarRecorrenteMulti(user, message.telefone, textoTrim, pending.tx_ids);
       } else if (isKnownCommand(textoTrim)) {
         await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+        // NÃO TEM RETURN AQUI PROPOSITALMENTE: O comando reconhecido (ex: "saldo") deve cair pro fluxo principal
       } else {
-        return await handleConfirmarRecorrenteMulti(user, message.telefone, textoTrim, pending.tx_ids);
+        // Texto genérico que não é seleção nem comando válido → bloqueia e exige seleção ou cancelamento
+        await whatsapp.sendText({ to: message.telefone, text: "Não entendi quais. Pode mandar os números? (ex: 1 e 2)\nOu 'nenhum' para pular." });
+        return { success: false, userId: user.id, erro: "Aguardando seleção válida" };
       }
     } else if (pending.step === "waiting_new_value") {
       if (!isKnownCommand(textoTrim)) {
