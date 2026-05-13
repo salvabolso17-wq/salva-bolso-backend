@@ -425,7 +425,7 @@ async function processWhatsAppMessage(message) {
             const saudacao = nome ? `Oi, ${nome}! 👋` : `Oi! 👋`;
             const boas_vindas = [
                 saudacao,
-                "Bem-vindo ao *Salva Bolso*! 🐷✨",
+                "Bem-vindo ao *Salva Bolso*! ✨",
                 "",
                 "Para eu te ajudar a controlar seu dinheiro, qual a sua *renda mensal aproximada*? 💰",
                 "",
