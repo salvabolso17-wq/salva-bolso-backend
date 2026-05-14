@@ -100,6 +100,16 @@
             font-size: 13px; color: #8e9bb3;
         }
 
+        .guarantee {
+            margin-top: 12px;
+            background: rgba(37,211,102,0.08);
+            border: 1px solid rgba(37,211,102,0.25);
+            color: #cfe9d8;
+            font-size: 13px; line-height: 1.45;
+            padding: 10px 12px; border-radius: 12px;
+            text-align: center;
+        }
+
         .badges {
             display: flex; gap: 8px; flex-wrap: wrap;
             margin: 18px 0 8px;
@@ -129,46 +139,120 @@
         .feature h3 { margin: 0 0 4px; font-size: 16px; }
         .feature p { margin: 0; font-size: 14px; color: #b9c4d6; }
 
-        .how { display: grid; gap: 14px; }
-        .step {
-            background: #131c30; border: 1px solid #1f2a44;
-            padding: 14px 16px; border-radius: 14px;
-            display: flex; gap: 12px; align-items: flex-start;
-        }
-        .step .num {
-            background: #25D366; color: #0b1220;
-            font-weight: 700; width: 28px; height: 28px;
-            border-radius: 50%; display: flex;
-            align-items: center; justify-content: center;
-            flex-shrink: 0; font-size: 14px;
-        }
-        .step h3 { margin: 0 0 4px; font-size: 15px; }
-        .step p { margin: 0; font-size: 14px; color: #b9c4d6; }
-
-        .chat {
-            background: #131c30; border: 1px solid #1f2a44;
-            border-radius: 16px; padding: 14px;
+        .chat-mockup {
+            margin-top: 18px;
+            background: #0b141a;
+            border: 1px solid #1f2a30;
+            border-radius: 16px;
+            padding: 14px;
             display: grid; gap: 8px;
         }
-        .msg {
-            padding: 10px 12px; border-radius: 12px;
-            font-size: 14px; max-width: 85%;
+        .chat-mockup .chat-title {
+            font-size: 13px; color: #8e9bb3;
+            text-align: center; margin-bottom: 4px;
         }
-        .msg.user { background: #25D366; color: #0b1220; justify-self: end; border-bottom-right-radius: 4px; }
-        .msg.bot  { background: #1f2a44; color: #e9eef7; justify-self: start; border-bottom-left-radius: 4px; }
+        .chat-mockup .bubble {
+            padding: 12px;
+            border-radius: 14px;
+            font-size: 14.5px; line-height: 1.4;
+            max-width: 75%;
+            white-space: pre-line;
+            box-shadow: 0 1px 1px rgba(0,0,0,0.2);
+        }
+        .chat-mockup .bubble.user {
+            background: #005c4b;
+            color: #e9ffe9;
+            justify-self: end;
+            border-bottom-right-radius: 4px;
+        }
+        .chat-mockup .bubble.bot {
+            background: #202c33;
+            color: #e9eef7;
+            justify-self: start;
+            border-bottom-left-radius: 4px;
+        }
 
-        .price {
-            background: linear-gradient(135deg, #131c30, #182648);
-            border: 1px solid #25D366;
-            border-radius: 16px; padding: 22px; text-align: center;
+        .social-proof {
+            margin-top: 20px;
+            background: #131c30;
+            border: 1px solid #1f2a44;
+            border-radius: 12px;
+            padding: 12px 14px;
+            text-align: center;
+            font-size: 13px;
+            color: #cfd6e6;
+            line-height: 1.5;
         }
-        .price .tag {
+        .social-proof .stars { color: #ffd24c; }
+
+        .pain h2 { font-size: 22px; margin-bottom: 16px; }
+        .pain .line {
+            font-size: 19px; line-height: 1.35;
+            color: #e9eef7; margin: 0 0 14px;
+            font-weight: 600;
+        }
+        .pain .close {
+            margin-top: 18px;
+            color: #25D366;
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+
+        .ad-table {
+            background: #131c30; border: 1px solid #1f2a44;
+            border-radius: 14px; overflow: hidden;
+        }
+        .ad-row {
+            display: grid; grid-template-columns: 1fr 1fr;
+            border-bottom: 1px solid #1f2a44;
+        }
+        .ad-row:last-child { border-bottom: none; }
+        .ad-row.head { background: rgba(37,211,102,0.08); font-weight: 700; }
+        .ad-cell {
+            padding: 12px 12px; font-size: 13.5px;
+            line-height: 1.35;
+        }
+        .ad-cell.before { color: #ffb4b4; border-right: 1px solid #1f2a44; }
+        .ad-cell.after  { color: #b8f0c8; }
+        .ad-row.head .ad-cell { color: #e9eef7; }
+
+        .price-grid { display: grid; gap: 14px; }
+        .price-card {
+            background: linear-gradient(135deg, #131c30, #182648);
+            border: 1px solid #1f2a44;
+            border-radius: 16px; padding: 20px; text-align: center;
+            position: relative;
+        }
+        .price-card.featured {
+            border: 2px solid #25D366;
+            box-shadow: 0 8px 24px rgba(37,211,102,0.18);
+        }
+        .price-card .tag {
             display: inline-block; background: #25D366; color: #0b1220;
             padding: 4px 10px; border-radius: 999px;
             font-size: 12px; font-weight: 700; margin-bottom: 10px;
         }
-        .price .free { font-size: 28px; font-weight: 800; margin: 4px 0; }
-        .price .after { font-size: 14px; color: #b9c4d6; margin-bottom: 16px; }
+        .price-card h3 { margin: 0 0 8px; font-size: 18px; }
+        .price-card .amount { font-size: 26px; font-weight: 800; margin: 4px 0; }
+        .price-card .equiv { font-size: 14px; color: #b9c4d6; }
+        .price-card .save  { font-size: 13px; color: #25D366; margin-top: 4px; font-weight: 600; }
+        .price-card .terms { font-size: 13px; color: #b9c4d6; margin-top: 4px; }
+        .price-card .cta { margin-top: 16px; }
+
+        .price-foot {
+            margin-top: 14px;
+            text-align: center;
+            color: #8e9bb3;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .price-reassure {
+            margin-top: 10px;
+            text-align: center;
+            color: #cfe9d8;
+            font-size: 13px;
+        }
 
         .faq details {
             background: #131c30; border: 1px solid #1f2a44;
@@ -211,19 +295,43 @@
             <div class="badges">
                 <span class="badge">✓ 7 dias grátis</span>
                 <span class="badge">✓ Sem cartão</span>
-                <span class="badge">✓ Direto no WhatsApp</span>
+                <span class="badge">✓ Cancela com 1 mensagem</span>
             </div>
-            <h1>Controle suas finanças <span class="hl">só mandando mensagem</span> no WhatsApp.</h1>
-            <p class="sub">Sem planilha. Sem baixar app. Você manda “gastei 30 no almoço” e o Salva Bolso registra, categoriza e te mostra para onde seu dinheiro está indo.</p>
+            <h1>Seu salário some todo mês e você <span class="hl">não sabe pra onde foi</span>?</h1>
+            <p class="sub">Mais de 2.000 brasileiros descobriram — mandando 1 mensagem no WhatsApp — que estavam perdendo de R$ 600 a R$ 1.200 por mês sem perceber. Agora não perdem mais.</p>
 
             <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
-                <span class="wa-icon">💬</span>Testar grátis no WhatsApp
+                <span class="wa-icon">💬</span>Quero testar grátis no WhatsApp →
             </a>
-            <p class="trust">Comece em menos de 30 segundos · 7 dias grátis</p>
+            <p class="trust">Teste 7 dias grátis · Sem cartão · Cancela com 1 mensagem</p>
+            <div class="guarantee">🛡️ Garantia simples: se não gostar, é só parar de responder. A gente não cobra.</div>
+
+            <div class="chat-mockup">
+                <div class="chat-title">Veja como é simples 👇</div>
+                <div class="bubble user">gastei 47 no ifood</div>
+                <div class="bubble bot">Anotado ✅
+🍔 Alimentação · R$ 47,00
+Total do mês: R$ 1.243</div>
+                <div class="bubble bot">⚠️ Você já gastou 38% a mais em delivery que no mês passado. Quer que eu te avise quando passar de R$ 1.500?</div>
+                <div class="bubble user">quero sim</div>
+                <div class="bubble bot">Combinado 👍 Vou te avisar.</div>
+            </div>
+
+            <div class="social-proof">
+                <span class="stars">⭐⭐⭐⭐⭐</span>&nbsp;&nbsp;4.9 de avaliação&nbsp;&nbsp;·&nbsp;&nbsp;+2.000 usuários ativos&nbsp;&nbsp;·&nbsp;&nbsp;R$ 1,4 milhão economizados
+            </div>
+        </section>
+
+        <section class="pain">
+            <h2>Você não tem problema de salário. Tem problema de invisibilidade.</h2>
+            <p class="line">Você ganha bem. Mas chega dia 20 e some tudo.</p>
+            <p class="line">Já tentou planilha. Durou 3 dias.</p>
+            <p class="line">Baixou 4 apps de finanças. Não abriu nenhum.</p>
+            <p class="close">A diferença é que dessa vez, você não precisa fazer nada além de mandar mensagem.</p>
         </section>
 
         <section>
-            <h2>Tudo que você precisa, em uma conversa</h2>
+            <h2>Por que funciona quando tudo o resto falhou</h2>
             <div class="features">
                 <div class="feature">
                     <div class="ico">⚡</div>
@@ -256,52 +364,64 @@
             </div>
         </section>
 
-        <section>
-            <h2>Como funciona</h2>
-            <div class="how">
-                <div class="step">
-                    <div class="num">1</div>
-                    <div>
-                        <h3>Abre o WhatsApp</h3>
-                        <p>Clica no botão e começa a conversar com o bot.</p>
-                    </div>
+        <section class="antes-depois">
+            <h2>Antes do Salva Bolso → Depois</h2>
+            <div class="ad-table">
+                <div class="ad-row head">
+                    <div class="ad-cell">❌ Antes</div>
+                    <div class="ad-cell">✅ Com Salva Bolso</div>
                 </div>
-                <div class="step">
-                    <div class="num">2</div>
-                    <div>
-                        <h3>Manda seus gastos</h3>
-                        <p>Em linguagem natural, do jeito que você fala.</p>
-                    </div>
+                <div class="ad-row">
+                    <div class="ad-cell before">Abrir planilha toda noite</div>
+                    <div class="ad-cell after">Mandar 1 mensagem no zap</div>
                 </div>
-                <div class="step">
-                    <div class="num">3</div>
-                    <div>
-                        <h3>Recebe insights</h3>
-                        <p>Saiba quanto gastou, em quê e quanto sobra.</p>
-                    </div>
+                <div class="ad-row">
+                    <div class="ad-cell before">Esquecer de anotar 80% dos gastos</div>
+                    <div class="ad-cell after">Anotar por áudio enquanto dirige</div>
+                </div>
+                <div class="ad-row">
+                    <div class="ad-cell before">Ver o estrago só no extrato do fim do mês</div>
+                    <div class="ad-cell after">Receber alerta na hora do gasto</div>
+                </div>
+                <div class="ad-row">
+                    <div class="ad-cell before">Não saber pra onde foi o dinheiro</div>
+                    <div class="ad-cell after">Relatório automático toda semana</div>
+                </div>
+                <div class="ad-row">
+                    <div class="ad-cell before">Sentir culpa</div>
+                    <div class="ad-cell after">Sentir controle</div>
                 </div>
             </div>
         </section>
 
         <section>
-            <h2>Veja na prática</h2>
-            <div class="chat">
-                <div class="msg user">gastei 35 no ifood</div>
-                <div class="msg bot">Anotado ✅ R$ 35,00 em Alimentação. Você já gastou R$ 248 nesta categoria este mês.</div>
-                <div class="msg user">quanto gastei essa semana?</div>
-                <div class="msg bot">Esta semana: R$ 412,30. Maior categoria: Alimentação (R$ 198). Quer o detalhe?</div>
-            </div>
-        </section>
+            <h2>7 dias grátis. Depois, você escolhe.</h2>
+            <p class="sub" style="color:#b9c4d6;font-size:15px;margin:0 0 16px;">Sem cartão pra começar. Só paga se quiser continuar usando.</p>
 
-        <section>
-            <div class="price">
-                <span class="tag">OFERTA DE LANÇAMENTO</span>
-                <div class="free">7 dias grátis</div>
-                <div class="after">Depois, a partir de R$ 8,33/mês. Cancela quando quiser.</div>
-                <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
-                    <span class="wa-icon">💬</span>Começar agora
-                </a>
+            <div class="price-grid">
+                <div class="price-card featured">
+                    <span class="tag">🏆 MAIS ESCOLHIDO</span>
+                    <h3>Plano Anual</h3>
+                    <div class="amount">R$ 99,90<span style="font-size:14px;color:#b9c4d6;">/ano</span></div>
+                    <div class="equiv">Equivale a R$ 8,32/mês</div>
+                    <div class="save">Economia de R$ 78,90 por ano</div>
+                    <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
+                        <span class="wa-icon">💬</span>Começar 7 dias grátis →
+                    </a>
+                </div>
+
+                <div class="price-card">
+                    <h3>Plano Mensal</h3>
+                    <div class="amount">R$ 14,90<span style="font-size:14px;color:#b9c4d6;">/mês</span></div>
+                    <div class="terms">Cancela quando quiser</div>
+                    <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
+                        <span class="wa-icon">💬</span>Começar 7 dias grátis →
+                    </a>
+                </div>
             </div>
+
+            <p class="price-foot">Menos que 1 café no shopping. Menos que 1 ifood por mês. Mais barato que qualquer planilha paga.</p>
+            <p class="price-reassure">✓ Sem cartão pra testar &nbsp; ✓ Sem fidelidade &nbsp; ✓ Cancela com 1 mensagem no zap</p>
         </section>
 
         <section class="faq">
@@ -331,7 +451,7 @@
 
     <div class="sticky-cta">
         <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
-            <span class="wa-icon">💬</span>Testar grátis agora
+            <span class="wa-icon">💬</span>Quero testar grátis no WhatsApp →
         </a>
     </div>
 </body>
