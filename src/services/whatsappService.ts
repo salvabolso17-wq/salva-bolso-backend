@@ -13,6 +13,7 @@ import { isCuriosityPhrase, buildFeaturesMenuText, isKnownCommand, isAmbiguousIn
 import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente } from "./modules/recurringDetection";
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip } from "./modules/insightsEngine";
 import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas } from "./modules/onboarding";
+import { classifyIntentWithAI } from "./modules/intentAI";
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria } from "./handlers/reports";
@@ -1243,18 +1244,36 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   const parsed = parseTransaction(textoParsear);
 
   if (!parsed) {
-    log.parser("nao reconhecido", { texto: message.texto });
+    try {
+      const aiCommand = await classifyIntentWithAI(message.texto, getSession(user.id)?.lastCommand ?? "");
+      if (aiCommand) {
+        switch (aiCommand) {
+          case "saldo":      return await handleSaldoCommand(user, message.telefone);
+          case "resumo":     return await handleResumoCommand(user, message.telefone);
+          case "recorrentes": return await handleRecorrentesCommand(user, message.telefone);
+          case "hoje":       return await handleHojeCommand(user, message.telefone);
+          case "semana":     return await handleSemanaCommand(user, message.telefone);
+          case "ranking":    return await handleRankingCommand(user, message.telefone);
+          case "metas":      return await handleMetasCommand(user, message.telefone);
+          case "extrato":    return await handleExtratoCommand(user, message.telefone, `extrato ${MESES_NOME[new Date().getMonth() + 1]}`);
+          case "ajuda":      return await handleAjudaCommand(user, message.telefone);
+          case "proximas":   return await handleProximasCommand(user, message.telefone);
+          case "comparar":   return await handleCompararCommand(user, message.telefone);
+          case "top_gastos": return await handleTopGastosCommand(user, message.telefone);
+          case "desafio":    return await handleDesafioCommand(user, message.telefone);
+          case "previsao":   return await handlePrevisaoCommand(user, message.telefone);
+          case "categorias": return await handleCategoriasCommand(user, message.telefone);
+        }
+      }
+    } catch (err) {
+      log.error("falha classifyIntentWithAI", err, { userId: user.id });
+    }
 
     try {
-      const sendResult = await whatsapp.sendText({
-        to: message.telefone,
-        text: buildContextualHint(message.texto),
-      });
-      log.whatsapp("erro enviado", { to: message.telefone, success: sendResult.success });
+      await whatsapp.sendText({ to: message.telefone, text: buildContextualHint(message.texto) });
     } catch (err) {
       log.error("falha ao enviar mensagem de erro", err, { to: message.telefone });
     }
-
     return { success: false, userId: user.id, erro: "Mensagem não reconhecida" };
   }
 
