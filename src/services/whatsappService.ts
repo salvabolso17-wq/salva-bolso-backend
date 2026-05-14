@@ -819,6 +819,42 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handleExtratoCommand(user, message.telefone, `extrato ${mesAtual}`);
   }
 
+  // ── AI-first: Claude classifica mensagens sem número ─────────────────────
+  if (!/\d/.test(message.texto)) {
+    try {
+      const _aiCmd = await classifyIntentWithAI(message.texto, getSession(user.id)?.lastCommand ?? "");
+      if (_aiCmd) {
+        switch (_aiCmd) {
+          case "saldo":       return await handleSaldoCommand(user, message.telefone);
+          case "resumo":      return await handleResumoCommand(user, message.telefone);
+          case "recorrentes": return await handleRecorrentesCommand(user, message.telefone);
+          case "hoje":        return await handleHojeCommand(user, message.telefone);
+          case "semana":      return await handleSemanaCommand(user, message.telefone);
+          case "ranking":     return await handleRankingCommand(user, message.telefone);
+          case "metas":       return await handleMetasCommand(user, message.telefone);
+          case "extrato":     return await handleExtratoCommand(user, message.telefone, `extrato ${MESES_NOME[new Date().getMonth() + 1]}`);
+          case "ajuda":       return await handleAjudaCommand(user, message.telefone);
+          case "proximas":    return await handleProximasCommand(user, message.telefone);
+          case "comparar":    return await handleCompararCommand(user, message.telefone);
+          case "top_gastos":  return await handleTopGastosCommand(user, message.telefone);
+          case "desafio":     return await handleDesafioCommand(user, message.telefone);
+          case "previsao":    return await handlePrevisaoCommand(user, message.telefone);
+          case "categorias":  return await handleCategoriasCommand(user, message.telefone);
+        }
+      }
+      // Claude não reconheceu → verifica se é lembrete
+      if (/lembr[ae]|me\s+avisa|notific|agendar/i.test(message.texto)) {
+        await whatsapp.sendText({
+          to:   message.telefone,
+          text: "Lembretes automáticos chegam em breve! 🔔\n\nPor enquanto, use _próximas_ para ver suas contas do mês.",
+        });
+        return { success: false, userId: user.id, erro: "lembrete nao disponivel" };
+      }
+    } catch (err) {
+      log.error("falha AI pre-classification", err, { userId: user.id });
+    }
+  }
+
   // ── Curiosidade sobre funcionalidades (linguagem natural) ────────────────
   if (isCuriosityPhrase(message.texto.trim())) {
     try {
