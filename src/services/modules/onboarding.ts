@@ -110,6 +110,16 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
       log.error("erro ao inserir recurring_expenses no onboarding", e);
     }
 
+    try {
+      await pool.query(
+        `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+         VALUES ($1, 'saida', $2, $3, $4)`,
+        [user.id, parsed.valor, parsed.categoria ?? "Outros", descricao]
+      );
+    } catch (e) {
+      log.error("erro ao inserir transaction no onboarding", e);
+    }
+
     const msg = [
       `✅ *${capitalizeFirst(descricao)}* (${fmtValor(parsed.valor)}) salvo nas contas fixas. Tudo pronto!`,
       "",
