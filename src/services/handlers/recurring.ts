@@ -298,3 +298,158 @@ export async function handleRecorrenteCommand(user: UserRow, telefone: string, t
     interpretado: { comando: "recorrente", nome, valor, frequencia },
   };
 }
+
+// ── Helpers internos ──────────────────────────────────────────────────────────
+
+function extractEditValues(texto: string): { nome: string; valor: number } | null {
+  const t = texto.trim();
+  const m1 = t.match(/^(.+?)\s+(?:subiu|passou|ficou|mudou|vale)\s+(?:para\s+)?([\d,.]+)/i);
+  if (m1) return { nome: m1[1].trim(), valor: parseFloat(m1[2].replace(",", ".")) };
+  const m2 = t.match(/^(.+?)\s+agora\s+[eé]\s+([\d,.]+)/i);
+  if (m2) return { nome: m2[1].trim(), valor: parseFloat(m2[2].replace(",", ".")) };
+  const m3 = t.match(/(?:mudar?|atualizar?|editar?|alterar?)\s+(.+?)\s+(?:para|p\/)\s*([\d,.]+)/i);
+  if (m3) return { nome: m3[1].trim(), valor: parseFloat(m3[2].replace(",", ".")) };
+  return null;
+}
+
+function extractRecorrenteName(texto: string): string | null {
+  const t = texto.trim();
+  const m1 = t.match(/(?:cancelei?|parei?|encerrei?|removi?|apaguei?|exclu[ií]|paguei?|quitei?|liquidei?|j[aá]\s+paguei?)\s+(?:a\s+|o\s+|as\s+|os\s+)?(.+?)[\?!.]*$/i);
+  if (m1) return m1[1].trim();
+  const m2 = t.match(/^(.+?)\s+(?:subiu|passou|ficou|agora\s+[eé]|mudou|foi\s+cancel)/i);
+  if (m2) return m2[1].trim();
+  return null;
+}
+
+// ── Editar recorrente ─────────────────────────────────────────────────────────
+
+export async function handleEditarRecorrenteAI(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  try {
+    const extracted = extractEditValues(texto);
+    if (!extracted || isNaN(extracted.valor) || extracted.valor <= 0) {
+      await whatsapp.sendText({ to: telefone, text: "💡 Ex: _aluguel subiu para 1300_" });
+      return { success: false, userId: user.id, erro: "formato inválido" };
+    }
+    const { nome, valor } = extracted;
+    const result = await pool.query<{ id: number; nome: string }>(
+      `SELECT id, nome FROM recurring_expenses
+       WHERE user_id = $1 AND ativo = TRUE AND LOWER(nome) ILIKE LOWER($2)
+       ORDER BY nome ASC LIMIT 1`,
+      [user.id, `%${nome}%`]
+    );
+    if (result.rows.length === 0) {
+      await whatsapp.sendText({ to: telefone, text: `Não encontrei _${nome}_ nas contas fixas.\nUse _recorrentes_ para ver a lista.` });
+      return { success: false, userId: user.id, erro: "recorrente não encontrado" };
+    }
+    const row = result.rows[0];
+    await pool.query(`UPDATE recurring_expenses SET valor = $1 WHERE id = $2`, [valor, row.id]);
+    await whatsapp.sendText({ to: telefone, text: `✅ *${capitalizeFirst(row.nome)}* atualizado para ${fmtValor(valor)}.` });
+    recordAction(user.id, "created_recurring");
+    setLastContext(user.id, "recurring");
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "editar_recorrente", nome: row.nome, valor } };
+  } catch (err) {
+    log.error("handleEditarRecorrenteAI falhou", err, { userId: user.id });
+    return { success: false, userId: user.id, erro: "erro editar recorrente" };
+  }
+}
+
+// ── Apagar recorrente (step 1 — pede confirmação) ─────────────────────────────
+
+export async function handleApagarRecorrenteAI(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  try {
+    const nome = extractRecorrenteName(texto);
+    if (!nome) {
+      await whatsapp.sendText({ to: telefone, text: "💡 Ex: _cancelei a netflix_" });
+      return { success: false, userId: user.id, erro: "nome não extraído" };
+    }
+    const result = await pool.query<{ id: number; nome: string }>(
+      `SELECT id, nome FROM recurring_expenses
+       WHERE user_id = $1 AND ativo = TRUE AND LOWER(nome) ILIKE LOWER($2)
+       ORDER BY nome ASC LIMIT 1`,
+      [user.id, `%${nome}%`]
+    );
+    if (result.rows.length === 0) {
+      await whatsapp.sendText({ to: telefone, text: `Não encontrei _${nome}_ nas contas fixas.\nUse _recorrentes_ para ver a lista.` });
+      return { success: false, userId: user.id, erro: "recorrente não encontrado" };
+    }
+    const row = result.rows[0];
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    await pool.query(
+      `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+       VALUES ($1, 'apagar_recorrente', 'waiting_confirmation', $2::jsonb, NOW() + INTERVAL '10 minutes')`,
+      [user.id, JSON.stringify({ id: row.id, nome: row.nome })]
+    );
+    await whatsapp.sendText({ to: telefone, text: `Quer remover *${capitalizeFirst(row.nome)}* das contas fixas?\n\n_sim_ para confirmar · _não_ para cancelar.` });
+    return { success: false, userId: user.id, erro: "aguardando confirmação apagar" };
+  } catch (err) {
+    log.error("handleApagarRecorrenteAI falhou", err, { userId: user.id });
+    return { success: false, userId: user.id, erro: "erro apagar recorrente" };
+  }
+}
+
+// ── Apagar recorrente (step 2 — processa confirmação) ────────────────────────
+
+export async function handleConfirmarApagarRecorrente(user: UserRow, telefone: string, texto: string, txIdsRaw: unknown): Promise<ProcessResult> {
+  const data = txIdsRaw as { id: number; nome: string };
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+  const isSim = /^(sim|s|yes|pode|ok|beleza|claro|certo|confirma)[\?!.]*$/i.test(texto.trim());
+  if (!isSim) {
+    await whatsapp.sendText({ to: telefone, text: "Ok, mantive! 🙂" });
+    return { success: false, userId: user.id, erro: "apagar cancelado" };
+  }
+  try {
+    await pool.query(`UPDATE recurring_expenses SET ativo = FALSE WHERE id = $1 AND user_id = $2`, [data.id, user.id]);
+    await whatsapp.sendText({ to: telefone, text: `✅ *${capitalizeFirst(data.nome)}* removido das contas fixas.` });
+    setLastContext(user.id, "recurring");
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "apagar_recorrente", nome: data.nome } };
+  } catch (err) {
+    log.error("handleConfirmarApagarRecorrente falhou", err, { userId: user.id });
+    return { success: false, userId: user.id, erro: "erro ao apagar recorrente" };
+  }
+}
+
+// ── Pagar recorrente (marcar como pago este mês) ──────────────────────────────
+
+export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+  try {
+    const nome = extractRecorrenteName(texto);
+    if (!nome) {
+      await whatsapp.sendText({ to: telefone, text: "💡 Ex: _já paguei o aluguel_" });
+      return { success: false, userId: user.id, erro: "nome não extraído" };
+    }
+    const result = await pool.query<{ id: number; nome: string; valor: string }>(
+      `SELECT id, nome, valor FROM recurring_expenses
+       WHERE user_id = $1 AND ativo = TRUE AND LOWER(nome) ILIKE LOWER($2)
+       ORDER BY nome ASC LIMIT 1`,
+      [user.id, `%${nome}%`]
+    );
+    if (result.rows.length === 0) {
+      await whatsapp.sendText({ to: telefone, text: `Não encontrei _${nome}_ nas contas fixas.\nUse _recorrentes_ para ver a lista.` });
+      return { success: false, userId: user.id, erro: "recorrente não encontrado" };
+    }
+    const row = result.rows[0];
+    const valor = Number(row.valor);
+    const existing = await pool.query(
+      `SELECT id FROM transactions
+       WHERE user_id = $1 AND tipo = 'saida'
+         AND LOWER(descricao) ILIKE LOWER($2)
+         AND created_at >= date_trunc('month', NOW())`,
+      [user.id, `%${row.nome}%`]
+    );
+    if (existing.rows.length > 0) {
+      await whatsapp.sendText({ to: telefone, text: `*${capitalizeFirst(row.nome)}* já está registrado este mês. 💡 Use _extrato_ para conferir.` });
+      return { success: false, userId: user.id, erro: "já registrado este mês" };
+    }
+    await pool.query(
+      `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+       VALUES ($1, 'saida', $2, 'Moradia', $3)`,
+      [user.id, valor, row.nome]
+    );
+    recordAction(user.id, "registered_transaction");
+    await whatsapp.sendText({ to: telefone, text: `✅ *${capitalizeFirst(row.nome)}* (${fmtValor(valor)}) registrado como pago.` });
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "pagar_recorrente", nome: row.nome, valor } };
+  } catch (err) {
+    log.error("handlePagarRecorrenteAI falhou", err, { userId: user.id });
+    return { success: false, userId: user.id, erro: "erro pagar recorrente" };
+  }
+}

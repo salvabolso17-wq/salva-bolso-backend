@@ -6,7 +6,8 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const VALID_COMMANDS = [
   "saldo", "resumo", "recorrentes", "hoje", "semana",
   "ranking", "metas", "extrato", "ajuda", "proximas",
-  "comparar", "top_gastos", "desafio", "previsao", "categorias"
+  "comparar", "top_gastos", "desafio", "previsao", "categorias",
+  "editar_recorrente", "apagar_recorrente", "pagar_recorrente"
 ] as const;
 
 type BotCommand = typeof VALID_COMMANDS[number];
@@ -31,6 +32,9 @@ Comandos:
 - desafio: desafio de economia
 - previsao: previsão do mês, estimativa
 - categorias: listar categorias
+- editar_recorrente: mudar o valor de uma conta fixa ("aluguel subiu para 1300", "netflix agora é 45", "mudar internet para 150", "atualizar luz para 200")
+- apagar_recorrente: cancelar ou remover uma conta fixa ("cancelei a netflix", "não tenho mais internet", "remover o aluguel", "parei de pagar academia")
+- pagar_recorrente: registrar que pagou uma conta fixa ("já paguei o aluguel", "paguei a netflix", "quitei a internet", "aluguel pago")
 - unknown: pedidos de lembrete ("pode lembrar", "me avisa", "me lembra"), agendamentos, notificações, funcionalidades não disponíveis, conversas pessoais
 
 Responda APENAS com o nome do comando. Nada mais.`;

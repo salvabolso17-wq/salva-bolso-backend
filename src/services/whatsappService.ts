@@ -19,7 +19,7 @@ import { classifyIntentWithAI } from "./modules/intentAI";
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
 import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
-import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand } from "./handlers/recurring";
+import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
 
@@ -617,7 +617,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente";
     step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas";
     tx_ids: unknown;
     selected_tx_id: number | null;
@@ -744,6 +744,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         });
         return { success: false, userId: user.id, erro: "Aguardando confirmação recorrente" };
       }
+    } else if (pending.action === "apagar_recorrente" && pending.step === "waiting_confirmation") {
+      return await handleConfirmarApagarRecorrente(user, message.telefone, textoTrim, pending.tx_ids);
     } else if (pending.action === "registrar_parcela" && pending.step === "waiting_parcela_valor") {
       if (!isKnownCommand(textoTrim)) {
         return await handleRegistrarParcelaValor(
@@ -840,6 +842,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           case "desafio":     return await handleDesafioCommand(user, message.telefone);
           case "previsao":    return await handlePrevisaoCommand(user, message.telefone);
           case "categorias":  return await handleCategoriasCommand(user, message.telefone);
+          case "editar_recorrente": return await handleEditarRecorrenteAI(user, message.telefone, message.texto);
+          case "apagar_recorrente": return await handleApagarRecorrenteAI(user, message.telefone, message.texto);
+          case "pagar_recorrente":  return await handlePagarRecorrenteAI(user, message.telefone, message.texto);
         }
       }
       // Claude não reconheceu → verifica se é lembrete
@@ -999,6 +1004,18 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
   if (/^buscar\s+.+$/i.test(message.texto.trim())) {
     return await handleBuscarCommand(user, message.telefone, message.texto.trim());
+  }
+  // Editar valor de recorrente: "aluguel subiu para 900", "mudar netflix para 45", "internet agora é 150"
+  const _editRecMatch =
+    message.texto.trim().match(/^(.+?)\s+(?:subiu|passou|ficou|mudou|vale)\s+(?:para\s+)?([\d,.]+)/i)
+    || message.texto.trim().match(/(?:mudar?|atualizar?|editar?|alterar?)\s+.+?\s+(?:para|p\/)\s*[\d,.]+/i)
+    || message.texto.trim().match(/^(.+?)\s+agora\s+[eé]\s+[\d,.]+/i);
+  if (_editRecMatch) {
+    try {
+      return await handleEditarRecorrenteAI(user, message.telefone, message.texto.trim());
+    } catch (err) {
+      log.error("handleEditarRecorrenteAI falhou", err, { userId: user.id });
+    }
   }
   if (/^recorrente\s+[\d,.]+\s+.+$/i.test(message.texto.trim())) {
     return await handleRecorrenteCommand(user, message.telefone, message.texto.trim());
@@ -1299,6 +1316,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           case "desafio":    return await handleDesafioCommand(user, message.telefone);
           case "previsao":   return await handlePrevisaoCommand(user, message.telefone);
           case "categorias": return await handleCategoriasCommand(user, message.telefone);
+          case "editar_recorrente": return await handleEditarRecorrenteAI(user, message.telefone, message.texto);
+          case "apagar_recorrente": return await handleApagarRecorrenteAI(user, message.telefone, message.texto);
+          case "pagar_recorrente":  return await handlePagarRecorrenteAI(user, message.telefone, message.texto);
         }
       }
     } catch (err) {
