@@ -244,7 +244,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   // Consulta de saldo via linguagem natural
   if (
     !temNumero &&
-    /quanto\s+(tenho|sobrou|resta|restou|tenho\s+de\s+saldo)|quanto\s+gastei\s+(esse|este|no)\s+m[eê]s|o\s+que\s+sobrou|quanto\s+est[aá]\s+sobrando/.test(t)
+    /quanto\s+(tenho|sobrou|resta|restou|tenho\s+de\s+saldo)|quanto\s+gastei\s+(esse|este|no)\s+m[eê]s|o\s+que\s+sobrou|quanto\s+est[aá]\s+sobrando|saldo\s+do\s+m[eê]s|quero\s+(ver\s+)?o\s+saldo|meu\s+saldo/.test(t)
   ) {
     return await handleSaldoCommand(user, telefone);
   }
@@ -252,7 +252,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   // Consulta de gastos via linguagem natural
   if (
     !temNumero &&
-    /(me\s+mostra|ver|quero\s+ver|mostrar)\s+(meus?\s+gastos?|o\s+resumo)|meus?\s+gastos?\s+(do\s+m[eê]s|de\s+hoje|essa\s+semana)/.test(t)
+    /(me\s+mostra|ver|quero\s+ver|mostrar)\s+(meus?\s+gastos?|o\s+resumo)|meus?\s+gastos?\s+(do\s+m[eê]s|de\s+hoje|essa\s+semana)|qual\s+(é\s+)?(o\s+)?meu\s+gasto\s+mensal|gasto\s+mensal/.test(t)
   ) {
     return await handleResumoCommand(user, telefone);
   }
@@ -1234,7 +1234,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // Guard: frases com intenção futura/condicional não devem ser registradas como gastos
   if (
     /\d/.test(textoParsear) &&
-    /\b(tenho\s+que\s+pagar|vou\s+pagar|preciso\s+pagar|falta\s+pagar|ainda\s+n[aã]o\s+paguei|a\s+pagar\b)\b/i.test(textoParsear)
+    /\b(tenho\s+que\s+pagar|vou\s+pagar|preciso\s+pagar|falta\s+pagar|ainda\s+n[aã]o\s+paguei|a\s+pagar\b)\b|t[oô]\s+querendo\s+(comprar|adquirir)\s|quero\s+comprar\s/i.test(textoParsear)
   ) {
     log.parser("mencao futura ignorada", { texto: textoParsear });
     return { success: false, userId: user.id, erro: "mencao futura ignorada" };
