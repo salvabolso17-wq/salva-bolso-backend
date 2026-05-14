@@ -111,14 +111,11 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
     }
 
     const msg = [
-      `✅ Salvei *${capitalizeFirst(descricao)}* (${fmtValor(parsed.valor)}) como conta fixa.`,
+      `✅ *${capitalizeFirst(descricao)}* (${fmtValor(parsed.valor)}) salvo nas contas fixas. Tudo pronto!`,
       "",
-      "Tudo pronto! Sua configuração está completa.",
+      "É só me mandar os gastos: _50 mercado_ ou _35 uber_",
       "",
-      "A partir de agora, é só me mandar seus gastos:",
-      "Ex: _50 mercado_ ou _35 uber_",
-      "",
-      "Mande seu primeiro gasto de hoje para testar! 👇"
+      "Mande o primeiro agora! 👇"
     ].join("\n");
     await whatsapp.sendText({ to: telefone, text: msg });
     return { success: false, userId: user.id, erro: "onboarding finalizado (com fixa)" };
