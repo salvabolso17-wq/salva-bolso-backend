@@ -8,6 +8,7 @@ import type { UserRow, ProcessResult } from "../types";
 
 export function isCuriosityPhrase(texto: string): boolean {
   const t = texto.trim();
+  if (/\b(saldo|resumo|contas?\s+fix|recorrentes?|metas?|extrato|ranking|parcelas?)\b/i.test(t)) return false;
   if (/^(mostra|mostra\s+a[ií]|explica|me\s+conta|pode\s+falar)[\?!.]*$/i.test(t)) return true;
   return /quero\s+ver|me\s+mostra|como\s+funciona|o\s+que\s+(você|voce|vc)\s+(faz|pode|conseg|d[aá])|o\s+que\s+d[aá]\s+pra\s+fa[çz]|tem\s+mais\s+coisa|quero\s+entender|me\s+explica|o\s+que\s+[eéè]\s+isso|como\s+(uso|usar|fa[çc]o)\b|o\s+que\s+tem\s+(aqui|nesse?\s+bot)?|conta\s+mais|o\s+que\s+voc[eê]\s+conseg|o\s+que\s+mais\s+(posso|d[aá]|consigo)\s+(fazer|ver|usar)|o\s+que\s+(posso|consigo)\s+(fazer|ver|usar)/i.test(t);
 }
