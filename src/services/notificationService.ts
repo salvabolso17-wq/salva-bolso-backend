@@ -403,6 +403,48 @@ async function sendRecorrentesAlert(): Promise<void> {
   }
 }
 
+async function sendMonthlyBillsReminder(): Promise<void> {
+  if (new Date().getUTCDate() !== 1) return;
+  const sentinel = currentMonthStart();
+
+  const { rows } = await pool.query<{ id: number; telefone: string }>(`
+    SELECT DISTINCT u.id, u.telefone
+    FROM users u
+    WHERE (u.subscription_status = 'active' OR (u.subscription_status = 'trial' AND u.trial_ends_at > NOW()))
+      AND EXISTS (SELECT 1 FROM recurring_expenses WHERE user_id = u.id AND ativo = TRUE)
+      AND NOT EXISTS (
+        SELECT 1 FROM sent_insights
+        WHERE user_id = u.id AND categoria = 'lembrete_contas_mes' AND mes_referencia = $1
+      )
+  `, [sentinel]);
+
+  for (const user of rows) {
+    if (!(await tryMarkSent(user.id, "lembrete_contas_mes", sentinel))) continue;
+    try {
+      const recRows = await pool.query<{ nome: string; valor: string }>(
+        `SELECT nome, valor FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE ORDER BY valor DESC`,
+        [user.id]
+      );
+      const total = recRows.rows.reduce((s, r) => s + Number(r.valor), 0);
+      const lista = recRows.rows.map(r => `• ${r.nome} — R$ ${Number(r.valor).toFixed(2)}`).join("\n");
+
+      await whatsapp.sendText({
+        to: user.telefone,
+        text: [
+          "📅 Suas contas deste mês:",
+          "",
+          lista,
+          "",
+          `Total: R$ ${total.toFixed(2)}`,
+        ].join("\n"),
+      });
+      log.whatsapp("lembrete contas mes enviado", { to: user.telefone, userId: user.id });
+    } catch (err) {
+      log.error("falha lembrete contas mes", err, { userId: user.id });
+    }
+  }
+}
+
 // Dia 1: score financeiro mensal — enviado junto ao fechamento
 async function sendMonthlyScore(): Promise<void> {
   if (new Date().getUTCDate() !== 1) return;
@@ -635,6 +677,7 @@ export async function runDailyNotifications(): Promise<void> {
   try { await sendSubscriptionReminders(); }            catch (err) { log.error("falha sub reminders", err); }
   try { await sendTrialReminders(); }                   catch (err) { log.error("falha trial reminders", err); }
   try { await sendRecorrentesAlert(); }                 catch (err) { log.error("falha alerta recorrentes", err); }
+  try { await sendMonthlyBillsReminder(); }             catch (err) { log.error("falha lembrete contas mes", err); }
   try { await sendInactivityNotifications(); }          catch (err) { log.error("falha notif inatividade", err); }
   try { await sendMonthEndNotifications(); }             catch (err) { log.error("falha notif fim mes", err); }
   try { await sendGoalStagnationNotifications(); }       catch (err) { log.error("falha notif meta parada", err); }
