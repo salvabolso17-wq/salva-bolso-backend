@@ -245,7 +245,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   // Consulta de saldo via linguagem natural
   if (
     !temNumero &&
-    /quanto\s+(tenho|sobrou|resta|restou|tenho\s+de\s+saldo)|quanto\s+gastei\s+(esse|este|no)\s+m[eê]s|o\s+que\s+sobrou|quanto\s+est[aá]\s+sobrando|saldo\s+do\s+m[eê]s|quero\s+(ver\s+)?o\s+saldo|meu\s+saldo/.test(t)
+    /quanto\s+(tenho|sobrou|resta|restou|tenho\s+de\s+saldo)|quanto\s+gastei\s+(esse|este|no)\s+m[eê]s|o\s+que\s+sobrou|quanto\s+est[aá]\s+sobrando|saldo\s+do\s+m[eê]s|quero\s+(ver\s+)?o\s+saldo|meu\s+saldo|quero\s+ver\s+o?\s*(meu\s+)?saldo/.test(t)
   ) {
     return await handleSaldoCommand(user, telefone);
   }
@@ -1269,7 +1269,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       log.error("falha classifyIntentWithAI", err, { userId: user.id });
     }
 
-    if (/lembr[ae]r?|lembrete|notific|agendar|avisa[rr]?|me avisa/i.test(message.texto)) {
+    if (/lembr[ae]|lembrete|notific|agendar|me avisa|me lembra/i.test(message.texto)) {
       await whatsapp.sendText({
         to: message.telefone,
         text: "Lembretes automáticos chegam em breve! 🔔\n\nPor enquanto, use _próximas_ para ver suas contas do mês."
