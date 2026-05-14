@@ -1269,6 +1269,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       log.error("falha classifyIntentWithAI", err, { userId: user.id });
     }
 
+    if (/lembr[ae]r?|lembrete|notific|agendar|avisa[rr]?|me avisa/i.test(message.texto)) {
+      await whatsapp.sendText({
+        to: message.telefone,
+        text: "Lembretes automáticos chegam em breve! 🔔\n\nPor enquanto, use _próximas_ para ver suas contas do mês."
+      });
+      return { success: false, userId: user.id, erro: "lembrete nao disponivel" };
+    }
+
     try {
       await whatsapp.sendText({ to: message.telefone, text: buildContextualHint(message.texto) });
     } catch (err) {

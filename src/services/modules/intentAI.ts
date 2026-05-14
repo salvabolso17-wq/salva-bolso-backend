@@ -31,7 +31,7 @@ Comandos:
 - desafio: desafio de economia
 - previsao: previsão do mês, estimativa
 - categorias: listar categorias
-- unknown: nenhum comando se aplica
+- unknown: pedidos de lembrete, notificação, agendamento, funcionalidades inexistentes, perguntas fora do escopo financeiro
 
 Responda APENAS com o nome do comando. Nada mais.`;
 
