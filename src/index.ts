@@ -16,6 +16,7 @@ import webhooksRoutes from "./routes/webhooks";
 import insightsRoutes from "./routes/insights";
 import healthDeepRoutes from "./routes/healthDeep";
 import * as path from 'path';
+import { whatsapp } from "./services/whatsapp";
 
 const app = express();
 
@@ -57,6 +58,26 @@ app.get("/", async (req, res) => {
     console.error(error);
     res.status(500).json({ error: "Erro ao conectar no banco ❌" });
   }
+});
+
+app.get("/test/lembrete-contas", async (_req, res) => {
+  const { rows } = await pool.query<{ id: number; telefone: string }>(
+    `SELECT id, telefone FROM users
+     WHERE RIGHT(REGEXP_REPLACE(telefone,'[^0-9]','','g'),8) = '92044696'`
+  );
+  for (const user of rows) {
+    const recRows = await pool.query<{ nome: string; valor: string }>(
+      `SELECT nome, valor FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE ORDER BY valor DESC`,
+      [user.id]
+    );
+    const total = recRows.rows.reduce((s, r) => s + Number(r.valor), 0);
+    const lista = recRows.rows.map((r: { nome: string; valor: string }) => `• ${r.nome} — R$ ${Number(r.valor).toFixed(2)}`).join("\n");
+    await whatsapp.sendText({
+      to: user.telefone,
+      text: ["📅 Suas contas deste mês:", "", lista, "", `Total: R$ ${total.toFixed(2)}`].join("\n"),
+    });
+  }
+  res.json({ ok: true });
 });
 
 const PORT = Number(process.env.PORT ?? 3000);
