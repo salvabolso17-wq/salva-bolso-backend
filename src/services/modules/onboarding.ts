@@ -113,11 +113,11 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
     try {
       await pool.query(
         `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
-         VALUES ($1, 'saida', $2, $3, $4)`,
-        [user.id, parsed.valor, parsed.categoria ?? "Outros", descricao]
+         VALUES ($1, 'saida', $2, 'Moradia', $3)`,
+        [user.id, parsed.valor, descricao]
       );
     } catch (e) {
-      log.error("erro ao inserir transaction no onboarding", e);
+      log.error("erro ao inserir transaction da conta fixa no onboarding", e);
     }
 
     const msg = [

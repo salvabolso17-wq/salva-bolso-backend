@@ -32,6 +32,15 @@ export async function handleConfirmarRecorrente(user: UserRow, telefone: string,
       const items = txIds as { nome: string; valor: number; frequencia: string }[];
       for (const item of items) {
         await upsertRecorrente(user.id, item.nome, item.valor, item.frequencia);
+        try {
+          await pool.query(
+            `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+             VALUES ($1, 'saida', $2, 'Moradia', $3)`,
+            [user.id, item.valor, item.nome]
+          );
+        } catch (e) {
+          log.error("erro ao inserir transaction da conta fixa no onboarding", e);
+        }
       }
       recordAction(user.id, "created_recurring");
       setLastCommand(user.id, "recorrentes");
@@ -48,6 +57,15 @@ export async function handleConfirmarRecorrente(user: UserRow, telefone: string,
     // Objeto único → fluxo original
     const data = txIds as { nome: string; valor: number; frequencia: string };
     await upsertRecorrente(user.id, data.nome, data.valor, data.frequencia);
+    try {
+      await pool.query(
+        `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+         VALUES ($1, 'saida', $2, 'Moradia', $3)`,
+        [user.id, data.valor, data.nome]
+      );
+    } catch (e) {
+      log.error("erro ao inserir transaction da conta fixa no onboarding", e);
+    }
     const nome = capitalizeFirst(data.nome);
     recordAction(user.id, "created_recurring");
     setLastCommand(user.id, "recorrentes");
@@ -100,6 +118,15 @@ export async function handleConfirmarRecorrenteMulti(user: UserRow, telefone: st
   let totalFixo = 0;
   for (const item of selectedItems) {
     await upsertRecorrente(user.id, item.nome, item.valor, item.frequencia);
+    try {
+      await pool.query(
+        `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+         VALUES ($1, 'saida', $2, 'Moradia', $3)`,
+        [user.id, item.valor, item.nome]
+      );
+    } catch (e) {
+      log.error("erro ao inserir transaction da conta fixa no onboarding", e);
+    }
     totalFixo += item.valor;
   }
 
