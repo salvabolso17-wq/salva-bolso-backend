@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Salva Bolso — Controle financeiro pelo WhatsApp</title>
+    <meta name="description" content="Organize suas finanças sem planilha e sem app. Mande mensagem no WhatsApp e o Salva Bolso registra tudo. Teste grátis por 7 dias.">
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Salva Bolso — Controle financeiro pelo WhatsApp">
+    <meta property="og:description" content="Organize suas finanças sem planilha e sem app. Mande mensagem no WhatsApp e o Salva Bolso registra tudo. Teste grátis por 7 dias.">
+    <meta property="og:image" content="/logo.png">
+    <meta property="og:url" content="https://salvabolso.com/lp.html">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Salva Bolso — Controle financeiro pelo WhatsApp">
+    <meta name="twitter:description" content="Organize suas finanças sem planilha e sem app. Teste grátis por 7 dias.">
+    <meta name="twitter:image" content="/logo.png">
+
+    <link rel="icon" href="/favicon.ico">
+
+    <!--
+    ====== META PIXEL (Facebook) — PLACEHOLDER ======
+    <script>
+      !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+      n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
+      n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+      t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,
+      document,'script','https://connect.facebook.net/en_US/fbevents.js');
+      fbq('init', 'YOUR_PIXEL_ID');
+      fbq('track', 'PageView');
+    </script>
+    <noscript><img height="1" width="1" style="display:none"
+      src="https://www.facebook.com/tr?id=YOUR_PIXEL_ID&ev=PageView&noscript=1"/></noscript>
+    ===================================================
+    -->
+
+    <!--
+    ====== GOOGLE TAG (gtag.js) — PLACEHOLDER ======
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-XXXXXXXXXX');
+    </script>
+    =================================================
+    -->
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0b1220;
+            color: #e9eef7;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            -webkit-tap-highlight-color: transparent;
+        }
+        a { color: inherit; text-decoration: none; }
+        img { max-width: 100%; height: auto; display: block; }
+
+        .container { max-width: 480px; margin: 0 auto; padding: 24px 20px 48px; }
+
+        .brand {
+            display: flex; align-items: center; gap: 10px;
+            font-weight: 700; font-size: 18px; margin-bottom: 28px;
+        }
+        .brand-logo {
+            width: 36px; height: 36px; border-radius: 10px;
+            background: linear-gradient(135deg,#25D366,#128C7E);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px;
+        }
+
+        .hero h1 {
+            font-size: 30px; line-height: 1.15; margin: 0 0 14px;
+            letter-spacing: -0.5px;
+        }
+        .hero h1 .hl { color: #25D366; }
+        .hero p.sub {
+            font-size: 17px; color: #b9c4d6; margin: 0 0 24px;
+        }
+
+        .cta {
+            display: block; width: 100%;
+            background: #25D366; color: #0b1220;
+            font-weight: 700; font-size: 17px;
+            padding: 16px 18px; border-radius: 14px;
+            text-align: center;
+            box-shadow: 0 8px 24px rgba(37,211,102,0.35);
+            transition: transform .15s ease, box-shadow .15s ease;
+        }
+        .cta:active { transform: scale(0.98); }
+        .cta .wa-icon { display: inline-block; margin-right: 8px; }
+
+        .trust {
+            margin-top: 12px; text-align: center;
+            font-size: 13px; color: #8e9bb3;
+        }
+
+        .badges {
+            display: flex; gap: 8px; flex-wrap: wrap;
+            margin: 18px 0 8px;
+        }
+        .badge {
+            background: rgba(37,211,102,0.12);
+            color: #25D366; font-size: 12px; font-weight: 600;
+            padding: 6px 10px; border-radius: 999px;
+            border: 1px solid rgba(37,211,102,0.25);
+        }
+
+        section { margin-top: 36px; }
+        h2 { font-size: 22px; margin: 0 0 14px; letter-spacing: -0.3px; }
+
+        .features { display: grid; gap: 12px; }
+        .feature {
+            background: #131c30; border: 1px solid #1f2a44;
+            padding: 14px 16px; border-radius: 14px;
+            display: flex; gap: 12px; align-items: flex-start;
+        }
+        .feature .ico {
+            font-size: 22px; line-height: 1; flex-shrink: 0;
+            width: 36px; height: 36px; display: flex;
+            align-items: center; justify-content: center;
+            background: rgba(37,211,102,0.12); border-radius: 10px;
+        }
+        .feature h3 { margin: 0 0 4px; font-size: 16px; }
+        .feature p { margin: 0; font-size: 14px; color: #b9c4d6; }
+
+        .how { display: grid; gap: 14px; }
+        .step {
+            background: #131c30; border: 1px solid #1f2a44;
+            padding: 14px 16px; border-radius: 14px;
+            display: flex; gap: 12px; align-items: flex-start;
+        }
+        .step .num {
+            background: #25D366; color: #0b1220;
+            font-weight: 700; width: 28px; height: 28px;
+            border-radius: 50%; display: flex;
+            align-items: center; justify-content: center;
+            flex-shrink: 0; font-size: 14px;
+        }
+        .step h3 { margin: 0 0 4px; font-size: 15px; }
+        .step p { margin: 0; font-size: 14px; color: #b9c4d6; }
+
+        .chat {
+            background: #131c30; border: 1px solid #1f2a44;
+            border-radius: 16px; padding: 14px;
+            display: grid; gap: 8px;
+        }
+        .msg {
+            padding: 10px 12px; border-radius: 12px;
+            font-size: 14px; max-width: 85%;
+        }
+        .msg.user { background: #25D366; color: #0b1220; justify-self: end; border-bottom-right-radius: 4px; }
+        .msg.bot  { background: #1f2a44; color: #e9eef7; justify-self: start; border-bottom-left-radius: 4px; }
+
+        .price {
+            background: linear-gradient(135deg, #131c30, #182648);
+            border: 1px solid #25D366;
+            border-radius: 16px; padding: 22px; text-align: center;
+        }
+        .price .tag {
+            display: inline-block; background: #25D366; color: #0b1220;
+            padding: 4px 10px; border-radius: 999px;
+            font-size: 12px; font-weight: 700; margin-bottom: 10px;
+        }
+        .price .free { font-size: 28px; font-weight: 800; margin: 4px 0; }
+        .price .after { font-size: 14px; color: #b9c4d6; margin-bottom: 16px; }
+
+        .faq details {
+            background: #131c30; border: 1px solid #1f2a44;
+            border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
+        }
+        .faq summary {
+            cursor: pointer; font-weight: 600; font-size: 15px;
+            list-style: none;
+        }
+        .faq summary::-webkit-details-marker { display: none; }
+        .faq summary::after { content: "+"; float: right; color: #25D366; font-size: 20px; line-height: 1; }
+        .faq details[open] summary::after { content: "–"; }
+        .faq p { margin: 10px 0 0; font-size: 14px; color: #b9c4d6; }
+
+        footer {
+            margin-top: 40px; padding-top: 20px;
+            border-top: 1px solid #1f2a44;
+            text-align: center; font-size: 12px; color: #6f7a92;
+        }
+
+        .sticky-cta {
+            position: fixed; left: 0; right: 0; bottom: 0;
+            padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+            background: linear-gradient(180deg, rgba(11,18,32,0) 0%, rgba(11,18,32,0.95) 30%);
+            z-index: 50;
+        }
+        .sticky-cta .cta { box-shadow: 0 10px 30px rgba(37,211,102,0.45); }
+        body { padding-bottom: 96px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <div class="brand">
+            <div class="brand-logo">💰</div>
+            <span>Salva Bolso</span>
+        </div>
+
+        <section class="hero">
+            <div class="badges">
+                <span class="badge">✓ 7 dias grátis</span>
+                <span class="badge">✓ Sem cartão</span>
+                <span class="badge">✓ Direto no WhatsApp</span>
+            </div>
+            <h1>Controle suas finanças <span class="hl">só mandando mensagem</span> no WhatsApp.</h1>
+            <p class="sub">Sem planilha. Sem baixar app. Você manda “gastei 30 no almoço” e o Salva Bolso registra, categoriza e te mostra para onde seu dinheiro está indo.</p>
+
+            <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
+                <span class="wa-icon">💬</span>Testar grátis no WhatsApp
+            </a>
+            <p class="trust">Comece em menos de 30 segundos · 7 dias grátis</p>
+        </section>
+
+        <section>
+            <h2>Tudo que você precisa, em uma conversa</h2>
+            <div class="features">
+                <div class="feature">
+                    <div class="ico">⚡</div>
+                    <div>
+                        <h3>Registro em segundos</h3>
+                        <p>“Gastei 50 no mercado” já vira lançamento categorizado.</p>
+                    </div>
+                </div>
+                <div class="feature">
+                    <div class="ico">📊</div>
+                    <div>
+                        <h3>Relatórios automáticos</h3>
+                        <p>Resumo do dia, da semana e do mês na hora que você pedir.</p>
+                    </div>
+                </div>
+                <div class="feature">
+                    <div class="ico">🔁</div>
+                    <div>
+                        <h3>Gastos recorrentes</h3>
+                        <p>Aluguel, assinaturas e contas fixas lançados automaticamente.</p>
+                    </div>
+                </div>
+                <div class="feature">
+                    <div class="ico">🔔</div>
+                    <div>
+                        <h3>Lembretes mensais</h3>
+                        <p>Você é avisado antes do vencimento. Nunca mais paga juros bobo.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Como funciona</h2>
+            <div class="how">
+                <div class="step">
+                    <div class="num">1</div>
+                    <div>
+                        <h3>Abre o WhatsApp</h3>
+                        <p>Clica no botão e começa a conversar com o bot.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="num">2</div>
+                    <div>
+                        <h3>Manda seus gastos</h3>
+                        <p>Em linguagem natural, do jeito que você fala.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="num">3</div>
+                    <div>
+                        <h3>Recebe insights</h3>
+                        <p>Saiba quanto gastou, em quê e quanto sobra.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Veja na prática</h2>
+            <div class="chat">
+                <div class="msg user">gastei 35 no ifood</div>
+                <div class="msg bot">Anotado ✅ R$ 35,00 em Alimentação. Você já gastou R$ 248 nesta categoria este mês.</div>
+                <div class="msg user">quanto gastei essa semana?</div>
+                <div class="msg bot">Esta semana: R$ 412,30. Maior categoria: Alimentação (R$ 198). Quer o detalhe?</div>
+            </div>
+        </section>
+
+        <section>
+            <div class="price">
+                <span class="tag">OFERTA DE LANÇAMENTO</span>
+                <div class="free">7 dias grátis</div>
+                <div class="after">Depois, a partir de R$ 8,33/mês. Cancela quando quiser.</div>
+                <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
+                    <span class="wa-icon">💬</span>Começar agora
+                </a>
+            </div>
+        </section>
+
+        <section class="faq">
+            <h2>Perguntas frequentes</h2>
+            <details>
+                <summary>Preciso baixar algum app?</summary>
+                <p>Não. Tudo acontece dentro do WhatsApp que você já usa.</p>
+            </details>
+            <details>
+                <summary>Preciso colocar cartão para testar?</summary>
+                <p>Não. Os 7 dias são totalmente grátis e sem cadastro de cartão.</p>
+            </details>
+            <details>
+                <summary>Meus dados ficam seguros?</summary>
+                <p>Sim. Seus dados são criptografados e nunca compartilhados.</p>
+            </details>
+            <details>
+                <summary>Posso cancelar quando quiser?</summary>
+                <p>Sim. Você cancela mandando uma mensagem para o próprio bot.</p>
+            </details>
+        </section>
+
+        <footer>
+            © Salva Bolso · Controle financeiro no WhatsApp
+        </footer>
+    </div>
+
+    <div class="sticky-cta">
+        <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
+            <span class="wa-icon">💬</span>Testar grátis agora
+        </a>
+    </div>
+</body>
+</html>
