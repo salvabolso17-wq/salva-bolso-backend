@@ -545,13 +545,16 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       const boas_vindas = [
         saudacao,
         "",
-        "Você ganhou *7 dias grátis* pra ver pra onde teu dinheiro vai todo mês.",
+        "🎁 *7 dias grátis* começam agora.",
+        "✨ Sem cartão. Sem compromisso.",
         "",
-        "Qual sua *renda mensal*?",
+        "Vou te mostrar pra onde teu dinheiro vai todo mês.",
+        "",
+        "Qual sua *renda mensal*? 💰",
         "💡 _Ex: 3500_",
         "",
-        "_Fica só comigo. Ou mande 'pular' pra começar pelos gastos._",
-        "_Sem cartão. Sem compromisso._",
+        "🔒 _Fica só comigo._",
+        "⏭️ _Ou mande 'pular' pra começar pelos gastos._",
       ].join("\n");
 
       await pool.query(

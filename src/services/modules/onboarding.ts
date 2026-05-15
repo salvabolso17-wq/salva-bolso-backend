@@ -32,14 +32,13 @@ export async function handleOnboardingRenda(user: UserRow, telefone: string, tex
     );
 
     const msg = [
-      "Tranquilo, dá pra informar depois. ⏭️",
+      "Tranquilo, dá pra informar depois ⏭️",
       "",
-      "Tem alguma *conta fixa* todo mês?",
+      "🏠 Tem alguma *conta fixa* todo mês?",
       "_Aluguel, luz, internet, celular..._",
       "",
       "💡 _Ex: aluguel 1200_",
-      "",
-      "_(ou 'pular')_",
+      "⏭️ _ou mande 'pular'_",
     ].join("\n");
 
     await whatsapp.sendText({ to: telefone, text: msg });
@@ -74,12 +73,11 @@ export async function handleOnboardingRenda(user: UserRow, telefone: string, tex
   const msg = [
     `💰 Renda anotada: *${fmtValor(valor)}*`,
     "",
-    "Tem alguma *conta fixa* todo mês?",
+    "🏠 Tem alguma *conta fixa* todo mês?",
     "_Aluguel, luz, internet, celular..._",
     "",
     "💡 _Ex: aluguel 1200_",
-    "",
-    "_(ou 'pular')_",
+    "⏭️ _ou mande 'pular'_",
   ].join("\n");
 
   await whatsapp.sendText({ to: telefone, text: msg });
@@ -98,7 +96,7 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
       "Tudo pronto! 🎉",
       "",
       "Manda teu primeiro gasto:",
-      "🛒 _50 mercado_ • 🚗 _35 uber_",
+      "🛒 _50 mercado_ • 🚗 _35 uber_ • 💊 _120 farmácia_",
     ].join("\n");
     await whatsapp.sendText({ to: telefone, text: msg });
     return { success: false, userId: user.id, erro: "onboarding finalizado (skip fixas)" };
