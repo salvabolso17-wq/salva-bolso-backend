@@ -544,16 +544,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       const saudacao  = nome ? `Oi, ${nome}! 👋` : `Oi! 👋`;
       const boas_vindas = [
         saudacao,
-        "Bem-vindo ao *Salva Bolso* ✨",
         "",
-        "🎁 *Seus 7 dias grátis começam agora.*",
-        "Sem cartão. Você só paga se quiser continuar depois.",
+        "Você ganhou *7 dias grátis* pra ver pra onde teu dinheiro vai todo mês.",
         "",
-        "Pra eu te ajudar a controlar seu dinheiro, qual sua *renda mensal aproximada*? 💰",
-        "",
+        "Qual sua *renda mensal*?",
         "💡 _Ex: 3500_",
         "",
-        "_(Se não quiser informar agora, é só mandar 'pular' ⏭️)_"
+        "_Fica só comigo. Ou mande 'pular' pra começar pelos gastos._",
+        "_Sem cartão. Sem compromisso._",
       ].join("\n");
 
       await pool.query(

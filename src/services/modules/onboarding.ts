@@ -32,14 +32,14 @@ export async function handleOnboardingRenda(user: UserRow, telefone: string, tex
     );
 
     const msg = [
-      "Sem problemas! ⏭️ Você pode informar sua renda depois mandando: _'recebo 3000'_.",
+      "Tranquilo, dá pra informar depois. ⏭️",
       "",
-      "E você tem alguma *conta fixa mensal*? 📅 (Aluguel, luz, internet, etc)",
+      "Tem alguma *conta fixa* todo mês?",
+      "_Aluguel, luz, internet, celular..._",
       "",
-      "Se tiver, me manda a principal para eu já deixar agendada:",
       "💡 _Ex: aluguel 1200_",
       "",
-      "_(Ou mande 'pular' para começar a usar 🚀)_"
+      "_(ou 'pular')_",
     ].join("\n");
 
     await whatsapp.sendText({ to: telefone, text: msg });
@@ -72,14 +72,14 @@ export async function handleOnboardingRenda(user: UserRow, telefone: string, tex
   );
 
   const msg = [
-    `💰 Boa! Renda de *${fmtValor(valor)}* registrada com sucesso.`,
+    `💰 Renda anotada: *${fmtValor(valor)}*`,
     "",
-    "Agora, você tem alguma *conta fixa mensal*? 📅 (Aluguel, luz, internet, celular...)",
+    "Tem alguma *conta fixa* todo mês?",
+    "_Aluguel, luz, internet, celular..._",
     "",
-    "Me manda a principal para eu já deixar agendada:",
     "💡 _Ex: aluguel 1200_",
     "",
-    "_(Ou mande 'pular' ⏭️)_"
+    "_(ou 'pular')_",
   ].join("\n");
 
   await whatsapp.sendText({ to: telefone, text: msg });
@@ -97,12 +97,8 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
     const msg = [
       "Tudo pronto! 🎉",
       "",
-      `💰 Tua renda registrada: ${fmtValor(renda)}`,
-      "",
-      "Agora me manda o primeiro gasto de hoje pra eu te mostrar como categorizo:",
-      "🛒 _50 mercado_ • 🚗 _35 uber_ • 💊 _120 farmácia_",
-      "",
-      "Conforme você for usando, vou montando teu painel financeiro automaticamente.",
+      "Manda teu primeiro gasto:",
+      "🛒 _50 mercado_ • 🚗 _35 uber_",
     ].join("\n");
     await whatsapp.sendText({ to: telefone, text: msg });
     return { success: false, userId: user.id, erro: "onboarding finalizado (skip fixas)" };
