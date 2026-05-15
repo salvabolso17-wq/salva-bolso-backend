@@ -153,7 +153,7 @@ export async function handleMultiLineTransactions(
             continue;
           }
           const jaRec = await pool.query(
-            `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(TRIM(nome)) = $2 LIMIT 1`,
+            `SELECT 1 FROM lembretes WHERE user_id = $1 AND LOWER(TRIM(titulo)) = $2 AND fixa = TRUE AND status = 'pendente' LIMIT 1`,
             [user.id, r.descricao.toLowerCase().trim()]
           );
           if (jaRec.rows.length > 0) {
@@ -178,7 +178,7 @@ export async function handleMultiLineTransactions(
           const r        = candidatos[0];
           const descNorm = r.descricao.toLowerCase().trim();
           const jaRecDB  = await pool.query(
-            `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(TRIM(nome)) = $2 LIMIT 1`,
+            `SELECT 1 FROM lembretes WHERE user_id = $1 AND LOWER(TRIM(titulo)) = $2 AND fixa = TRUE AND status = 'pendente' LIMIT 1`,
             [user.id, descNorm]
           );
           if (jaRecDB.rows.length === 0) {

@@ -174,7 +174,7 @@ export async function checkAndSendSmartInsights(
     );
     if (Number(freqRow.rows[0].count) >= 3) {
       const jaRec = await pool.query(
-        `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(nome) = $2 AND ativo = TRUE LIMIT 1`,
+        `SELECT 1 FROM lembretes WHERE user_id = $1 AND LOWER(titulo) = $2 AND fixa = TRUE AND status IN ('pendente','pago') LIMIT 1`,
         [userId, descNorm]
       );
       if (jaRec.rows.length === 0) {

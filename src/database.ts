@@ -105,6 +105,8 @@ export async function createTables() {
       );
     `);
 
+    // DEPRECATED: recurring_expenses substituída por lembretes (planejado drop em 30 dias após cutover).
+    // Mantida apenas como fallback histórico — sem novas escritas.
     await step("CREATE recurring_expenses", `
       CREATE TABLE IF NOT EXISTS recurring_expenses (
         id          SERIAL PRIMARY KEY,
@@ -210,11 +212,68 @@ export async function createTables() {
       );
     `);
 
+    // Migração one-shot: recurring_expenses → lembretes (idempotente)
+    await migrarRecorrentesParaLembretes();
+
     console.log("[SCHEMA] createTables concluído ✅");
   } catch (error) {
     console.error("[SCHEMA] ERRO ao criar/migrar schema — abortando boot:");
     console.error(error);
     throw error;
+  }
+}
+
+async function migrarRecorrentesParaLembretes(): Promise<void> {
+  try {
+    const r = await pool.query<{ inserted: string }>(`
+      WITH novos AS (
+        INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status, ultimo_aviso_em)
+        SELECT
+          re.user_id,
+          re.nome AS titulo,
+          re.valor,
+          -- dia_vencimento: dia do criado_em, clampado a 28 (evita erro com fev/30/31)
+          LEAST(EXTRACT(DAY FROM re.criado_em)::int, 28) AS dia_vencimento,
+          TRUE AS fixa,
+          -- proxima_data: próxima ocorrência do dia a partir de hoje BRT, clampado
+          (
+            CASE
+              WHEN LEAST(EXTRACT(DAY FROM re.criado_em)::int, 28) >= EXTRACT(DAY FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int
+              THEN make_date(
+                EXTRACT(YEAR  FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int,
+                EXTRACT(MONTH FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int,
+                LEAST(EXTRACT(DAY FROM re.criado_em)::int, 28)
+              )
+              ELSE make_date(
+                EXTRACT(YEAR FROM ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date + INTERVAL '1 month'))::int,
+                EXTRACT(MONTH FROM ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date + INTERVAL '1 month'))::int,
+                LEAST(EXTRACT(DAY FROM re.criado_em)::int, 28)
+              )
+            END
+          ) AS proxima_data,
+          'pendente' AS status,
+          -- silencia avisos no primeiro ciclo pós-migração
+          (NOW() AT TIME ZONE 'America/Sao_Paulo')::date AS ultimo_aviso_em
+        FROM recurring_expenses re
+        WHERE re.ativo = TRUE
+          AND (re.frequencia IS NULL OR re.frequencia = 'mensal')
+          AND NOT EXISTS (
+            SELECT 1 FROM lembretes l
+            WHERE l.user_id = re.user_id
+              AND LOWER(l.titulo) = LOWER(re.nome)
+              AND l.fixa = TRUE
+              AND l.status IN ('pendente','pago')
+          )
+        RETURNING 1
+      )
+      SELECT COUNT(*)::text AS inserted FROM novos;
+    `);
+    const n = Number(r.rows[0]?.inserted ?? 0);
+    if (n > 0) console.log(`[MIGRATION] recurring_expenses→lembretes: ${n} migrados`);
+    else       console.log(`[MIGRATION] recurring_expenses→lembretes: nada novo`);
+  } catch (err) {
+    console.error("[MIGRATION] recurring_expenses→lembretes falhou:", err);
+    throw err;
   }
 }
 

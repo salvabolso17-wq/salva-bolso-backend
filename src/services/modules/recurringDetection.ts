@@ -147,9 +147,9 @@ export async function checkAndSuggestRecorrente(userId: number, telefone: string
     const mesAtual = new Date(now.getFullYear(), now.getMonth(), 1);
     const sentinel = `rec_suggest_${descNorm.replace(/\s+/g, "_").slice(0, 40)}`;
 
-    // Não sugerir se já é recorrente cadastrado
+    // Não sugerir se já é lembrete fixo cadastrado
     const jaRecorrente = await pool.query(
-      `SELECT 1 FROM recurring_expenses WHERE user_id = $1 AND LOWER(nome) = $2 LIMIT 1`,
+      `SELECT 1 FROM lembretes WHERE user_id = $1 AND LOWER(titulo) = $2 AND fixa = TRUE AND status IN ('pendente','pago') LIMIT 1`,
       [userId, descNorm]
     );
     if (jaRecorrente.rows.length > 0) return false;
@@ -228,17 +228,26 @@ export async function checkAndSuggestRecorrente(userId: number, telefone: string
   }
 }
 
-// Upsert case-insensitive: UPDATE primeiro, INSERT só se nenhuma linha existir com mesmo nome (qualquer casing)
+// Upsert case-insensitive em lembretes: atualiza valor do pendente existente, ou cria novo.
+// frequencia é ignorada (lembretes só suporta mensal); dia_vencimento defaulta para hoje BRT.
 export async function upsertRecorrente(userId: number, nome: string, valor: number, frequencia: string): Promise<void> {
+  void frequencia;
   const upd = await pool.query(
-    `UPDATE recurring_expenses SET valor = $1, frequencia = $2, ativo = TRUE
-     WHERE user_id = $3 AND LOWER(TRIM(nome)) = LOWER(TRIM($4))`,
-    [valor, frequencia, userId, nome]
+    `UPDATE lembretes SET valor = $1, atualizado_em = NOW()
+     WHERE user_id = $2 AND LOWER(TRIM(titulo)) = LOWER(TRIM($3))
+       AND fixa = TRUE AND status = 'pendente'`,
+    [valor, userId, nome]
   );
   if ((upd.rowCount ?? 0) === 0) {
     await pool.query(
-      `INSERT INTO recurring_expenses (user_id, nome, valor, frequencia) VALUES ($1, $2, $3, $4)`,
-      [userId, nome, valor, frequencia]
+      `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status, ultimo_aviso_em)
+       SELECT $1, $2, $3,
+              LEAST(EXTRACT(DAY FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int, 28),
+              TRUE,
+              ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date + INTERVAL '1 month')::date,
+              'pendente',
+              (NOW() AT TIME ZONE 'America/Sao_Paulo')::date`,
+      [userId, nome, valor]
     );
   }
 }
@@ -249,10 +258,10 @@ export async function checkRecorrenteDuplicado(
   valor: number,
 ): Promise<{ nome: string; nomeOriginal: string; recValor: number; sameValue: boolean } | null> {
   try {
-    const res = await pool.query<{ nome: string; valor: string }>(
-      `SELECT nome, valor FROM recurring_expenses
-       WHERE user_id = $1 AND ativo = TRUE
-         AND LOWER(TRIM(nome)) = LOWER(TRIM($2))
+    const res = await pool.query<{ titulo: string; valor: string }>(
+      `SELECT titulo, valor FROM lembretes
+       WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente'
+         AND LOWER(TRIM(titulo)) = LOWER(TRIM($2))
        LIMIT 1`,
       [userId, descricao]
     );
@@ -260,7 +269,7 @@ export async function checkRecorrenteDuplicado(
     const row      = res.rows[0];
     const recValor = parseFloat(row.valor);
     const sameValue = Math.abs(recValor - valor) < 0.50;
-    return { nome: capitalizeFirst(row.nome), nomeOriginal: row.nome, recValor, sameValue };
+    return { nome: capitalizeFirst(row.titulo), nomeOriginal: row.titulo, recValor, sameValue };
   } catch (err) {
     log.error("checkRecorrenteDuplicado falhou", err, { userId });
     return null;

@@ -444,7 +444,7 @@ async function sendRecorrentesAlert(): Promise<void> {
     SELECT DISTINCT u.id, u.telefone
     FROM users u
     WHERE (u.subscription_status = 'active' OR (u.subscription_status = 'trial' AND u.trial_ends_at > NOW()))
-      AND EXISTS (SELECT 1 FROM recurring_expenses WHERE user_id = u.id AND ativo = TRUE)
+      AND EXISTS (SELECT 1 FROM lembretes WHERE user_id = u.id AND fixa = TRUE AND status = 'pendente')
       AND NOT EXISTS (
         SELECT 1 FROM sent_insights
         WHERE user_id = u.id AND categoria = 'alerta_recorrentes' AND mes_referencia = $1
@@ -455,7 +455,9 @@ async function sendRecorrentesAlert(): Promise<void> {
     if (!(await tryMarkSent(user.id, "alerta_recorrentes", sentinel))) continue;
     try {
       const recRows = await pool.query<{ nome: string; valor: string }>(
-        `SELECT nome, valor FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE ORDER BY valor DESC`,
+        `SELECT titulo AS nome, valor FROM lembretes
+         WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente'
+         ORDER BY valor DESC`,
         [user.id]
       );
       const total = recRows.rows.reduce((s, r) => s + Number(r.valor), 0);
@@ -488,7 +490,7 @@ async function sendMonthlyBillsReminder(): Promise<void> {
     SELECT DISTINCT u.id, u.telefone
     FROM users u
     WHERE (u.subscription_status = 'active' OR (u.subscription_status = 'trial' AND u.trial_ends_at > NOW()))
-      AND EXISTS (SELECT 1 FROM recurring_expenses WHERE user_id = u.id AND ativo = TRUE)
+      AND EXISTS (SELECT 1 FROM lembretes WHERE user_id = u.id AND fixa = TRUE AND status = 'pendente')
       AND NOT EXISTS (
         SELECT 1 FROM sent_insights
         WHERE user_id = u.id AND categoria = 'lembrete_contas_mes' AND mes_referencia = $1
@@ -499,7 +501,9 @@ async function sendMonthlyBillsReminder(): Promise<void> {
     if (!(await tryMarkSent(user.id, "lembrete_contas_mes", sentinel))) continue;
     try {
       const recRows = await pool.query<{ nome: string; valor: string }>(
-        `SELECT nome, valor FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE ORDER BY valor DESC`,
+        `SELECT titulo AS nome, valor FROM lembretes
+         WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente'
+         ORDER BY valor DESC`,
         [user.id]
       );
       const total = recRows.rows.reduce((s, r) => s + Number(r.valor), 0);
@@ -572,7 +576,7 @@ async function sendMonthlyScore(): Promise<void> {
           [user.id]
         ),
         pool.query<{ count: string }>(
-          `SELECT COUNT(*) AS count FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE`,
+          `SELECT COUNT(*) AS count FROM lembretes WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente'`,
           [user.id]
         ),
         pool.query<{ count: string }>(

@@ -98,16 +98,25 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
   // Tenta parsear como uma despesa. Se der certo, nós já guardamos como recorrente.
   const parsed = parseTransaction(textoTrim);
   if (parsed && parsed.tipo === "saida") {
-    // Insere como recorrente
+    // Insere como lembrete fixo (dia=hoje BRT, próximo mês). Usuário pode reajustar com "muda X pra dia Y".
     const descricao = parsed.descricao || "conta fixa";
     try {
       await pool.query(
-        `INSERT INTO recurring_expenses (user_id, nome, valor, frequencia)
-         VALUES ($1, $2, $3, 'mensal')`,
+        `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status, ultimo_aviso_em)
+         SELECT $1, $2, $3,
+                LEAST(EXTRACT(DAY FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int, 28),
+                TRUE,
+                ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date + INTERVAL '1 month')::date,
+                'pendente',
+                (NOW() AT TIME ZONE 'America/Sao_Paulo')::date
+         WHERE NOT EXISTS (
+           SELECT 1 FROM lembretes
+           WHERE user_id = $1 AND LOWER(titulo) = LOWER($2) AND fixa = TRUE AND status = 'pendente'
+         )`,
         [user.id, descricao, parsed.valor]
       );
     } catch (e) {
-      log.error("erro ao inserir recurring_expenses no onboarding", e);
+      log.error("erro ao inserir lembrete no onboarding", e);
     }
 
     try {

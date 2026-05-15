@@ -473,6 +473,17 @@ async function iniciarPorIntencao(user: UserRow, telefone: string, intencao: Lem
   return null;
 }
 
+// Inicia o fluxo de criação de lembrete com state parcial, pedindo o que falta.
+// Usado por detecção automática ("é fixo?" → "sim") pra perguntar o dia de vencimento.
+export async function iniciarFluxoCriacaoLembrete(
+  user: UserRow,
+  telefone: string,
+  parcial: { titulo?: string; valor?: number; dia?: number; fixa?: boolean },
+): Promise<ProcessResult> {
+  log.webhook("lembrete: iniciar criacao via parcial", { userId: user.id, parcial });
+  return await avancarCriar(user, telefone, { ...parcial });
+}
+
 export async function tryHandleLembretes(user: UserRow, telefone: string, texto: string): Promise<ProcessResult | null> {
   try {
     const ctx = await getContext(user.id);

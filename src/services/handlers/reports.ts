@@ -652,8 +652,10 @@ export async function handleBuscarCommand(user: UserRow, telefone: string, texto
 }
 
 export async function handleRecorrentesTotalCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
-  const result = await pool.query<{ nome: string; valor: string }>(
-    `SELECT nome, valor FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE ORDER BY criado_em ASC`,
+  const result = await pool.query<{ titulo: string; valor: string }>(
+    `SELECT titulo, valor FROM lembretes
+     WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente'
+     ORDER BY proxima_data ASC`,
     [user.id]
   );
 
@@ -664,7 +666,7 @@ export async function handleRecorrentesTotalCommand(user: UserRow, telefone: str
 
   const total = result.rows.reduce((sum, row) => sum + Number(row.valor), 0);
   const linhas = [`Total fixo por mês: ${fmtValor(total)}`, ""];
-  result.rows.forEach(row => linhas.push(`${row.nome} — ${fmtValor(Number(row.valor))}`));
+  result.rows.forEach(row => linhas.push(`${row.titulo} — ${fmtValor(Number(row.valor))}`));
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
