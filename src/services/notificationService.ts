@@ -383,8 +383,8 @@ const TRIAL_REMINDERS = [
 
 function buildTrialReminderText(daysAhead: number, plansBlock: string): string {
   const intro = daysAhead === 2
-    ? "Seu período de teste termina em 2 dias.\n\nSe quiser continuar organizando seus gastos:"
-    : "Seu período de teste termina hoje.\n\nPara continuar usando o Salva Bolso:";
+    ? "Seu teste grátis acaba em *2 dias* ⏰\n\nVocê já viu como é simples organizar seus gastos por aqui — sem planilha, sem app complicado.\n\nPra continuar usando:"
+    : "Seu teste grátis acaba hoje ⏰\n\nPra não perder seu histórico e continuar acompanhando teus gastos:";
   return plansBlock ? `${intro}\n\n${plansBlock}` : intro;
 }
 
