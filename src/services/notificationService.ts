@@ -40,37 +40,38 @@ function currentMonthStart(): Date {
 
 // Nudge de engajamento progressivo: D+1, D+3, D+7, D+14 dias sem registrar gasto.
 // Roda 1x/dia às 19h BRT. Após D+14, para até o usuário registrar algo novo.
+// Usuários que nunca registraram entram pelo mesmo cron (dias contados desde criado_em).
 const INACTIVITY_MARCOS = [1, 3, 7, 14] as const;
 
-function buildInactivityMessage(dias: number): string {
-  switch (dias) {
-    case 1:
-      return "Oi! Tudo bem? 👋\nFaz 1 dia que você não anota nada.\nJá gastou algo hoje? É só me contar.";
-    case 3:
-      return "3 dias sem dar notícia 😬\nSem registrar, fica difícil saber pra onde foi o dinheiro.\nManda o que gastou que eu organizo pra você.";
-    case 7:
-      return "⚠️ 1 semana sem registrar.\nEsse é o jeito mais rápido de perder o controle de novo.\nManda o último gasto que você lembra que eu te recoloco no eixo.";
-    case 14:
-      return "Vou parar de te incomodar por aqui.\nQuando quiser voltar, é só me mandar qualquer gasto.\nTô aqui. 🤝";
-    default:
-      return "";
-  }
-}
+const mensagensRetorno: Record<number, string> = {
+  1:  "Oi! Tudo bem? 👋\nFaz 1 dia que você não anota nada.\nJá gastou algo hoje? É só me contar.",
+  3:  "3 dias sem dar notícia 😬\nSem registrar, fica difícil saber pra onde foi o dinheiro.\nManda o que gastou que eu organizo pra você.",
+  7:  "⚠️ 1 semana sem registrar.\nEsse é o jeito mais rápido de perder o controle de novo.\nManda o último gasto que você lembra que eu te recoloco no eixo.",
+  14: "Vou parar de te incomodar por aqui.\nQuando quiser voltar, é só me mandar qualquer gasto.\nTô aqui. 🤝",
+};
+
+const mensagensPrimeiroUso: Record<number, string> = {
+  1:  "Oi! 👋\nVocê se cadastrou ontem mas ainda não testou nada.\nÉ super rápido: me manda agora \"gastei 20 no almoço\" que eu já te mostro como funciona.",
+  3:  "3 dias e ainda não experimentou 😬\nPrometo que vou facilitar sua vida.\nManda qualquer gasto que você teve hoje — só pra ver acontecendo.",
+  7:  "⚠️ 1 semana sem usar.\nOlha, se não funcionar pra você é só não responder. Mas pelo menos testa 1 vez.\n\"gastei X no Y\" — é só isso.",
+  14: "Tudo bem, vou parar de te chamar.\nSe um dia mudar de ideia, é só me mandar qualquer gasto.\nTô aqui. 🤝",
+};
 
 export async function sendInactivityNotifications(): Promise<{ elegiveis: number; enviados: number }> {
   let elegiveis = 0;
   let enviados = 0;
   try {
-    const { rows } = await pool.query<{ id: number; telefone: string; dias_sem_gasto: string | null; ultimo_nudge_em: string | null; ultimo_nudge_dias: number | null }>(`
+    const { rows } = await pool.query<{ id: number; telefone: string; dias_sem_gasto: string | null; ultimo_nudge_em: string | null; ultimo_nudge_dias: number | null; ja_registrou: boolean }>(`
       SELECT u.id,
              u.telefone,
-             (CURRENT_DATE - DATE(MAX(t.criado_em) AT TIME ZONE 'America/Sao_Paulo')) AS dias_sem_gasto,
+             (CURRENT_DATE - DATE(COALESCE(MAX(t.criado_em), u.criado_em) AT TIME ZONE 'America/Sao_Paulo')) AS dias_sem_gasto,
              u.ultimo_nudge_em::text AS ultimo_nudge_em,
-             u.ultimo_nudge_dias
+             u.ultimo_nudge_dias,
+             EXISTS (SELECT 1 FROM transactions t2 WHERE t2.user_id = u.id) AS ja_registrou
         FROM users u
-        JOIN transactions t ON t.user_id = u.id
-       GROUP BY u.id, u.telefone, u.ultimo_nudge_em, u.ultimo_nudge_dias
-       HAVING (CURRENT_DATE - DATE(MAX(t.criado_em) AT TIME ZONE 'America/Sao_Paulo')) = ANY($1::int[])
+        LEFT JOIN transactions t ON t.user_id = u.id
+       GROUP BY u.id, u.telefone, u.criado_em, u.ultimo_nudge_em, u.ultimo_nudge_dias
+       HAVING (CURRENT_DATE - DATE(COALESCE(MAX(t.criado_em), u.criado_em) AT TIME ZONE 'America/Sao_Paulo')) = ANY($1::int[])
     `, [INACTIVITY_MARCOS as unknown as number[]]);
 
     elegiveis = rows.length;
@@ -78,20 +79,22 @@ export async function sendInactivityNotifications(): Promise<{ elegiveis: number
     for (const user of rows) {
       const dias = Number(user.dias_sem_gasto ?? 0);
       const hojeISO = new Date().toISOString().slice(0, 10);
+      const fluxo = user.ja_registrou ? "retorno" : "primeiro_uso";
 
       // Skip se já nudgeou hoje OU se o último nudge foi exatamente para esse marco
       if (user.ultimo_nudge_em === hojeISO) {
-        console.log(`[NUDGE] user=${user.id} dias=${dias} status=skip-ja-hoje`);
+        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=skip-ja-hoje`);
         continue;
       }
       if (user.ultimo_nudge_dias === dias) {
-        console.log(`[NUDGE] user=${user.id} dias=${dias} status=skip-mesmo-marco`);
+        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=skip-mesmo-marco`);
         continue;
       }
 
-      const text = buildInactivityMessage(dias);
+      const mapa = user.ja_registrou ? mensagensRetorno : mensagensPrimeiroUso;
+      const text = mapa[dias];
       if (!text) {
-        console.log(`[NUDGE] user=${user.id} dias=${dias} status=skip-marco-invalido`);
+        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=skip-marco-invalido`);
         continue;
       }
 
@@ -102,11 +105,11 @@ export async function sendInactivityNotifications(): Promise<{ elegiveis: number
           [user.id, dias]
         );
         enviados++;
-        console.log(`[NUDGE] user=${user.id} dias=${dias} status=enviado`);
-        log.whatsapp("notif inatividade enviada", { to: user.telefone, userId: user.id, dias });
+        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=enviado`);
+        log.whatsapp("notif inatividade enviada", { to: user.telefone, userId: user.id, dias, fluxo });
       } catch (err) {
-        console.log(`[NUDGE] user=${user.id} dias=${dias} status=erro`);
-        log.error("falha ao enviar notif inatividade", err, { userId: user.id, dias });
+        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=erro`);
+        log.error("falha ao enviar notif inatividade", err, { userId: user.id, dias, fluxo });
       }
     }
   } catch (err) {
