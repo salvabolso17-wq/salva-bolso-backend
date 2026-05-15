@@ -26,14 +26,47 @@ export function looksLikeTransactionLine(linha: string): boolean {
   return false;
 }
 
+function splitInlineExpenses(texto: string): string[] | null {
+  if (/\n/.test(texto)) return null;
+
+  // Posições de cada número no texto
+  const positions: number[] = [];
+  const regex = /\b\d+(?:[,.]\d{1,2})?\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(texto)) !== null) {
+    positions.push(m.index);
+  }
+  if (positions.length < 2) return null;
+
+  // Constrói partes: cada parte vai de um número até o próximo
+  const partes: string[] = [];
+  for (let i = 0; i < positions.length; i++) {
+    const start = positions[i];
+    const end = i + 1 < positions.length ? positions[i + 1] : texto.length;
+    partes.push(texto.slice(start, end).trim());
+  }
+  if (partes.length < 2) return null;
+
+  // Cada parte precisa ter descrição (token não-numérico) + parsear como saída
+  for (const p of partes) {
+    if (!/\d+(?:[,.]\d{1,2})?\s+\S/.test(p)) return null;
+    const parsed = parseTransaction(p);
+    if (!parsed || parsed.tipo !== "saida") return null;
+  }
+  return partes;
+}
+
 export function detectMultiLine(texto: string): string[] | null {
+  // Caminho original: split por \n
   const linhas = texto
     .split(/\n/)
     .map(l => l.trim())
     .filter(l => l.length > 0);
-  if (linhas.length < 2) return null;
-  if (!linhas.every(looksLikeTransactionLine)) return null;
-  return linhas;
+  if (linhas.length >= 2 && linhas.every(looksLikeTransactionLine)) {
+    return linhas;
+  }
+  // Fallback: split inline "VALOR DESC VALOR DESC..."
+  return splitInlineExpenses(texto);
 }
 
 export async function handleMultiLineTransactions(
