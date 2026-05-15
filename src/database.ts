@@ -185,6 +185,40 @@ export async function createTables() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS ultimo_nudge_dias INT;
     `);
 
+    // Lembretes de contas (feature conversacional)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lembretes (
+        id              SERIAL PRIMARY KEY,
+        user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        titulo          VARCHAR(120) NOT NULL,
+        valor           NUMERIC(12,2) NOT NULL,
+        dia_vencimento  INT NOT NULL CHECK (dia_vencimento BETWEEN 1 AND 31),
+        fixa            BOOLEAN NOT NULL DEFAULT TRUE,
+        proxima_data    DATE NOT NULL,
+        status          VARCHAR(20) NOT NULL DEFAULT 'pendente',
+        ultimo_aviso_em DATE,
+        criado_em       TIMESTAMP DEFAULT NOW(),
+        atualizado_em   TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_lembretes_proxima_data ON lembretes(proxima_data, status);
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_lembretes_user ON lembretes(user_id, status);
+    `);
+
+    // Contexto conversacional persistente (substitui state in-memory para fluxos multi-step)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS conversation_context (
+        user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        fluxo         VARCHAR(40) NOT NULL,
+        dados         JSONB NOT NULL DEFAULT '{}',
+        expira_em     TIMESTAMP NOT NULL,
+        atualizado_em TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     console.log("Tabelas criadas/verificadas ✅");
   } catch (error) {
     console.error("ERRO REAL DO BANCO:");

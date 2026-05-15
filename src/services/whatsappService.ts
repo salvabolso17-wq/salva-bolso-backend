@@ -23,6 +23,7 @@ import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handle
 import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
+import { tryHandleLembretes } from "./handlers/lembretes";
 
 function firstNameOf(rawName?: string | null): string | null {
   if (!rawName) return null;
@@ -813,6 +814,15 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
+  // ── Lembretes de contas: context persistente + NLU (heurística + LLM) ────
+  // Roda ANTES do parser de gasto e do AI-first; isolado por try-catch.
+  try {
+    const lembreteResult = await tryHandleLembretes(user, message.telefone, message.texto);
+    if (lembreteResult !== null) return lembreteResult;
+  } catch (err) {
+    log.error("tryHandleLembretes excecao", err, { userId: user.id });
+  }
+
   // ── Intenção de histórico/registros — redireciona para extrato ──────────
   if (
     !parseTransaction(message.texto.trim()) &&
@@ -847,14 +857,6 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           case "apagar_recorrente": return await handleApagarRecorrenteAI(user, message.telefone, message.texto);
           case "pagar_recorrente":  return await handlePagarRecorrenteAI(user, message.telefone, message.texto);
         }
-      }
-      // Claude não reconheceu → verifica se é lembrete
-      if (/lembr[ae]|me\s+avisa|notific|agendar/i.test(message.texto)) {
-        await whatsapp.sendText({
-          to:   message.telefone,
-          text: "Lembretes automáticos chegam em breve! 🔔\n\nPor enquanto, use _próximas_ para ver suas contas do mês.",
-        });
-        return { success: false, userId: user.id, erro: "lembrete nao disponivel" };
       }
     } catch (err) {
       log.error("falha AI pre-classification", err, { userId: user.id });
@@ -1324,14 +1326,6 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
     } catch (err) {
       log.error("falha classifyIntentWithAI", err, { userId: user.id });
-    }
-
-    if (/lembr[ae]|lembrete|notific|agendar|me avisa|me lembra/i.test(message.texto)) {
-      await whatsapp.sendText({
-        to: message.telefone,
-        text: "Lembretes automáticos chegam em breve! 🔔\n\nPor enquanto, use _próximas_ para ver suas contas do mês."
-      });
-      return { success: false, userId: user.id, erro: "lembrete nao disponivel" };
     }
 
     try {

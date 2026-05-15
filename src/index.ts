@@ -6,6 +6,7 @@ import pool from "./db/client";
 import { createTables } from "./database";
 import { selfRegisterWebhook } from "./services/webhookSelfRegister";
 import { runDailyNotifications, runWeeklyNotifications, sendInactivityNotifications } from "./services/notificationService";
+import { executarAvisos as executarLembretesAvisos } from "./services/cron/lembretesAvisos";
 import { cronState } from "./utils/cronState";
 import usersRoutes from "./routes/users";
 import transactionsRoutes from "./routes/transactions";
@@ -126,6 +127,12 @@ const PORT = Number(process.env.PORT ?? 3000);
     cron.schedule("0 19 * * *", () => {
       cronState.inatividade.ultimaExecucao = new Date();
       sendInactivityNotifications().catch(err => console.error("cron inatividade falhou:", err));
+    }, { timezone: "America/Sao_Paulo" });
+
+    // Avisos de lembretes de contas — 19h Brasília (D-3, D-2, D-1, atrasados)
+    console.log("[CRON] Lembretes avisos agendado: 19h BRT");
+    cron.schedule("0 19 * * *", () => {
+      executarLembretesAvisos().catch(err => console.error("cron lembretes avisos falhou:", err));
     }, { timezone: "America/Sao_Paulo" });
   });
 })();
