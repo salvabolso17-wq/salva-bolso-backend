@@ -1,10 +1,20 @@
 import pool from "./db/client";
 
+async function step(nome: string, sql: string): Promise<void> {
+  try {
+    await pool.query(sql);
+    console.log(`[SCHEMA] ok: ${nome}`);
+  } catch (err) {
+    console.error(`[SCHEMA] FALHOU: ${nome}`);
+    throw err;
+  }
+}
+
 export async function createTables() {
   try {
-    console.log("Tentando conectar no banco...");
+    console.log("[SCHEMA] iniciando createTables...");
 
-    await pool.query(`
+    await step("CREATE users", `
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         telefone VARCHAR(20) UNIQUE NOT NULL,
@@ -17,7 +27,7 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
+    await step("CREATE transactions", `
       CREATE TABLE IF NOT EXISTS transactions (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -29,26 +39,18 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS senha VARCHAR(255);
-    `);
-
-    await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(20) NOT NULL DEFAULT 'trial';
-    `);
-
-    await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
-    `);
+    await step("ALTER users.senha", `ALTER TABLE users ADD COLUMN IF NOT EXISTS senha VARCHAR(255);`);
+    await step("ALTER users.subscription_status", `ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(20) NOT NULL DEFAULT 'trial';`);
+    await step("ALTER users.trial_ends_at", `ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;`);
 
     // Usuários existentes antes da migração: 90 dias de graça a partir do cadastro
-    await pool.query(`
+    await step("BACKFILL users.trial_ends_at", `
       UPDATE users
       SET trial_ends_at = criado_em + INTERVAL '90 days'
       WHERE trial_ends_at IS NULL;
     `);
 
-    await pool.query(`
+    await step("CREATE financial_goals", `
       CREATE TABLE IF NOT EXISTS financial_goals (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -60,7 +62,7 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
+    await step("CREATE processed_messages", `
       CREATE TABLE IF NOT EXISTS processed_messages (
         message_id  TEXT        PRIMARY KEY,
         telefone    TEXT        NOT NULL,
@@ -68,7 +70,7 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
+    await step("CREATE sent_insights", `
       CREATE TABLE IF NOT EXISTS sent_insights (
         id            SERIAL PRIMARY KEY,
         user_id       INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -80,7 +82,7 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
+    await step("CREATE user_goals", `
       CREATE TABLE IF NOT EXISTS user_goals (
         id           SERIAL PRIMARY KEY,
         user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -92,7 +94,7 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
+    await step("CREATE category_limits", `
       CREATE TABLE IF NOT EXISTS category_limits (
         id           SERIAL PRIMARY KEY,
         user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -103,7 +105,7 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
+    await step("CREATE recurring_expenses", `
       CREATE TABLE IF NOT EXISTS recurring_expenses (
         id          SERIAL PRIMARY KEY,
         user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -116,7 +118,7 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
+    await step("CREATE pending_actions", `
       CREATE TABLE IF NOT EXISTS pending_actions (
         user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         action         VARCHAR(100) NOT NULL,
@@ -128,13 +130,13 @@ export async function createTables() {
     `);
 
     // Migração: garante a expansão de colunas antigas (caso a tabela tenha sido criada com tamanho menor)
-    await pool.query(`
-      ALTER TABLE pending_actions 
+    await step("ALTER pending_actions widen cols", `
+      ALTER TABLE pending_actions
         ALTER COLUMN action TYPE VARCHAR(100),
         ALTER COLUMN step TYPE VARCHAR(100);
     `);
 
-    await pool.query(`
+    await step("CREATE installments", `
       CREATE TABLE IF NOT EXISTS installments (
         id             SERIAL PRIMARY KEY,
         user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -149,11 +151,11 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
+    await step("INDEX installments_user_id_idx", `
       CREATE INDEX IF NOT EXISTS installments_user_id_idx ON installments(user_id);
     `);
 
-    await pool.query(`
+    await step("CREATE plans", `
       CREATE TABLE IF NOT EXISTS plans (
         id           SERIAL PRIMARY KEY,
         nome         VARCHAR(50) UNIQUE NOT NULL,
@@ -162,31 +164,20 @@ export async function createTables() {
       );
     `);
 
-    await pool.query(`
+    await step("SEED plans", `
       INSERT INTO plans (nome, duration_days) VALUES
         ('mensal', 30),
         ('anual', 365)
       ON CONFLICT (nome) DO NOTHING;
     `);
 
-    await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_expires_at TIMESTAMPTZ;
-    `);
-
-    await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS current_plan VARCHAR(50);
-    `);
-
-    await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS ultimo_nudge_em DATE;
-    `);
-
-    await pool.query(`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS ultimo_nudge_dias INT;
-    `);
+    await step("ALTER users.subscription_expires_at", `ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_expires_at TIMESTAMPTZ;`);
+    await step("ALTER users.current_plan", `ALTER TABLE users ADD COLUMN IF NOT EXISTS current_plan VARCHAR(50);`);
+    await step("ALTER users.ultimo_nudge_em", `ALTER TABLE users ADD COLUMN IF NOT EXISTS ultimo_nudge_em DATE;`);
+    await step("ALTER users.ultimo_nudge_dias", `ALTER TABLE users ADD COLUMN IF NOT EXISTS ultimo_nudge_dias INT;`);
 
     // Lembretes de contas (feature conversacional)
-    await pool.query(`
+    await step("CREATE lembretes", `
       CREATE TABLE IF NOT EXISTS lembretes (
         id              SERIAL PRIMARY KEY,
         user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -201,15 +192,15 @@ export async function createTables() {
         atualizado_em   TIMESTAMP DEFAULT NOW()
       );
     `);
-    await pool.query(`
+    await step("INDEX idx_lembretes_proxima_data", `
       CREATE INDEX IF NOT EXISTS idx_lembretes_proxima_data ON lembretes(proxima_data, status);
     `);
-    await pool.query(`
+    await step("INDEX idx_lembretes_user", `
       CREATE INDEX IF NOT EXISTS idx_lembretes_user ON lembretes(user_id, status);
     `);
 
     // Contexto conversacional persistente (substitui state in-memory para fluxos multi-step)
-    await pool.query(`
+    await step("CREATE conversation_context", `
       CREATE TABLE IF NOT EXISTS conversation_context (
         user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         fluxo         VARCHAR(40) NOT NULL,
@@ -219,9 +210,22 @@ export async function createTables() {
       );
     `);
 
-    console.log("Tabelas criadas/verificadas ✅");
+    console.log("[SCHEMA] createTables concluído ✅");
   } catch (error) {
-    console.error("ERRO REAL DO BANCO:");
+    console.error("[SCHEMA] ERRO ao criar/migrar schema — abortando boot:");
     console.error(error);
+    throw error;
+  }
+}
+
+export async function cleanupConversationContextExpirado(): Promise<number> {
+  try {
+    const r = await pool.query(`DELETE FROM conversation_context WHERE expira_em < NOW()`);
+    const n = r.rowCount ?? 0;
+    if (n > 0) console.log(`[CLEANUP] conversation_context: ${n} expirados removidos`);
+    return n;
+  } catch (err) {
+    console.error("[CLEANUP] falha em conversation_context:", err);
+    return 0;
   }
 }

@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import cron from "node-cron";
 import pool from "./db/client";
-import { createTables } from "./database";
+import { createTables, cleanupConversationContextExpirado } from "./database";
 import { selfRegisterWebhook } from "./services/webhookSelfRegister";
 import { runDailyNotifications, runWeeklyNotifications, sendInactivityNotifications } from "./services/notificationService";
 import { executarAvisos as executarLembretesAvisos } from "./services/cron/lembretesAvisos";
@@ -65,7 +65,13 @@ app.get("/", async (req, res) => {
 const PORT = Number(process.env.PORT ?? 3000);
 
 (async () => {
-  await createTables();
+  try {
+    await createTables();
+  } catch (err) {
+    console.error("[STARTUP] schema falhou — abortando boot");
+    console.error(err);
+    process.exit(1);
+  }
   console.log(`[STARTUP] tentando ouvir em 0.0.0.0:${PORT} | build=20260509-producao-publica`);
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[STARTUP] Servidor ouvindo em 0.0.0.0:${PORT}`);
@@ -112,6 +118,7 @@ const PORT = Number(process.env.PORT ?? 3000);
     cron.schedule("0 9 * * *", () => {
       cronState.notificacoes.ultimaExecucao = new Date();
       runDailyNotifications().catch(err => console.error("cron diario falhou:", err));
+      cleanupConversationContextExpirado().catch(err => console.error("cleanup context falhou:", err));
     }, { timezone: "America/Sao_Paulo" });
 
     // Push semanal comparativo — segunda-feira 9h Brasília
