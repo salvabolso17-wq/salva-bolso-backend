@@ -1460,7 +1460,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (parsed.tipo === "saida") {
     try {
       const cntGastos = await pool.query<{ count: string }>(
-        `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+        `SELECT COUNT(*) AS count
+         FROM transactions t
+         WHERE t.user_id = $1 AND t.tipo = 'saida'
+           AND NOT EXISTS (
+             SELECT 1 FROM lembretes l
+             WHERE l.user_id = $1 AND l.fixa = TRUE
+               AND LOWER(l.titulo) = LOWER(t.descricao)
+           )`,
         [user.id]
       );
       if (Number(cntGastos.rows[0].count) === 1) {
