@@ -147,19 +147,14 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
     const sobra      = renda - totalFixas;
 
     const msg = [
-      `✅ Conta fixa salva: *${capitalizeFirst(descricao)}* (${fmtValor(parsed.valor)})`,
-      "",
-      "Já consigo te mostrar uma coisa importante:",
+      `✅ ${capitalizeFirst(descricao)} salvo (${fmtValor(parsed.valor)})`,
       "",
       `💰 Renda: ${fmtValor(renda)}`,
-      `🏠 Contas fixas: ${fmtValor(totalFixas)}`,
-      "──────────",
-      `📊 *Sobra pro mês: ${fmtValor(sobra)}*`,
+      `🏠 Fixas: ${fmtValor(totalFixas)}`,
+      `📊 *Sobra: ${fmtValor(sobra)}*`,
       "",
-      "Isso é o que você tem pra dividir entre comida, lazer, transporte e o resto. Vou te ajudar a fazer render.",
-      "",
-      "Agora manda seu primeiro gasto de hoje pra eu te mostrar como categorizo na hora:",
-      "🛒 _50 mercado_ • 🚗 _35 uber_ • 💊 _120 farmácia_",
+      "Manda teu primeiro gasto:",
+      "🛒 _50 mercado_ • 🚗 _35 uber_",
     ].join("\n");
     await whatsapp.sendText({ to: telefone, text: msg });
     return { success: false, userId: user.id, erro: "onboarding finalizado (com fixa)" };
