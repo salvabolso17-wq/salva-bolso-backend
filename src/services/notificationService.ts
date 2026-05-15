@@ -42,17 +42,17 @@ function currentMonthStart(): Date {
 // Roda 1x/dia às 19h BRT. Após o marco 14, salva ultimo_nudge_dias=14 e fica em silêncio
 // até o usuário registrar algo (reset feito por resetInactivityNudge no insert).
 const mensagensRetorno: Record<number, string> = {
-  1:  "Oi! Tudo bem? 👋\nFaz 1 dia que você não anota nada.\nJá gastou algo hoje? É só me contar.",
-  3:  "3 dias sem dar notícia 😬\nSem registrar, fica difícil saber pra onde foi o dinheiro.\nManda o que gastou que eu organizo pra você.",
+  1:  "Oi 👋\n\nFaz 1 dia sem gasto. Já anotou algo hoje?\nÉ só me contar 🙂",
+  3:  "3 dias sem dar notícia 👋\n\nManda o que gastou que eu organizo:\n🛒 _50 mercado_ • 🚗 _35 uber_",
   7:  "⚠️ 1 semana sem registrar.\nEsse é o jeito mais rápido de perder o controle de novo.\nManda o último gasto que você lembra que eu te recoloco no eixo.",
-  14: "Vou parar de te incomodar por aqui.\nQuando quiser voltar, é só me mandar qualquer gasto.\nTô aqui. 🤝",
+  14: "Vou parar de te chamar por aqui.\n\nQuando quiser voltar, é só mandar um gasto. Tô aqui 🤝",
 };
 
 const mensagensPrimeiroUso: Record<number, string> = {
-  1:  "Oi! 👋\nVocê se cadastrou ontem mas ainda não testou nada.\nÉ super rápido: me manda agora \"gastei 20 no almoço\" que eu já te mostro como funciona.",
-  3:  "3 dias e ainda não experimentou 😬\nPrometo que vou facilitar sua vida.\nManda qualquer gasto que você teve hoje — só pra ver acontecendo.",
+  1:  "Oi 👋\n\nVocê se cadastrou ontem mas ainda não testou.\n\nÉ super rápido — manda um gasto:\n🛒 _50 mercado_ • 🚗 _35 uber_",
+  3:  "Seu teste grátis tá pela metade ⏰\n\nManda um gasto pra ver acontecendo antes que acabe:\n🛒 _50 mercado_ • 🚗 _35 uber_",
   7:  "⚠️ 1 semana sem usar.\nOlha, se não funcionar pra você é só não responder. Mas pelo menos testa 1 vez.\n\"gastei X no Y\" — é só isso.",
-  14: "Tudo bem, vou parar de te chamar.\nSe um dia mudar de ideia, é só me mandar qualquer gasto.\nTô aqui. 🤝",
+  14: "Vou parar de te chamar.\n\nSe mudar de ideia, manda um gasto. Tô aqui 🤝",
 };
 
 function calcMarco(dias: number): 1 | 3 | 7 | 14 | null {
