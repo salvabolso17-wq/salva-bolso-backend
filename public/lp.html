@@ -108,33 +108,34 @@
         .hero {
             position: relative;
             background:
-                radial-gradient(circle at 20% 0%, rgba(37,211,102,0.15), transparent 50%),
-                radial-gradient(circle at 80% 30%, rgba(37,211,102,0.08), transparent 50%),
-                #0b1014;
-            padding-top: 32px;
-            padding-bottom: 32px;
+                radial-gradient(ellipse at top, rgba(37,211,102,0.18), transparent 60%),
+                #0a0e12;
+            padding: 32px 20px 48px;
             max-width: 100%;
         }
         .hero-inner {
             max-width: 720px;
             margin: 0 auto;
-            padding: 0 20px;
         }
         .hero h1 {
-            font-size: 2.2rem;
-            line-height: 1.15;
+            font-size: 2.6rem;
+            line-height: 1.05;
             font-weight: 800;
-            margin: 0 0 14px;
-            letter-spacing: -0.5px;
+            letter-spacing: -0.02em;
+            margin: 16px 0 12px;
         }
         .hero h1 .hl { color: #25D366; }
-        .hero p.sub {
-            font-size: 1.05rem; color: #b9c4d6; margin: 0 0 26px;
+        .hero-sub {
+            font-size: 1.05rem;
+            color: #9aa5ad;
+            line-height: 1.4;
+            max-width: 420px;
+            margin: 12px 0 0;
         }
 
         .badges {
             display: flex; gap: 8px; flex-wrap: wrap;
-            margin: 0 0 22px;
+            margin: 20px 0 0;
         }
         .badge {
             background: rgba(37,211,102,0.12);
@@ -181,25 +182,23 @@
         }
 
         .guarantee {
-            background: rgba(37,211,102,0.08);
-            border: 1px dashed rgba(37,211,102,0.4);
-            border-radius: 12px;
-            padding: 12px 16px;
-            font-size: 0.95rem;
+            margin-top: 14px;
             text-align: center;
-            margin-top: 16px;
-            color: #cfe9d8;
+            font-size: 0.85rem;
+            color: #8e9bb3;
         }
 
         /* Phone mockup */
         .phone {
             max-width: 340px;
-            margin: 32px auto 0;
+            width: 90%;
+            margin: 28px auto;
             background: #0b141a;
             border: 8px solid #1a1a1a;
             border-radius: 32px;
-            box-shadow: 0 30px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+            box-shadow: 0 40px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
             padding: 16px 12px;
+            transform: rotate(-1.5deg);
         }
         .phone .wa-header {
             display: flex; align-items: center; gap: 10px;
@@ -494,17 +493,10 @@
             <div class="badges">
                 <span class="badge">✓ 7 dias grátis</span>
                 <span class="badge">✓ Sem cartão</span>
-                <span class="badge">✓ Cancela com 1 mensagem</span>
             </div>
 
-            <h1>Seu salário <span class="hl">some</span> todo mês e você não sabe pra onde foi?</h1>
-            <p class="sub">Mais de 2.000 brasileiros descobriram — mandando 1 mensagem no WhatsApp — que estavam perdendo de R$ 600 a R$ 1.200 por mês sem perceber. Agora não perdem mais.</p>
-
-            <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
-                <span class="wa-icon">💬</span>Quero testar grátis no WhatsApp →
-            </a>
-            <p class="trust">Teste 7 dias grátis · Sem cartão · Cancela com 1 mensagem</p>
-            <div class="guarantee">🛡️ Garantia simples: se não gostar, é só parar de responder. A gente não cobra.</div>
+            <h1>Seu dinheiro <span class="hl">some</span>.<br>A gente mostra pra onde foi.</h1>
+            <p class="hero-sub">Controle suas finanças mandando 1 mensagem no WhatsApp.</p>
 
             <div class="phone">
                 <div class="wa-header">
@@ -522,11 +514,17 @@ Total do mês: R$ 1.243<span class="time">21:14</span></div>
                 <div class="bubble user">quero sim<span class="time">21:15</span></div>
                 <div class="bubble bot">Combinado 👍 Vou te avisar.<span class="time">21:15</span></div>
             </div>
+
+            <a class="cta" href="https://wa.me/556892614549?text=Quero%20testar%20o%20Salva%20Bolso%20gr%C3%A1tis">
+                <span class="wa-icon">💬</span>Testar grátis no WhatsApp
+            </a>
+            <p class="trust">Funciona em menos de 30 segundos. Sem cartão.</p>
+            <div class="guarantee">🛡️ Se não gostar, é só parar de responder.</div>
         </div>
     </header>
 
     <div class="social-proof reveal">
-        <span class="stars">⭐⭐⭐⭐⭐</span>&nbsp;&nbsp;4.9 de avaliação&nbsp;&nbsp;·&nbsp;&nbsp;+2.000 usuários ativos&nbsp;&nbsp;·&nbsp;&nbsp;R$ 1,4 milhão economizados
+        <span class="stars">⭐⭐⭐⭐⭐</span>&nbsp;&nbsp;+2.000 usuários&nbsp;&nbsp;·&nbsp;&nbsp;R$ 1,4M economizados
     </div>
 
     <section class="pain reveal">
