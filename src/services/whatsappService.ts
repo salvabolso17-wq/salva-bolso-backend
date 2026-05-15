@@ -1467,15 +1467,16 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         if (fastTrackPrimeiraInteracao) {
           linhasConfirmacao.push(
             "",
-            "🎁 Bem-vindo! Seus *7 dias grátis* começam agora.",
-            "Sem cartão, sem compromisso. Manda mais gastos quando quiser — vou organizando tudo aqui.",
+            "🎁 Teus 7 dias grátis começaram.",
+            "",
+            "Quanto mais você anotar, mais claro fica onde dá pra economizar.",
           );
         } else {
           linhasConfirmacao.push(
             "",
-            "🎉 *Primeiro gasto registrado!* É assim que funciona — você manda, eu organizo.",
+            "🎉 Esse é só o começo.",
             "",
-            "Quer ver tudo que sei fazer? Manda *menu*.",
+            "Quanto mais você anotar, mais claro fica onde dá pra economizar.",
           );
         }
       }
