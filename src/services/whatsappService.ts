@@ -503,24 +503,21 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     try {
       const nomeNovo = firstNameOf(message.pushName);
       if (nomeNovo) {
-        const insertRes = await pool.query(
+        await pool.query(
           `INSERT INTO users (telefone, nome, trial_ends_at)
            VALUES ($1, $2, NOW() + INTERVAL '7 days')
-           ON CONFLICT (telefone) DO UPDATE SET nome = $2 WHERE users.nome IS DISTINCT FROM $2
-           RETURNING id`,
+           ON CONFLICT (telefone) DO UPDATE SET nome = $2 WHERE users.nome IS DISTINCT FROM $2`,
           [message.telefone, nomeNovo]
         );
-        user = insertRes.rows[0] as UserRow;
       } else {
-        const insertRes = await pool.query(
+        await pool.query(
           `INSERT INTO users (telefone, trial_ends_at)
            VALUES ($1, NOW() + INTERVAL '7 days')
-           ON CONFLICT (telefone) DO NOTHING
-           RETURNING id`,
+           ON CONFLICT (telefone) DO NOTHING`,
           [message.telefone]
         );
-        user = insertRes.rows[0] as UserRow;
       }
+      user = await findUserByTelefone(message.telefone);
     } catch (err) {
       log.error("falha ao criar usuario no onboarding", err, { telefone: message.telefone });
       return { success: false, erro: "Erro ao criar usuário" };
