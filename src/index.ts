@@ -113,9 +113,9 @@ const PORT = Number(process.env.PORT ?? 3000);
       }
     });
 
-    // Notificações de retenção — diariamente às 9h horário de Brasília
+    // Notificações de retenção — diariamente às 21h horário de Brasília (= 19h Rio Branco/Acre)
     cronState.notificacoes.registrado = true;
-    cron.schedule("0 9 * * *", () => {
+    cron.schedule("0 21 * * *", () => {
       cronState.notificacoes.ultimaExecucao = new Date();
       runDailyNotifications().catch(err => console.error("cron diario falhou:", err));
       cleanupConversationContextExpirado().catch(err => console.error("cleanup context falhou:", err));
