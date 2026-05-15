@@ -86,12 +86,62 @@ function extractTituloAlvo(t: string): string | undefined {
   return undefined;
 }
 
+// Normaliza para comparação: lowercase + trim + colapso de espaços.
+// Mantém acentos pra preservar palavras como "mês", "não".
+export function normalizar(msg: string): string {
+  return msg.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+// LISTAR: variações naturais ("minha conta", "minhas contas", "ver contas", "quais contas",
+// "contas a pagar", "meu lembrete", "meus lembretes", "o que tenho pra pagar", ...)
+const RE_LISTAR_POSSESSIVO   = /\b(minhas?|meus?)\s+contas?\b/i;                          // minha conta / minhas contas / meu conta
+const RE_LISTAR_QUAIS        = /\bquais?\s+(?:as\s+|os\s+|minhas?\s+|meus?\s+)?contas?\b/i;
+const RE_LISTAR_VER          = /\b(?:ver|listar?|mostrar?|exibir?)\s+(?:as\s+|os\s+|minhas?\s+|meus?\s+|a\s+|o\s+)?contas?\b/i;
+const RE_LISTAR_A_PAGAR      = /\bcontas?\s+(?:a|pra|para)\s+pagar\b/i;
+const RE_LISTAR_LEMBRETES    = /\b(?:minhas?|meus?)\s+lembretes?\b/i;
+const RE_LISTAR_VER_LEMBRETE = /\b(?:ver|listar?|mostrar?|exibir?|quais?)\s+(?:meus?\s+|minhas?\s+|os\s+)?lembretes?\b/i;
+const RE_LISTAR_O_QUE        = /\bo\s+que\s+(?:eu\s+)?(?:tenho|preciso|devo|vou)\s+(?:que\s+|pra\s+|para\s+)?pagar\b/i;
+const RE_LISTAR_LISTA_DE     = /\blista\s+de\s+(?:contas?|lembretes?)\b/i;
+const RE_LISTAR_QUANTO_VOU   = /\bquanto\s+vou\s+(?:gastar|pagar)\s+de\s+contas?\b/i;
+const RE_LISTAR_CONTAS_MES   = /\bcontas?\s+do\s+m[eê]s\b/i;
+
+function isListar(tl: string): boolean {
+  return RE_LISTAR_POSSESSIVO.test(tl)
+      || RE_LISTAR_QUAIS.test(tl)
+      || RE_LISTAR_VER.test(tl)
+      || RE_LISTAR_A_PAGAR.test(tl)
+      || RE_LISTAR_LEMBRETES.test(tl)
+      || RE_LISTAR_VER_LEMBRETE.test(tl)
+      || RE_LISTAR_O_QUE.test(tl)
+      || RE_LISTAR_LISTA_DE.test(tl)
+      || RE_LISTAR_QUANTO_VOU.test(tl)
+      || RE_LISTAR_CONTAS_MES.test(tl);
+}
+
+// CRIAR: gatilho lexical + sinais ("dia X", valor, "todo mês", etc.)
+const RE_CRIAR = /\b(?:novo|criar?|cria|registra(?:r)?|adiciona(?:r)?|salva(?:r)?|anota(?:r)?|p[oõ]e|guarda(?:r)?)\s+(?:um[a]?\s+)?(?:lembrete|conta)\b|\b(?:lembra|me\s+lembra|me\s+lembre)\s+(?:de\s+)?(?:pagar?\s+)?\b|\bnova\s+conta\b|\bnovo\s+lembrete\b|\banota\s+(?:essa|aí|ai|aqui)\b/i;
+
+// PAGAR: verbos diversos de quitação
+const RE_PAGAR = /\b(paguei|quitei|liquidei|j[aá]\s+paguei|j[aá]\s+quitei|t[aá]\s+(?:pago|quitad[ao])|foi\s+pago|est[aá]\s+pago|pago\s+(?:a|o|essa|esse)?|paguei\s+(?:a|o)?|conta\s+paga)\b/i;
+
+// CANCELAR: verbos de remoção/cancelamento
+const RE_CANCELAR_VERBO = /\b(cancela(?:r)?|cancelei|cancela|tira(?:r)?|tirei|tira|remove(?:r)?|removi|removeu|deleta(?:r)?|deletei|deleta|apaga(?:r)?|apaguei|apaga|exclu[ií]r?|exclu[ií]|n[aã]o\s+tenho\s+mais|parei\s+(?:de|com))\b/i;
+// Pra evitar falso-positivo com "apagar gasto", exige nome de conta ou palavra "conta/lembrete" no contexto.
+const RE_CANCELAR_ALVO = /\b(lembrete|conta|netflix|spotify|disney|hbo|prime|youtube|aluguel|condom[ií]nio|luz|[aá]gua|energia|internet|telefone|celular|claro|vivo|tim|oi|gym|academia|pilates|crossfit|mei|[a-zá-ú]{3,})\b/i;
+
+// EDITAR: verbo de mudança + sinal de novo valor/dia/data
+const RE_EDITAR_VERBO = /\b(muda(?:r)?|mudei|mudou|altera(?:r)?|alterei|alterou|atualiza(?:r)?|atualizei|atualizou|edita(?:r)?|editei|editou|aumenta(?:r)?|aumentou|diminui(?:r)?|diminuiu|subiu|baixou|passou)\b/i;
+const RE_EDITAR_SINAL = /\b(pra|para|p\/|agora\s+[eé]|dia\s+\d{1,2}|r?\$?\s*\d|de\s+r?\$?\s*\d)\b/i;
+
 export function heuristicaNLU(texto: string): LembreteIntencao | null {
-  const t = texto.trim();
-  const tl = t.toLowerCase();
+  const t  = texto.trim();
+  const tl = normalizar(t);
+
+  // Ordem: verbos específicos primeiro (CRIAR/PAGAR/CANCELAR/EDITAR), LISTAR no final
+  // pra evitar que "cancela minha conta" engatilhe LISTAR antes do CANCELAR.
 
   // CRIAR
-  if (/\b(novo\s+lembrete|criar?\s+(?:um\s+)?lembrete|nova\s+conta|anota\s+(?:uma\s+)?conta|anotar?\s+(?:uma\s+)?conta|lembra\s+de\s+pagar|me\s+lembra\s+de\s+pagar|cria\s+(?:um\s+)?lembrete|registra\s+(?:um\s+)?lembrete|adiciona\s+(?:uma\s+)?conta)\b/i.test(tl)) {
+  if (RE_CRIAR.test(tl)) {
     const titulo = extractTituloCriar(t);
     const valor  = extractValor(t);
     const dia    = extractDia(t);
@@ -103,29 +153,29 @@ export function heuristicaNLU(texto: string): LembreteIntencao | null {
     };
   }
 
-  // LISTAR
-  if (/\b(minhas\s+contas|meus\s+lembretes|o\s+que\s+tenho\s+(?:pra|para)\s+pagar|quanto\s+vou\s+(?:gastar|pagar)\s+de\s+contas|lista(?:r)?\s+(?:meus?\s+)?lembretes|ver\s+(?:meus?\s+)?lembretes|contas\s+do\s+m[eê]s)\b/i.test(tl)) {
-    return { acao: "listar", dados: { confianca: 0.9 } };
-  }
-
   // PAGAR
-  if (/\b(paguei|quitei|j[aá]\s+paguei|t[aá]\s+(?:pago|quitad[ao])|foi\s+pago|t[aá]\s+pago|est[aá]\s+pago)\b/i.test(tl)) {
+  if (RE_PAGAR.test(tl)) {
     const titulo = extractTituloAlvo(t);
     return { acao: "pagar", dados: { titulo, confianca: titulo ? 0.85 : 0.5 } };
   }
 
-  // CANCELAR
-  if (/\b(cancela(?:r)?|cancelei|tira(?:r)?|remove(?:r)?|deleta(?:r)?|apaga(?:r)?|n[aã]o\s+tenho\s+mais)\b.*\b(lembrete|conta|netflix|spotify|aluguel|luz|[áéíóúâêôãõa-z]+)/i.test(tl)) {
+  // CANCELAR (verbo + algum alvo na mesma frase)
+  if (RE_CANCELAR_VERBO.test(tl) && RE_CANCELAR_ALVO.test(tl)) {
     const titulo = extractTituloAlvo(t);
     return { acao: "cancelar", dados: { titulo, confianca: titulo ? 0.8 : 0.45 } };
   }
 
   // EDITAR
-  if (/\b(muda(?:r)?|altera(?:r)?|atualiza(?:r)?|edita(?:r)?)\b/i.test(tl) && /\b(pra|para|p\/|agora\s+[eé]|dia\s+\d{1,2}|r?\$?\s*\d)/i.test(tl)) {
+  if (RE_EDITAR_VERBO.test(tl) && RE_EDITAR_SINAL.test(tl)) {
     const titulo = extractTituloAlvo(t);
     const valor  = extractValor(t);
     const dia    = extractDia(t);
     return { acao: "editar", dados: { titulo, valor, dia, confianca: 0.7 } };
+  }
+
+  // LISTAR (por último — mais permissivo)
+  if (isListar(tl)) {
+    return { acao: "listar", dados: { confianca: 0.92 } };
   }
 
   return null;
@@ -185,14 +235,24 @@ async function llmNLU(texto: string): Promise<LembreteIntencao | null> {
   }
 }
 
+function logNLU(texto: string, r: LembreteIntencao, fonte: string): LembreteIntencao {
+  log.webhook(`[NLU] msg="${texto.slice(0, 120)}" intent=${r.acao ?? "null"} confianca=${r.dados.confianca} fonte=${fonte}`, {
+    titulo: r.dados.titulo,
+    valor:  r.dados.valor,
+    dia:    r.dados.dia,
+    fixa:   r.dados.fixa,
+  });
+  return r;
+}
+
 export async function interpretarLembrete(texto: string): Promise<LembreteIntencao> {
   const heur = heuristicaNLU(texto);
-  if (heur && heur.dados.confianca >= 0.85) return heur;
+  if (heur && heur.dados.confianca >= 0.85) return logNLU(texto, heur, "heuristica");
 
   const llm = await llmNLU(texto);
   if (llm) {
     if (heur) {
-      return {
+      const merged: LembreteIntencao = {
         acao: llm.acao ?? heur.acao,
         dados: {
           titulo: llm.dados.titulo ?? heur.dados.titulo,
@@ -202,12 +262,14 @@ export async function interpretarLembrete(texto: string): Promise<LembreteIntenc
           confianca: Math.max(llm.dados.confianca, heur.dados.confianca),
         },
       };
+      return logNLU(texto, merged, "llm+heuristica");
     }
-    return llm;
+    return logNLU(texto, llm, "llm");
   }
 
-  if (heur) return heur;
-  return { acao: null, dados: { confianca: 0 } };
+  if (heur) return logNLU(texto, heur, "heuristica-baixa");
+  const nulo: LembreteIntencao = { acao: null, dados: { confianca: 0 } };
+  return logNLU(texto, nulo, "nenhum");
 }
 
 const VERBOS_PAGAR = /\b(paguei|quitei|j[aá]\s+paguei|t[aá]\s+(?:pago|quitad[ao])|foi\s+pago|est[aá]\s+pago|foi|t[aá]\s+pago|pago)\b/i;

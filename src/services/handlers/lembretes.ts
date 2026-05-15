@@ -548,9 +548,10 @@ export async function tryHandleLembretes(user: UserRow, telefone: string, texto:
     }
 
     const t = texto.trim().toLowerCase();
-    // Gate: só roda NLU se há sinal mínimo de lembrete (evita custo de LLM em toda mensagem)
+    // Gate: só roda NLU se há sinal mínimo de lembrete (evita custo de LLM em toda mensagem).
+    // Inclui variações naturais ("ver contas", "lista de contas", "quais contas", "meu lembrete", etc.)
     const sinalLembrete =
-      /\b(lembr[ae]|lembrete|me\s+avisa|me\s+lembra|notific|agendar|conta\s+fixa|nova\s+conta|anota\s+(?:uma\s+)?conta|anotar?\s+(?:uma\s+)?conta|minhas\s+contas|meus\s+lembretes|o\s+que\s+tenho\s+(?:pra|para)\s+pagar|paguei|quitei|vence|vencimento|cancela(?:r)?\s+(?:a|o|os|as)?\s*(?:luz|netflix|spotify|aluguel|internet|conta|lembrete)|todo\s+dia\s+\d{1,2}|todo\s+m[eê]s)\b/i.test(t);
+      /\b(lembr[ae]|lembrete|me\s+avisa|me\s+lembra|notific|agendar|conta\s+fixa|contas?\s+(?:a|pra|para)\s+pagar|nova\s+conta|anota\s+(?:uma\s+)?conta|anotar?\s+(?:uma\s+)?conta|(?:minhas?|meus?)\s+contas?|(?:minhas?|meus?)\s+lembretes?|quais?\s+(?:as\s+|os\s+|minhas?\s+|meus?\s+)?contas?|(?:ver|listar?|mostrar?|exibir?)\s+(?:as\s+|os\s+|minhas?\s+|meus?\s+|a\s+|o\s+)?(?:contas?|lembretes?)|lista\s+de\s+(?:contas?|lembretes?)|contas?\s+do\s+m[eê]s|o\s+que\s+(?:eu\s+)?(?:tenho|preciso|devo|vou)\s+(?:que\s+|pra\s+|para\s+)?pagar|paguei|quitei|vence|vencimento|cancela(?:r)?\s+(?:a|o|os|as)?\s*(?:luz|netflix|spotify|aluguel|internet|conta|lembrete)|todo\s+dia\s+\d{1,2}|todo\s+m[eê]s)\b/i.test(t);
     if (!sinalLembrete) {
       log.webhook("lembrete: sem sinal — skip", { userId: user.id });
       return null;
