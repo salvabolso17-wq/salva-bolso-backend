@@ -38,34 +38,82 @@ function currentMonthStart(): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
-// Usuários sem registrar gastos há 3–10 dias → nudge leve (máx 1x/semana)
-async function sendInactivityNotifications(): Promise<void> {
-  const sentinel = currentWeekStart();
+// Nudge de engajamento progressivo: D+1, D+3, D+7, D+14 dias sem registrar gasto.
+// Roda 1x/dia às 19h BRT. Após D+14, para até o usuário registrar algo novo.
+const INACTIVITY_MARCOS = [1, 3, 7, 14] as const;
 
-  const { rows } = await pool.query<{ id: number; telefone: string }>(`
-    SELECT u.id, u.telefone
-    FROM users u
-    WHERE EXISTS (SELECT 1 FROM transactions WHERE user_id = u.id)
-      AND (SELECT MAX(criado_em) FROM transactions WHERE user_id = u.id)
-            BETWEEN NOW() - INTERVAL '10 days' AND NOW() - INTERVAL '3 days'
-      AND NOT EXISTS (
-        SELECT 1 FROM sent_insights
-        WHERE user_id = u.id AND categoria = 'notif_inatividade' AND mes_referencia = $1
-      )
-  `, [sentinel]);
-
-  for (const user of rows) {
-    if (!(await tryMarkSent(user.id, "notif_inatividade", sentinel))) continue;
-    try {
-      await whatsapp.sendText({
-        to:   user.telefone,
-        text: "Oi! 👋 Faz alguns dias sem registrar nada.\n\nMe conta um gasto recente — ex: 30 almoço",
-      });
-      log.whatsapp("notif inatividade enviada", { to: user.telefone, userId: user.id });
-    } catch (err) {
-      log.error("falha ao enviar notif inatividade", err, { userId: user.id });
-    }
+function buildInactivityMessage(dias: number): string {
+  switch (dias) {
+    case 1:
+      return "Oi! Tudo bem? 👋\nFaz 1 dia que você não anota nada.\nJá gastou algo hoje? É só me contar.";
+    case 3:
+      return "3 dias sem dar notícia 😬\nSem registrar, fica difícil saber pra onde foi o dinheiro.\nManda o que gastou que eu organizo pra você.";
+    case 7:
+      return "⚠️ 1 semana sem registrar.\nEsse é o jeito mais rápido de perder o controle de novo.\nManda o último gasto que você lembra que eu te recoloco no eixo.";
+    case 14:
+      return "Vou parar de te incomodar por aqui.\nQuando quiser voltar, é só me mandar qualquer gasto.\nTô aqui. 🤝";
+    default:
+      return "";
   }
+}
+
+export async function sendInactivityNotifications(): Promise<{ elegiveis: number; enviados: number }> {
+  let elegiveis = 0;
+  let enviados = 0;
+  try {
+    const { rows } = await pool.query<{ id: number; telefone: string; dias_sem_gasto: string | null; ultimo_nudge_em: string | null; ultimo_nudge_dias: number | null }>(`
+      SELECT u.id,
+             u.telefone,
+             (CURRENT_DATE - DATE(MAX(t.criado_em) AT TIME ZONE 'America/Sao_Paulo')) AS dias_sem_gasto,
+             u.ultimo_nudge_em::text AS ultimo_nudge_em,
+             u.ultimo_nudge_dias
+        FROM users u
+        JOIN transactions t ON t.user_id = u.id
+       GROUP BY u.id, u.telefone, u.ultimo_nudge_em, u.ultimo_nudge_dias
+       HAVING (CURRENT_DATE - DATE(MAX(t.criado_em) AT TIME ZONE 'America/Sao_Paulo')) = ANY($1::int[])
+    `, [INACTIVITY_MARCOS as unknown as number[]]);
+
+    elegiveis = rows.length;
+
+    for (const user of rows) {
+      const dias = Number(user.dias_sem_gasto ?? 0);
+      const hojeISO = new Date().toISOString().slice(0, 10);
+
+      // Skip se já nudgeou hoje OU se o último nudge foi exatamente para esse marco
+      if (user.ultimo_nudge_em === hojeISO) {
+        console.log(`[NUDGE] user=${user.id} dias=${dias} status=skip-ja-hoje`);
+        continue;
+      }
+      if (user.ultimo_nudge_dias === dias) {
+        console.log(`[NUDGE] user=${user.id} dias=${dias} status=skip-mesmo-marco`);
+        continue;
+      }
+
+      const text = buildInactivityMessage(dias);
+      if (!text) {
+        console.log(`[NUDGE] user=${user.id} dias=${dias} status=skip-marco-invalido`);
+        continue;
+      }
+
+      try {
+        await whatsapp.sendText({ to: user.telefone, text });
+        await pool.query(
+          `UPDATE users SET ultimo_nudge_em = CURRENT_DATE, ultimo_nudge_dias = $2 WHERE id = $1`,
+          [user.id, dias]
+        );
+        enviados++;
+        console.log(`[NUDGE] user=${user.id} dias=${dias} status=enviado`);
+        log.whatsapp("notif inatividade enviada", { to: user.telefone, userId: user.id, dias });
+      } catch (err) {
+        console.log(`[NUDGE] user=${user.id} dias=${dias} status=erro`);
+        log.error("falha ao enviar notif inatividade", err, { userId: user.id, dias });
+      }
+    }
+  } catch (err) {
+    log.error("falha geral sendInactivityNotifications", err);
+  }
+  console.log(`[CRON] Inactivity check: ${elegiveis} users elegiveis, ${enviados} mensagens`);
+  return { elegiveis, enviados };
 }
 
 // Últimos dias do mês para usuários com ≥3 gastos no mês → lembra de ver resumo (máx 1x/mês)
@@ -678,7 +726,6 @@ export async function runDailyNotifications(): Promise<void> {
   try { await sendTrialReminders(); }                   catch (err) { log.error("falha trial reminders", err); }
   try { await sendRecorrentesAlert(); }                 catch (err) { log.error("falha alerta recorrentes", err); }
   try { await sendMonthlyBillsReminder(); }             catch (err) { log.error("falha lembrete contas mes", err); }
-  try { await sendInactivityNotifications(); }          catch (err) { log.error("falha notif inatividade", err); }
   try { await sendMonthEndNotifications(); }             catch (err) { log.error("falha notif fim mes", err); }
   try { await sendGoalStagnationNotifications(); }       catch (err) { log.error("falha notif meta parada", err); }
   try { await sendMonthlyClosingNotifications(); }       catch (err) { log.error("falha notif fechamento", err); }

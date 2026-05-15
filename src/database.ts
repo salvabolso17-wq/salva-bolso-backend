@@ -177,6 +177,14 @@ export async function createTables() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS current_plan VARCHAR(50);
     `);
 
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS ultimo_nudge_em DATE;
+    `);
+
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS ultimo_nudge_dias INT;
+    `);
+
     console.log("Tabelas criadas/verificadas ✅");
   } catch (error) {
     console.error("ERRO REAL DO BANCO:");

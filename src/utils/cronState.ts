@@ -13,4 +13,8 @@ export const cronState = {
     registrado: false,
     ultimaExecucao: null as Date | null,
   },
+  inatividade: {
+    registrado: false,
+    ultimaExecucao: null as Date | null,
+  },
 };

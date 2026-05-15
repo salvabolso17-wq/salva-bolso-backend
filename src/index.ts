@@ -5,7 +5,7 @@ import cron from "node-cron";
 import pool from "./db/client";
 import { createTables } from "./database";
 import { selfRegisterWebhook } from "./services/webhookSelfRegister";
-import { runDailyNotifications, runWeeklyNotifications } from "./services/notificationService";
+import { runDailyNotifications, runWeeklyNotifications, sendInactivityNotifications } from "./services/notificationService";
 import { cronState } from "./utils/cronState";
 import usersRoutes from "./routes/users";
 import transactionsRoutes from "./routes/transactions";
@@ -15,6 +15,7 @@ import reportsRoutes from "./routes/reports";
 import webhooksRoutes from "./routes/webhooks";
 import insightsRoutes from "./routes/insights";
 import healthDeepRoutes from "./routes/healthDeep";
+import adminRoutes from "./routes/admin";
 import * as path from 'path';
 
 const app = express();
@@ -33,6 +34,7 @@ app.use("/reports", reportsRoutes);
 app.use("/webhooks", webhooksRoutes);
 app.use("/insights", insightsRoutes);
 app.use("/healthz/deep", healthDeepRoutes);
+app.use("/admin", adminRoutes);
 
 // Global error handler — catches sync throws and next(err) calls
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -116,6 +118,14 @@ const PORT = Number(process.env.PORT ?? 3000);
     cron.schedule("0 9 * * 1", () => {
       cronState.relatorioSemanal.ultimaExecucao = new Date();
       runWeeklyNotifications().catch(err => console.error("cron semanal falhou:", err));
+    }, { timezone: "America/Sao_Paulo" });
+
+    // Nudge de inatividade progressivo (1/3/7/14 dias) — 19h Brasília
+    cronState.inatividade.registrado = true;
+    console.log("[CRON] Inactivity nudge agendado: 19h BRT (marcos 1/3/7/14)");
+    cron.schedule("0 19 * * *", () => {
+      cronState.inatividade.ultimaExecucao = new Date();
+      sendInactivityNotifications().catch(err => console.error("cron inatividade falhou:", err));
     }, { timezone: "America/Sao_Paulo" });
   });
 })();
