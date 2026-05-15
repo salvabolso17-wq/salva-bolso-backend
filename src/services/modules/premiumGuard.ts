@@ -76,7 +76,67 @@ export async function checkAndSendExpirationNotice(userId: number, telefone: str
 
   if (fullNovo) {
     log.webhook("enviando aviso de expiracao LONGO (primeira vez)", { userId });
-    const mensagem = `✨ Seu teste grátis terminou.\n\nVocê ainda pode:\n👀 consultar saldo\n📊 visualizar registros do mês\n\nDesbloqueie todos os recursos:\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+
+    // Estatísticas do trial pra personalizar a mensagem
+    let qtdGastos = 0;
+    let totalGastos = 0;
+    let qtdLembretes = 0;
+    try {
+      const [g, t, l] = await Promise.all([
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+          [userId]
+        ),
+        pool.query<{ total: string }>(
+          `SELECT COALESCE(SUM(valor), 0)::text AS total FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+          [userId]
+        ),
+        pool.query<{ count: string }>(
+          `SELECT COUNT(*)::text AS count FROM lembretes WHERE user_id = $1`,
+          [userId]
+        ),
+      ]);
+      qtdGastos    = Number(g.rows[0]?.count ?? 0);
+      totalGastos  = Number(t.rows[0]?.total ?? 0);
+      qtdLembretes = Number(l.rows[0]?.count ?? 0);
+    } catch (err) {
+      log.error("falha buscar estatisticas trial", err, { userId });
+    }
+
+    const planos = [
+      "🏆 *Anual — R$ 99,90* (R$ 8,32/mês — mais escolhido)",
+      "💳 *Mensal — R$ 14,90*",
+      "",
+      "Cancela quando quiser, sem multa.",
+      "",
+      "👉 https://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html",
+    ];
+
+    let mensagem: string;
+    if (qtdGastos === 0) {
+      mensagem = [
+        "✨ *Seus 7 dias acabaram.*",
+        "",
+        "Você não chegou a testar de verdade — que tal continuar e usar?",
+        "",
+        ...planos,
+      ].join("\n");
+    } else {
+      const totalFmt = "R$ " + totalGastos.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      mensagem = [
+        "✨ *Seus 7 dias acabaram.*",
+        "",
+        "Em 1 semana com você, eu:",
+        `📝 Registrei *${qtdGastos}* gastos`,
+        `💰 Acompanhei *${totalFmt}* do seu mês`,
+        `⏰ Salvei *${qtdLembretes}* lembretes de contas`,
+        "",
+        "Pra continuar, escolhe seu plano:",
+        "",
+        ...planos,
+      ].join("\n");
+    }
+
     await whatsapp.sendText({ to: telefone, text: mensagem });
     return true;
   }

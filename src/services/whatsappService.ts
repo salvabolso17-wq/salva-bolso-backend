@@ -464,6 +464,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   const provider = process.env.WHATSAPP_PROVIDER ?? "mock";
   log.webhook("iniciando processamento", { provider_envio: provider });
 
+  // Flag pra mensagem extra de boas-vindas + 7 dias grátis no fast-track (1ª interação = gasto direto)
+  let fastTrackPrimeiraInteracao = false;
+
   // ── Anti-duplicidade — insere messageId atomicamente ─────────────────────
   if (message.messageId) {
     try {
@@ -530,7 +533,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
 
     if (parsedFirst || isCommandFirst) {
-      // Fast-track: usuário já sabe o que quer → processa direto, sem tutorial
+      // Fast-track: usuário já sabe o que quer → processa direto, sem tutorial.
+      // Marca pra anexar mensagem de "7 dias grátis" depois da confirmação do gasto.
+      fastTrackPrimeiraInteracao = true;
       log.user("fast-track onboarding — processando direto", { telefone: message.telefone, userId: user.id });
       // Continua no fluxo normal abaixo
     } else {
@@ -539,9 +544,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       const saudacao  = nome ? `Oi, ${nome}! 👋` : `Oi! 👋`;
       const boas_vindas = [
         saudacao,
-        "Bem-vindo ao *Salva Bolso*! ✨",
+        "Bem-vindo ao *Salva Bolso* ✨",
         "",
-        "Para eu te ajudar a controlar seu dinheiro, qual a sua *renda mensal aproximada*? 💰",
+        "🎁 *Seus 7 dias grátis começam agora.*",
+        "Sem cartão. Você só paga se quiser continuar depois.",
+        "",
+        "Pra eu te ajudar a controlar seu dinheiro, qual sua *renda mensal aproximada*? 💰",
         "",
         "💡 _Ex: 3500_",
         "",
@@ -602,9 +610,25 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         let txtCurto = "Atenção: acesso limitado.";
 
         if (comandoBloq) {
-           txtCurto = `🔒 Função exclusiva do Premium.\n\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+           txtCurto = [
+             "🔒 Essa função é do plano pago.",
+             "",
+             "🏆 Anual R$ 99,90 (R$ 8,32/mês)",
+             "💳 Mensal R$ 14,90",
+             "",
+             "👉 https://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html",
+           ].join("\n");
         } else {
-           txtCurto = `🔒 Registro de novos gastos disponível no Premium.\n\nhttps://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+           txtCurto = [
+             "🔒 Pra continuar anotando seus gastos:",
+             "",
+             "🏆 Anual R$ 99,90 (R$ 8,32/mês — mais escolhido)",
+             "💳 Mensal R$ 14,90",
+             "",
+             "Cancela com 1 mensagem.",
+             "",
+             "👉 https://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html",
+           ].join("\n");
         }
 
         try {
@@ -1430,6 +1454,34 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (parsed.tipo === "saida") {
     const aviso = await checkLimiteCategoria(user.id, parsed.categoria);
     if (aviso) linhasConfirmacao.push("", aviso);
+  }
+
+  // Primeiro gasto registrado → anexa parabéns (ou welcome do fast-track) à confirmação
+  if (parsed.tipo === "saida") {
+    try {
+      const cntGastos = await pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1 AND tipo = 'saida'`,
+        [user.id]
+      );
+      if (Number(cntGastos.rows[0].count) === 1) {
+        if (fastTrackPrimeiraInteracao) {
+          linhasConfirmacao.push(
+            "",
+            "🎁 Bem-vindo! Seus *7 dias grátis* começam agora.",
+            "Sem cartão, sem compromisso. Manda mais gastos quando quiser — vou organizando tudo aqui.",
+          );
+        } else {
+          linhasConfirmacao.push(
+            "",
+            "🎉 *Primeiro gasto registrado!* É assim que funciona — você manda, eu organizo.",
+            "",
+            "Quer ver tudo que sei fazer? Manda *menu*.",
+          );
+        }
+      }
+    } catch (err) {
+      log.error("falha contar gastos pra parabens primeiro gasto", err, { userId: user.id });
+    }
   }
 
   const confirmacao = linhasConfirmacao.join("\n");

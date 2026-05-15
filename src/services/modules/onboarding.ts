@@ -6,6 +6,17 @@ import { fetchPeriodMetrics } from "../reportService";
 import { parseValor, parseTransaction } from "../../utils/parseTransaction";
 import type { UserRow, ProcessResult } from "../types";
 
+// Soma das contas fixas ativas (lembretes fixa=true, status != cancelado)
+async function somaContasFixas(userId: number): Promise<number> {
+  const r = await pool.query<{ total: string }>(
+    `SELECT COALESCE(SUM(valor), 0)::text AS total
+     FROM lembretes
+     WHERE user_id = $1 AND fixa = TRUE AND status <> 'cancelado'`,
+    [userId]
+  );
+  return Number(r.rows[0]?.total ?? 0);
+}
+
 export async function handleOnboardingRenda(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
   const textoTrim = texto.trim();
   const skipRenda = /^(n[aã]o\s+sei|n[aã]o\s+tenho|sem\s+renda|pula|pular|depois|n[aã]o\s+quero|prefiro\s+n[aã]o|ignore|ignora|skip)[\?!.]*$/i.test(textoTrim);
@@ -82,14 +93,16 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
   await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
 
   if (skipFixas) {
+    const renda = Number(user.renda ?? 0);
     const msg = [
-      "Tudo pronto! 🎉 Sua configuração está completa.",
+      "Tudo pronto! 🎉",
       "",
-      "Agora, o *Salva Bolso* é o seu bloco de notas inteligente 🧠✨",
-      "Sempre que gastar algo na rua, é só me mandar:",
-      "🛒 _50 mercado_  •  🚗 _35 uber_  •  💊 _120 farmácia_",
+      `💰 Tua renda registrada: ${fmtValor(renda)}`,
       "",
-      "Que tal tentar? Mande o seu *primeiro gasto* de hoje! 👇"
+      "Agora me manda o primeiro gasto de hoje pra eu te mostrar como categorizo:",
+      "🛒 _50 mercado_ • 🚗 _35 uber_ • 💊 _120 farmácia_",
+      "",
+      "Conforme você for usando, vou montando teu painel financeiro automaticamente.",
     ].join("\n");
     await whatsapp.sendText({ to: telefone, text: msg });
     return { success: false, userId: user.id, erro: "onboarding finalizado (skip fixas)" };
@@ -129,12 +142,24 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
       log.error("erro ao inserir transaction da conta fixa no onboarding", e);
     }
 
+    const renda      = Number(user.renda ?? 0);
+    const totalFixas = await somaContasFixas(user.id);
+    const sobra      = renda - totalFixas;
+
     const msg = [
-      `✅ *${capitalizeFirst(descricao)}* (${fmtValor(parsed.valor)}) salvo nas contas fixas. Tudo pronto!`,
+      `✅ Conta fixa salva: *${capitalizeFirst(descricao)}* (${fmtValor(parsed.valor)})`,
       "",
-      "É só me mandar os gastos: _50 mercado_ ou _35 uber_",
+      "Já consigo te mostrar uma coisa importante:",
       "",
-      "Mande o primeiro agora! 👇"
+      `💰 Renda: ${fmtValor(renda)}`,
+      `🏠 Contas fixas: ${fmtValor(totalFixas)}`,
+      "──────────",
+      `📊 *Sobra pro mês: ${fmtValor(sobra)}*`,
+      "",
+      "Isso é o que você tem pra dividir entre comida, lazer, transporte e o resto. Vou te ajudar a fazer render.",
+      "",
+      "Agora manda seu primeiro gasto de hoje pra eu te mostrar como categorizo na hora:",
+      "🛒 _50 mercado_ • 🚗 _35 uber_ • 💊 _120 farmácia_",
     ].join("\n");
     await whatsapp.sendText({ to: telefone, text: msg });
     return { success: false, userId: user.id, erro: "onboarding finalizado (com fixa)" };
@@ -142,14 +167,14 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
 
   // Se não conseguir parsear, apenas finaliza
   const msgFalha = [
-    "Sem problemas! Você pode adicionar contas fixas depois mandando: _'recorrente 1200 aluguel'_.",
+    'Sem problemas! Você pode adicionar contas fixas depois mandando algo como: _"lembra de pagar aluguel dia 5, 1200, todo mês"_.',
     "",
-    "Tudo pronto! Sua configuração está completa.",
+    "Por enquanto, vamos começar pelos gastos do dia a dia.",
     "",
-    "A partir de agora, é só me mandar seus gastos:",
-    "Ex: _50 mercado_ ou _35 uber_",
+    "Manda agora qualquer gasto que você fez hoje:",
+    "🛒 _50 mercado_ • 🚗 _35 uber_ • 💊 _120 farmácia_",
     "",
-    "Mande seu primeiro gasto de hoje para testar! 👇"
+    "Eu organizo, categorizo e te mostro o panorama na hora.",
   ].join("\n");
   await whatsapp.sendText({ to: telefone, text: msgFalha });
   return { success: false, userId: user.id, erro: "onboarding finalizado (falha fixa)" };
