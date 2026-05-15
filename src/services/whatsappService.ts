@@ -14,6 +14,7 @@ import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyInt
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip } from "./modules/insightsEngine";
 import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas } from "./modules/onboarding";
 import { classifyIntentWithAI } from "./modules/intentAI";
+import { resetInactivityNudge } from "./notificationService";
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria } from "./handlers/reports";
@@ -1392,6 +1393,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     transacaoRow = result.rows[0] as Record<string, unknown>;
     log.db("transacao salva", { id: transacaoRow.id, user_id: user.id });
     recordAction(user.id, "registered_transaction");
+    resetInactivityNudge(user.id).catch(() => {});
   } catch (err) {
     log.error("falha ao inserir transacao", err, { user_id: user.id });
     return { success: false, userId: user.id, erro: "Erro ao salvar transação no banco" };

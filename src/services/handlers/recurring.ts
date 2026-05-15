@@ -5,6 +5,7 @@ import { fmtValor, capitalizeFirst } from "../../utils/formatting";
 import { recordAction, setLastCommand, setLastContext } from "../conversationEngine";
 import { upsertRecorrente } from "../modules/recurringDetection";
 import { checkAndSendOnboardingTip } from "../modules/insightsEngine";
+import { resetInactivityNudge } from "../notificationService";
 import type { UserRow, ProcessResult } from "../types";
 
 export async function handleConfirmarRecorrente(user: UserRow, telefone: string, txIds: unknown): Promise<ProcessResult> {
@@ -446,6 +447,7 @@ export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, t
       [user.id, valor, row.nome]
     );
     recordAction(user.id, "registered_transaction");
+    resetInactivityNudge(user.id).catch(() => {});
     await whatsapp.sendText({ to: telefone, text: `✅ *${capitalizeFirst(row.nome)}* (${fmtValor(valor)}) registrado como pago.` });
     return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "pagar_recorrente", nome: row.nome, valor } };
   } catch (err) {

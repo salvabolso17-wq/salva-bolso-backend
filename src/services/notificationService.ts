@@ -38,11 +38,9 @@ function currentMonthStart(): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
-// Nudge de engajamento progressivo: D+1, D+3, D+7, D+14 dias sem registrar gasto.
-// Roda 1x/dia às 19h BRT. Após D+14, para até o usuário registrar algo novo.
-// Usuários que nunca registraram entram pelo mesmo cron (dias contados desde criado_em).
-const INACTIVITY_MARCOS = [1, 3, 7, 14] as const;
-
+// Nudge de engajamento progressivo: faixas 1-2 / 3-6 / 7-13 / 14+ dias sem registrar.
+// Roda 1x/dia às 19h BRT. Após o marco 14, salva ultimo_nudge_dias=14 e fica em silêncio
+// até o usuário registrar algo (reset feito por resetInactivityNudge no insert).
 const mensagensRetorno: Record<number, string> = {
   1:  "Oi! Tudo bem? 👋\nFaz 1 dia que você não anota nada.\nJá gastou algo hoje? É só me contar.",
   3:  "3 dias sem dar notícia 😬\nSem registrar, fica difícil saber pra onde foi o dinheiro.\nManda o que gastou que eu organizo pra você.",
@@ -57,59 +55,87 @@ const mensagensPrimeiroUso: Record<number, string> = {
   14: "Tudo bem, vou parar de te chamar.\nSe um dia mudar de ideia, é só me mandar qualquer gasto.\nTô aqui. 🤝",
 };
 
+function calcMarco(dias: number): 1 | 3 | 7 | 14 | null {
+  if (dias >= 14) return 14;
+  if (dias >= 7)  return 7;
+  if (dias >= 3)  return 3;
+  if (dias >= 1)  return 1;
+  return null;
+}
+
+export async function resetInactivityNudge(userId: number): Promise<void> {
+  try {
+    await pool.query(
+      `UPDATE users SET ultimo_nudge_dias = NULL WHERE id = $1 AND ultimo_nudge_dias IS NOT NULL`,
+      [userId]
+    );
+  } catch (err) {
+    log.error("falha resetInactivityNudge", err, { userId });
+  }
+}
+
 export async function sendInactivityNotifications(): Promise<{ elegiveis: number; enviados: number }> {
   let elegiveis = 0;
   let enviados = 0;
   try {
-    const { rows } = await pool.query<{ id: number; telefone: string; dias_sem_gasto: string | null; ultimo_nudge_em: string | null; ultimo_nudge_dias: number | null; ja_registrou: boolean }>(`
+    const { rows } = await pool.query<{ id: number; telefone: string; dias_sem_gasto: string | null; ultimo_nudge_em: string | null; ultimo_nudge_dias: number | null; ja_registrou: boolean; hoje_brt: string }>(`
       SELECT u.id,
              u.telefone,
-             (CURRENT_DATE - DATE(COALESCE(MAX(t.criado_em), u.criado_em) AT TIME ZONE 'America/Sao_Paulo')) AS dias_sem_gasto,
+             (DATE(NOW() AT TIME ZONE 'America/Sao_Paulo')
+              - DATE(COALESCE(MAX(t.criado_em), u.criado_em) AT TIME ZONE 'America/Sao_Paulo')) AS dias_sem_gasto,
              u.ultimo_nudge_em::text AS ultimo_nudge_em,
              u.ultimo_nudge_dias,
-             EXISTS (SELECT 1 FROM transactions t2 WHERE t2.user_id = u.id) AS ja_registrou
+             EXISTS (SELECT 1 FROM transactions t2 WHERE t2.user_id = u.id) AS ja_registrou,
+             DATE(NOW() AT TIME ZONE 'America/Sao_Paulo')::text AS hoje_brt
         FROM users u
         LEFT JOIN transactions t ON t.user_id = u.id
        GROUP BY u.id, u.telefone, u.criado_em, u.ultimo_nudge_em, u.ultimo_nudge_dias
-       HAVING (CURRENT_DATE - DATE(COALESCE(MAX(t.criado_em), u.criado_em) AT TIME ZONE 'America/Sao_Paulo')) = ANY($1::int[])
-    `, [INACTIVITY_MARCOS as unknown as number[]]);
+       HAVING (DATE(NOW() AT TIME ZONE 'America/Sao_Paulo')
+               - DATE(COALESCE(MAX(t.criado_em), u.criado_em) AT TIME ZONE 'America/Sao_Paulo')) >= 1
+    `);
 
     elegiveis = rows.length;
 
     for (const user of rows) {
       const dias = Number(user.dias_sem_gasto ?? 0);
-      const hojeISO = new Date().toISOString().slice(0, 10);
+      const marco = calcMarco(dias);
       const fluxo = user.ja_registrou ? "retorno" : "primeiro_uso";
 
-      // Skip se já nudgeou hoje OU se o último nudge foi exatamente para esse marco
-      if (user.ultimo_nudge_em === hojeISO) {
-        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=skip-ja-hoje`);
+      if (marco === null) {
+        console.log(`[NUDGE] user=${user.id} dias=${dias} marco=null fluxo=${fluxo} status=skip-sem-marco`);
         continue;
       }
-      if (user.ultimo_nudge_dias === dias) {
-        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=skip-mesmo-marco`);
+      if (user.ultimo_nudge_em === user.hoje_brt) {
+        console.log(`[NUDGE] user=${user.id} dias=${dias} marco=${marco} fluxo=${fluxo} status=skip-ja-hoje`);
+        continue;
+      }
+      if (user.ultimo_nudge_dias === marco) {
+        console.log(`[NUDGE] user=${user.id} dias=${dias} marco=${marco} fluxo=${fluxo} status=skip-mesmo-marco`);
         continue;
       }
 
       const mapa = user.ja_registrou ? mensagensRetorno : mensagensPrimeiroUso;
-      const text = mapa[dias];
+      const text = mapa[marco];
       if (!text) {
-        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=skip-marco-invalido`);
+        console.log(`[NUDGE] user=${user.id} dias=${dias} marco=${marco} fluxo=${fluxo} status=skip-sem-mensagem`);
         continue;
       }
 
       try {
         await whatsapp.sendText({ to: user.telefone, text });
         await pool.query(
-          `UPDATE users SET ultimo_nudge_em = CURRENT_DATE, ultimo_nudge_dias = $2 WHERE id = $1`,
-          [user.id, dias]
+          `UPDATE users
+              SET ultimo_nudge_em = DATE(NOW() AT TIME ZONE 'America/Sao_Paulo'),
+                  ultimo_nudge_dias = $2
+            WHERE id = $1`,
+          [user.id, marco]
         );
         enviados++;
-        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=enviado`);
-        log.whatsapp("notif inatividade enviada", { to: user.telefone, userId: user.id, dias, fluxo });
+        console.log(`[NUDGE] user=${user.id} dias=${dias} marco=${marco} fluxo=${fluxo} status=enviado`);
+        log.whatsapp("notif inatividade enviada", { to: user.telefone, userId: user.id, dias, marco, fluxo });
       } catch (err) {
-        console.log(`[NUDGE] user=${user.id} dias=${dias} fluxo=${fluxo} status=erro`);
-        log.error("falha ao enviar notif inatividade", err, { userId: user.id, dias, fluxo });
+        console.log(`[NUDGE] user=${user.id} dias=${dias} marco=${marco} fluxo=${fluxo} status=erro`);
+        log.error("falha ao enviar notif inatividade", err, { userId: user.id, dias, marco, fluxo });
       }
     }
   } catch (err) {

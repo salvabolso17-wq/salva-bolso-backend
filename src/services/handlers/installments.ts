@@ -6,6 +6,7 @@ import { parseTransaction, parseValor } from "../../utils/parseTransaction";
 import { recordAction, setLastInstallment, getLastInstallment } from "../conversationEngine";
 import { checkAndSendOnboardingTip, checkAndSendInsights, checkAndSendSmartInsights } from "../modules/insightsEngine";
 import { checkLimiteCategoria } from "./reports";
+import { resetInactivityNudge } from "../notificationService";
 import type { UserRow, ProcessResult } from "../types";
 import type { InstallmentCtx } from "../conversationEngine";
 
@@ -219,6 +220,7 @@ export async function handleInstallmentRegistration(
     const dbId = instResult.rows[0].id;
 
     recordAction(user.id, "registered_transaction");
+    resetInactivityNudge(user.id).catch(() => {});
     setLastInstallment(user.id, { item: descricao, valor, totalParcelas, parcelaAtual: 1, dbId, valorTotal: total });
     log.db("parcela salva", { id: transacaoRow.id, installmentId: dbId, user_id: user.id });
   } catch (err) {
@@ -341,6 +343,7 @@ export async function handleRegistrarParcelaValor(
     const dbId = instResult.rows[0].id;
 
     recordAction(user.id, "registered_transaction");
+    resetInactivityNudge(user.id).catch(() => {});
     setLastInstallment(user.id, { item: descricao, valor: valorParcela, totalParcelas, parcelaAtual: 1, dbId, valorTotal: total });
     log.db("parcela salva (confirmada)", { installmentId: dbId, user_id: user.id });
   } catch (err) {

@@ -6,6 +6,7 @@ import { parseTransaction } from "../../utils/parseTransaction";
 import { recordAction, setLastInstallment, recordInsightSent } from "../conversationEngine";
 import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, NEVER_RECURRING, isLikelyRecurring, detectFrequencyIntent, checkHistoricalPattern } from "../modules/recurringDetection";
 import { handleInstallmentRegistration, detectInstallment } from "./installments";
+import { resetInactivityNudge } from "../notificationService";
 import type { UserRow, ProcessResult } from "../types";
 
 export function looksLikeTransactionLine(linha: string): boolean {
@@ -99,6 +100,8 @@ export async function handleMultiLineTransactions(
     await whatsapp.sendText({ to: telefone, text: "Não consegui interpretar. Tenta uma linha por vez?" });
     return { success: false, userId: user.id, erro: "multilinha: nenhuma linha processada" };
   }
+
+  resetInactivityNudge(user.id).catch(() => {});
 
   const itens = resultados.map(r => {
     const sinal = r.tipo === "entrada" ? "+" : "";
