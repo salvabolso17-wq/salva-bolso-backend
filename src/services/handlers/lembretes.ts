@@ -203,6 +203,10 @@ function linhaItemLembrete(l: LembreteRow): string {
   const v    = fmtValorBR(Number(l.valor));
   const t    = capitalizeFirst(l.titulo);
   const dia  = l.dia_vencimento;
+  if (dias <= -30) {
+    const m = Math.round(Math.abs(dias) / 30);
+    return `${t} · ${v} · venceu há ~${m} ${m === 1 ? "mês" : "meses"}`;
+  }
   if (dias < 0) {
     const n = Math.abs(dias);
     return `${t} · ${v} · venceu há ${n} dia${n > 1 ? "s" : ""}`;
@@ -210,7 +214,9 @@ function linhaItemLembrete(l: LembreteRow): string {
   if (dias === 0) return `${t} · ${v} · hoje (dia ${dia})`;
   if (dias === 1) return `${t} · ${v} · amanhã`;
   if (dias <= 7)  return `${t} · ${v} · em ${dias} dias (dia ${dia})`;
-  return `${t} · ${v} · em ${dias} dias`;
+  if (dias < 30)  return `${t} · ${v} · em ${dias} dias`;
+  const m = Math.round(dias / 30);
+  return `${t} · ${v} · em ~${m} ${m === 1 ? "mês" : "meses"}`;
 }
 
 async function listarHandler(user: UserRow, telefone: string): Promise<ProcessResult> {
