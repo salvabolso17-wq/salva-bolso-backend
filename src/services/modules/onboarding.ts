@@ -116,7 +116,7 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
     try {
       await pool.query(
         `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status, ultimo_aviso_em)
-         SELECT $1, $2, $3,
+         SELECT $1::int, $2::text, $3::numeric,
                 LEAST(EXTRACT(DAY FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int, 28),
                 TRUE,
                 ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date + INTERVAL '1 month')::date,
@@ -124,7 +124,7 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
                 (NOW() AT TIME ZONE 'America/Sao_Paulo')::date
          WHERE NOT EXISTS (
            SELECT 1 FROM lembretes
-           WHERE user_id = $1 AND LOWER(titulo) = LOWER($2) AND fixa = TRUE AND status = 'pendente'
+           WHERE user_id = $1::int AND LOWER(titulo) = LOWER($2::text) AND fixa = TRUE AND status = 'pendente'
          )`,
         [user.id, descricao, parsed.valor]
       );
