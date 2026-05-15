@@ -170,6 +170,7 @@ function pickEscolha(t: string, max: number): number | null {
 }
 
 async function avancarCriar(user: UserRow, telefone: string, state: CriarState): Promise<ProcessResult> {
+  log.webhook("lembrete: avancarCriar", { userId: user.id, state, callstack: (new Error().stack ?? "").split("\n").slice(2, 4).join(" ← ") });
   if (!state.titulo) {
     await setContext(user.id, FLUXO_CRIAR, state);
     await send(telefone, "Boa, vamos lá. Me conta o nome da conta e o valor.\n(ex: \"Luz, 180\" ou \"Aluguel de R$ 1.200\")");
@@ -211,7 +212,9 @@ async function avancarCriar(user: UserRow, telefone: string, state: CriarState):
 
 async function listarHandler(user: UserRow, telefone: string): Promise<ProcessResult> {
   try {
+    log.webhook("lembrete: listarHandler", { userId: user.id });
     const ls = await listarLembretes(user.id);
+    log.webhook("lembrete: listarHandler resultado", { userId: user.id, total: ls.length, ids: ls.map(x => x.id), titulos: ls.map(x => x.titulo) });
     if (ls.length === 0) {
       await send(telefone, "Você ainda não tem lembretes 🙂\nEx: \"lembra de pagar luz dia 10, 180\"");
       return { success: false, userId: user.id, erro: "lembretes vazios" };

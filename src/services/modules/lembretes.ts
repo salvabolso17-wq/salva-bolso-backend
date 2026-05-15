@@ -1,4 +1,5 @@
 import pool from "../../db/client";
+import { log } from "../../utils/logger";
 
 export interface LembreteRow {
   id: number;
@@ -75,22 +76,47 @@ export async function criarLembrete(
 ): Promise<LembreteRow> {
   const tituloNorm = normalizeTitulo(titulo);
   const proxima = proximaDataParaDia(dia);
+
+  log.db("criarLembrete chamado", { userId, titulo: tituloNorm, valor, dia, fixa, proxima, stack: (new Error().stack ?? "").split("\n").slice(2, 5).join(" ← ") });
+
+  // Dedup: se já há um lembrete pendente igual (case-insensitive) criado nos últimos 60s,
+  // retorna o existente em vez de criar duplicado. Cobre dupla chamada do handler ou
+  // dedupe de webhook que escapou.
+  const dup = await pool.query<LembreteRow>(
+    `SELECT * FROM lembretes
+     WHERE user_id = $1
+       AND LOWER(titulo) = LOWER($2)
+       AND dia_vencimento = $3
+       AND status = 'pendente'
+       AND criado_em >= NOW() - INTERVAL '60 seconds'
+     ORDER BY criado_em DESC
+     LIMIT 1`,
+    [userId, tituloNorm, dia],
+  );
+  if (dup.rows[0]) {
+    log.db("criarLembrete dedup — retornando existente", { userId, lembreteId: dup.rows[0].id, titulo: tituloNorm });
+    return dup.rows[0];
+  }
+
   const r = await pool.query<LembreteRow>(
     `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status)
      VALUES ($1, $2, $3, $4, $5, $6, 'pendente')
      RETURNING *`,
     [userId, tituloNorm, valor, dia, fixa, proxima],
   );
+  log.db("criarLembrete INSERT ok", { userId, lembreteId: r.rows[0].id, titulo: tituloNorm });
   return r.rows[0];
 }
 
 export async function listarLembretes(userId: number): Promise<LembreteRow[]> {
+  log.db("listarLembretes chamado", { userId });
   const r = await pool.query<LembreteRow>(
     `SELECT * FROM lembretes
-     WHERE user_id = $1 AND status IN ('pendente','pago')
+     WHERE user_id = $1 AND status = 'pendente'
      ORDER BY proxima_data ASC, id ASC`,
     [userId],
   );
+  log.db("listarLembretes resultado", { userId, total: r.rows.length, ids: r.rows.map(x => x.id) });
   return r.rows;
 }
 
