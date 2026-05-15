@@ -2,15 +2,17 @@ import pool from "../../db/client";
 import { whatsapp } from "../whatsapp";
 import { log } from "../../utils/logger";
 import { fmtValor, capitalizeFirst } from "../../utils/formatting";
-import { interpretarLembrete, type LembreteIntencao } from "../modules/lembretesNLU";
+import { interpretarLembrete, interpretarLembreteComContexto, type LembreteIntencao } from "../modules/lembretesNLU";
 import {
   criarLembrete,
   listarLembretes,
   buscarLembretesPorTitulo,
+  getLembrete,
   marcarPago,
   cancelarLembrete,
   editarLembrete,
   diasAteVencimento,
+  dataToISO,
   type LembreteRow,
 } from "../modules/lembretes";
 import type { UserRow, ProcessResult } from "../types";
@@ -193,10 +195,11 @@ async function avancarCriar(user: UserRow, telefone: string, state: CriarState):
   try {
     const l = await criarLembrete(user.id, state.titulo, state.valor, state.dia, state.fixa);
     await clearContext(user.id);
+    log.webhook("lembrete criado", { userId: user.id, lembreteId: l.id, titulo: l.titulo, valor: state.valor, dia: state.dia, fixa: state.fixa });
     const tipo = l.fixa ? "conta fixa" : "pontual";
     await send(
       telefone,
-      `✅ Anotado!\n${capitalizeFirst(l.titulo)} · ${fmtValor(Number(l.valor))} · todo dia ${l.dia_vencimento} · ${tipo}\nVou te avisar 3, 2 e 1 dia antes do vencimento.`,
+      `📌 Lembrete criado:\n${capitalizeFirst(l.titulo)} · ${fmtValor(Number(l.valor))} · todo dia ${l.dia_vencimento} · ${tipo}\nVou te avisar 3, 2 e 1 dia antes do vencimento.`,
     );
     return { success: true, userId: user.id, transacao: { id: l.id }, interpretado: { comando: "lembrete_criar" } };
   } catch (err) {
@@ -231,10 +234,12 @@ async function listarHandler(user: UserRow, telefone: string): Promise<ProcessRe
 
 async function pagarHandler(user: UserRow, telefone: string, titulo?: string): Promise<ProcessResult> {
   if (!titulo) {
+    log.webhook("lembrete: pagar sem titulo", { userId: user.id });
     await send(telefone, "Qual conta foi paga? (ex: \"paguei a luz\")");
     return { success: false, userId: user.id, erro: "pagar sem titulo" };
   }
   const candidatos = (await buscarLembretesPorTitulo(user.id, titulo)).filter(l => l.status === "pendente");
+  log.webhook("lembrete: pagar busca", { userId: user.id, titulo, encontrados: candidatos.length });
   if (candidatos.length === 0) {
     await send(telefone, `Não achei nenhum lembrete com "${titulo}".`);
     return { success: false, userId: user.id, erro: "pagar nao encontrado" };
@@ -256,12 +261,13 @@ async function aplicarPagar(user: UserRow, telefone: string, l: LembreteRow): Pr
       await send(telefone, "Não consegui marcar como pago agora.");
       return { success: false, userId: user.id, erro: "marcarPago falhou" };
     }
+    log.webhook("lembrete: pagar aplicado", { userId: user.id, lembreteId: l.id, fixa: atualizado.fixa });
     if (atualizado.fixa) {
       const proxDia = atualizado.dia_vencimento;
-      const proxMes = new Date(atualizado.proxima_data + "T00:00:00Z").toLocaleString("pt-BR", { month: "long", timeZone: "UTC" });
-      await send(telefone, `✅ Anotado! ${capitalizeFirst(l.titulo)} quitada.\nPróximo lembrete: dia ${proxDia} de ${proxMes}.`);
+      const proxMes = new Date(dataToISO(atualizado.proxima_data) + "T00:00:00Z").toLocaleString("pt-BR", { month: "long", timeZone: "UTC" });
+      await send(telefone, `✅ ${capitalizeFirst(l.titulo)} quitada.\nPróximo lembrete: dia ${proxDia} de ${proxMes}.`);
     } else {
-      await send(telefone, `✅ Anotado! ${capitalizeFirst(l.titulo)} quitada.`);
+      await send(telefone, `✅ ${capitalizeFirst(l.titulo)} quitada.`);
     }
     return { success: true, userId: user.id, transacao: { id: l.id }, interpretado: { comando: "lembrete_pagar" } };
   } catch (err) {
@@ -468,6 +474,7 @@ export async function tryHandleLembretes(user: UserRow, telefone: string, texto:
   try {
     const ctx = await getContext(user.id);
     if (ctx && ctx.fluxo.startsWith("lembrete_")) {
+      log.webhook("lembrete: continua fluxo", { userId: user.id, fluxo: ctx.fluxo });
       return await continuarFluxo(user, telefone, texto, ctx);
     }
 
@@ -475,10 +482,29 @@ export async function tryHandleLembretes(user: UserRow, telefone: string, texto:
     // Gate: só roda NLU se há sinal mínimo de lembrete (evita custo de LLM em toda mensagem)
     const sinalLembrete =
       /\b(lembr[ae]|lembrete|me\s+avisa|me\s+lembra|notific|agendar|conta\s+fixa|nova\s+conta|anota\s+(?:uma\s+)?conta|anotar?\s+(?:uma\s+)?conta|minhas\s+contas|meus\s+lembretes|o\s+que\s+tenho\s+(?:pra|para)\s+pagar|paguei|quitei|vence|vencimento|cancela(?:r)?\s+(?:a|o|os|as)?\s*(?:luz|netflix|spotify|aluguel|internet|conta|lembrete)|todo\s+dia\s+\d{1,2}|todo\s+m[eê]s)\b/i.test(t);
-    if (!sinalLembrete) return null;
+    if (!sinalLembrete) {
+      log.webhook("lembrete: sem sinal — skip", { userId: user.id });
+      return null;
+    }
 
-    const intencao = await interpretarLembrete(texto);
+    const intencao = await interpretarLembreteComContexto(user.id, texto);
+    log.webhook("lembrete: NLU resultado", { userId: user.id, acao: intencao.acao, titulo: intencao.dados.titulo, conf: intencao.dados.confianca, lembreteId: intencao.lembreteId });
     if (intencao.acao === null) return null;
+
+    // Atalho: contexto já achou o lembrete exato → aplica direto
+    if (intencao.lembreteId && intencao.acao === "pagar") {
+      const alvo = await getLembrete(user.id, intencao.lembreteId);
+      if (alvo) return await aplicarPagar(user, telefone, alvo);
+    }
+    if (intencao.lembreteId && intencao.acao === "cancelar") {
+      const alvo = await getLembrete(user.id, intencao.lembreteId);
+      if (alvo) {
+        await setContext(user.id, FLUXO_CANCELAR, { id: alvo.id, titulo: alvo.titulo } as CancelarConfirmState);
+        await send(telefone, `Tem certeza que quer remover o lembrete de ${capitalizeFirst(alvo.titulo)}? (sim/não)`);
+        return { success: false, userId: user.id, erro: "cancelar aguardando confirmacao" };
+      }
+    }
+
     return await iniciarPorIntencao(user, telefone, intencao);
   } catch (err) {
     log.error("tryHandleLembretes falhou", err, { userId: user.id });

@@ -817,8 +817,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // ── Lembretes de contas: context persistente + NLU (heurística + LLM) ────
   // Roda ANTES do parser de gasto e do AI-first; isolado por try-catch.
   try {
+    log.webhook("rota: lembretes gate", { userId: user.id, texto: message.texto.slice(0, 80) });
     const lembreteResult = await tryHandleLembretes(user, message.telefone, message.texto);
-    if (lembreteResult !== null) return lembreteResult;
+    if (lembreteResult !== null) {
+      log.webhook("rota: lembretes handled", { userId: user.id, sucesso: lembreteResult.success });
+      return lembreteResult;
+    }
+    log.webhook("rota: lembretes passthrough", { userId: user.id });
   } catch (err) {
     log.error("tryHandleLembretes excecao", err, { userId: user.id });
   }

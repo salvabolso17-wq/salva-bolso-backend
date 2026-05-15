@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { log } from "../../utils/logger";
+import { listarLembretes, type LembreteRow } from "./lembretes";
 
 export type LembreteAcao =
   | "criar"
@@ -207,4 +208,64 @@ export async function interpretarLembrete(texto: string): Promise<LembreteIntenc
 
   if (heur) return heur;
   return { acao: null, dados: { confianca: 0 } };
+}
+
+const VERBOS_PAGAR = /\b(paguei|quitei|j[aá]\s+paguei|t[aá]\s+(?:pago|quitad[ao])|foi\s+pago|est[aá]\s+pago|foi|t[aá]\s+pago|pago)\b/i;
+const VERBOS_CANCELAR = /\b(cancela(?:r)?|cancelei|tira(?:r)?|remove(?:r)?|deleta(?:r)?|apaga(?:r)?|n[aã]o\s+tenho\s+mais)\b/i;
+
+function normTitulo(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+}
+
+// Match contra lembretes pendentes do usuário. Usa antes da LLM porque é mais
+// preciso: o título do lembrete real é a fonte de verdade.
+function matchPendente(texto: string, lembretes: LembreteRow[]): LembreteRow | null {
+  const t = normTitulo(texto);
+  for (const l of lembretes) {
+    const tit = normTitulo(l.titulo);
+    if (!tit) continue;
+    const re = new RegExp(`\\b${tit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (re.test(t)) return l;
+  }
+  // 2a passada: cada palavra do título com 4+ chars
+  for (const l of lembretes) {
+    const tokens = normTitulo(l.titulo).split(/\s+/).filter(w => w.length >= 4);
+    for (const w of tokens) {
+      const re = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+      if (re.test(t)) return l;
+    }
+  }
+  return null;
+}
+
+export async function interpretarLembreteComContexto(
+  userId: number,
+  texto: string,
+): Promise<LembreteIntencao & { lembreteId?: number }> {
+  // 1) Heurística com contexto: se texto tem verbo de pagar/cancelar E nome de
+  //    lembrete pendente do user, resolve sem LLM (alta confiança).
+  try {
+    const pendentes = (await listarLembretes(userId)).filter(l => l.status === "pendente");
+    if (pendentes.length > 0) {
+      if (VERBOS_PAGAR.test(texto)) {
+        const m = matchPendente(texto, pendentes);
+        if (m) {
+          log.webhook("lembrete: match pendente PAGAR", { userId, lembreteId: m.id, titulo: m.titulo });
+          return { acao: "pagar", dados: { titulo: m.titulo, confianca: 0.98 }, lembreteId: m.id };
+        }
+      }
+      if (VERBOS_CANCELAR.test(texto)) {
+        const m = matchPendente(texto, pendentes);
+        if (m) {
+          log.webhook("lembrete: match pendente CANCELAR", { userId, lembreteId: m.id, titulo: m.titulo });
+          return { acao: "cancelar", dados: { titulo: m.titulo, confianca: 0.95 }, lembreteId: m.id };
+        }
+      }
+    }
+  } catch (err) {
+    log.error("interpretarLembreteComContexto: match pendentes falhou", err, { userId });
+  }
+
+  // 2) Fallback: NLU normal (heurística + LLM)
+  return await interpretarLembrete(texto);
 }

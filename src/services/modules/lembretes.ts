@@ -7,11 +7,23 @@ export interface LembreteRow {
   valor: string;
   dia_vencimento: number;
   fixa: boolean;
-  proxima_data: string;
+  proxima_data: string | Date;
   status: string;
-  ultimo_aviso_em: string | null;
+  ultimo_aviso_em: string | Date | null;
   criado_em: Date;
   atualizado_em: Date;
+}
+
+function pad2(n: number): string { return String(n).padStart(2, "0"); }
+
+export function dataToISO(d: string | Date): string {
+  if (d instanceof Date) {
+    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+  }
+  // pg pode mandar "YYYY-MM-DD" ou ISO completo; pegamos só os 10 primeiros chars válidos
+  const s = String(d);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : s;
 }
 
 function nowBRT(): Date {
@@ -39,8 +51,9 @@ function proximaDataParaDia(dia: number, base?: Date): string {
   return `${ano}-${String(mes).padStart(2, "0")}-${String(diaFinal).padStart(2, "0")}`;
 }
 
-function proxMesParaDia(dia: number, dataAtual: string): string {
-  const [a, m] = dataAtual.split("-").map(n => parseInt(n, 10));
+function proxMesParaDia(dia: number, dataAtual: string | Date): string {
+  const iso = dataToISO(dataAtual);
+  const [a, m] = iso.split("-").map(n => parseInt(n, 10));
   let ano = a;
   let mes = m + 1;
   if (mes > 12) { mes = 1; ano += 1; }
@@ -184,10 +197,12 @@ export async function marcarAvisoEnviado(id: number, marco: string): Promise<voi
   void marco;
 }
 
-export function diasAteVencimento(proxima_data: string): number {
+export function diasAteVencimento(proxima_data: string | Date): number {
   const hoje = nowBRT();
-  const hojeStr = `${hoje.getUTCFullYear()}-${String(hoje.getUTCMonth() + 1).padStart(2, "0")}-${String(hoje.getUTCDate()).padStart(2, "0")}`;
+  const hojeStr = `${hoje.getUTCFullYear()}-${pad2(hoje.getUTCMonth() + 1)}-${pad2(hoje.getUTCDate())}`;
+  const isoData = dataToISO(proxima_data);
   const a = new Date(hojeStr + "T00:00:00Z").getTime();
-  const b = new Date(proxima_data + "T00:00:00Z").getTime();
+  const b = new Date(isoData  + "T00:00:00Z").getTime();
+  if (isNaN(a) || isNaN(b)) return 0;
   return Math.round((b - a) / (24 * 60 * 60 * 1000));
 }
