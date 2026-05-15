@@ -259,20 +259,20 @@ async function pagarHandler(user: UserRow, telefone: string, titulo?: string): P
 
 async function aplicarPagar(user: UserRow, telefone: string, l: LembreteRow): Promise<ProcessResult> {
   try {
-    const atualizado = await marcarPago(user.id, l.id);
-    if (!atualizado) {
-      await send(telefone, "Não consegui marcar como pago agora.");
-      return { success: false, userId: user.id, erro: "marcarPago falhou" };
+    const r = await marcarPago(user.id, l.id);
+    if (!r) {
+      await send(telefone, "Esse lembrete já tinha sido pago ou cancelado.");
+      return { success: false, userId: user.id, erro: "marcarPago no-op" };
     }
-    log.webhook("lembrete: pagar aplicado", { userId: user.id, lembreteId: l.id, fixa: atualizado.fixa });
-    if (atualizado.fixa) {
-      const proxDia = atualizado.dia_vencimento;
-      const proxMes = new Date(dataToISO(atualizado.proxima_data) + "T00:00:00Z").toLocaleString("pt-BR", { month: "long", timeZone: "UTC" });
-      await send(telefone, `✅ ${capitalizeFirst(l.titulo)} quitada.\nPróximo lembrete: dia ${proxDia} de ${proxMes}.`);
+    log.webhook("lembrete: pagar aplicado", { userId: user.id, lembreteId: l.id, fixa: r.pago.fixa, proximoId: r.proximo?.id ?? null });
+    if (r.proximo) {
+      const proxDia = r.proximo.dia_vencimento;
+      const proxMes = new Date(dataToISO(r.proximo.proxima_data) + "T00:00:00Z").toLocaleString("pt-BR", { month: "long", timeZone: "UTC" });
+      await send(telefone, `✅ ${capitalizeFirst(r.pago.titulo)} quitada.\nPróximo lembrete: dia ${proxDia} de ${proxMes}.`);
     } else {
-      await send(telefone, `✅ ${capitalizeFirst(l.titulo)} quitada.`);
+      await send(telefone, `✅ ${capitalizeFirst(r.pago.titulo)} quitada.`);
     }
-    return { success: true, userId: user.id, transacao: { id: l.id }, interpretado: { comando: "lembrete_pagar" } };
+    return { success: true, userId: user.id, transacao: { id: r.pago.id }, interpretado: { comando: "lembrete_pagar" } };
   } catch (err) {
     log.error("falha aplicar pagar", err, { userId: user.id, id: l.id });
     return { success: false, userId: user.id, erro: "pagar falhou" };

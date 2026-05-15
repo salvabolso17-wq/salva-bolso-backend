@@ -140,30 +140,42 @@ export async function getLembrete(userId: number, id: number): Promise<LembreteR
   return r.rows[0] ?? null;
 }
 
-export async function marcarPago(userId: number, id: number): Promise<LembreteRow | null> {
-  const cur = await getLembrete(userId, id);
-  if (!cur) return null;
+export interface MarcarPagoResult {
+  pago: LembreteRow;
+  proximo: LembreteRow | null;
+}
 
-  if (cur.fixa) {
-    const novaData = proxMesParaDia(cur.dia_vencimento, cur.proxima_data);
-    const r = await pool.query<LembreteRow>(
-      `UPDATE lembretes
-       SET status = 'pendente', proxima_data = $1, ultimo_aviso_em = NULL, atualizado_em = NOW()
-       WHERE id = $2 AND user_id = $3
-       RETURNING *`,
-      [novaData, id, userId],
-    );
-    return r.rows[0] ?? null;
-  } else {
-    const r = await pool.query<LembreteRow>(
-      `UPDATE lembretes
-       SET status = 'pago', atualizado_em = NOW()
-       WHERE id = $1 AND user_id = $2
-       RETURNING *`,
-      [id, userId],
-    );
-    return r.rows[0] ?? null;
+export async function marcarPago(userId: number, id: number): Promise<MarcarPagoResult | null> {
+  // 1) UPDATE atômico pendente → pago (condicionado a status='pendente' pra evitar dupla marcação)
+  const upd = await pool.query<LembreteRow>(
+    `UPDATE lembretes
+     SET status = 'pago', atualizado_em = NOW()
+     WHERE id = $1 AND user_id = $2 AND status = 'pendente'
+     RETURNING *`,
+    [id, userId],
+  );
+  if ((upd.rowCount ?? 0) === 0) {
+    log.db("marcarPago — nenhum row pendente alterado", { userId, id });
+    return null;
   }
+  const pago = upd.rows[0];
+  log.db("marcarPago — pendente→pago", { userId, id, titulo: pago.titulo });
+
+  // 2) Se fixa, cria novo lembrete pendente para o próximo mês
+  let proximo: LembreteRow | null = null;
+  if (pago.fixa) {
+    const novaData = proxMesParaDia(pago.dia_vencimento, pago.proxima_data);
+    const ins = await pool.query<LembreteRow>(
+      `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pendente')
+       RETURNING *`,
+      [userId, pago.titulo, pago.valor, pago.dia_vencimento, pago.fixa, novaData],
+    );
+    proximo = ins.rows[0] ?? null;
+    log.db("marcarPago — proximo mes criado", { userId, proximoId: proximo?.id, proximaData: novaData });
+  }
+
+  return { pago, proximo };
 }
 
 export async function cancelarLembrete(userId: number, id: number): Promise<boolean> {
