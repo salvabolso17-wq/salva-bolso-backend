@@ -120,6 +120,32 @@ export async function listarLembretes(userId: number): Promise<LembreteRow[]> {
   return r.rows;
 }
 
+export interface LembretesParaTela {
+  pendentes: LembreteRow[];   // todos pendentes (atrasados + futuros)
+  pagosMes:  LembreteRow[];   // pagos com proxima_data no mês BRT corrente
+}
+
+// Retorna pendentes + pagos do mês corrente (BRT) pra renderização agrupada por urgência.
+export async function listarLembretesParaTela(userId: number): Promise<LembretesParaTela> {
+  log.db("listarLembretesParaTela chamado", { userId });
+  const pendentesRes = await pool.query<LembreteRow>(
+    `SELECT * FROM lembretes
+     WHERE user_id = $1 AND status = 'pendente'
+     ORDER BY proxima_data ASC, id ASC`,
+    [userId],
+  );
+  const pagosRes = await pool.query<LembreteRow>(
+    `SELECT * FROM lembretes
+     WHERE user_id = $1 AND status = 'pago'
+       AND date_trunc('month', proxima_data) =
+           date_trunc('month', (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)
+     ORDER BY proxima_data ASC, id ASC`,
+    [userId],
+  );
+  log.db("listarLembretesParaTela resultado", { userId, pendentes: pendentesRes.rows.length, pagosMes: pagosRes.rows.length });
+  return { pendentes: pendentesRes.rows, pagosMes: pagosRes.rows };
+}
+
 export async function buscarLembretesPorTitulo(userId: number, titulo: string): Promise<LembreteRow[]> {
   const termo = `%${titulo.trim().toLowerCase()}%`;
   const r = await pool.query<LembreteRow>(

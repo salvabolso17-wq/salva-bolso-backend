@@ -5,7 +5,7 @@ import { fmtValor, capitalizeFirst } from "../../utils/formatting";
 import { interpretarLembrete, interpretarLembreteComContexto, type LembreteIntencao } from "../modules/lembretesNLU";
 import {
   criarLembrete,
-  listarLembretes,
+  listarLembretesParaTela,
   buscarLembretesPorTitulo,
   getLembrete,
   marcarPago,
@@ -85,23 +85,6 @@ async function clearContext(userId: number): Promise<void> {
   } catch (err) {
     log.error("clearContext falhou", err, { userId });
   }
-}
-
-function fmtDataLembrete(l: LembreteRow): string {
-  const dias = diasAteVencimento(l.proxima_data);
-  const dia  = l.dia_vencimento;
-  if (l.status === "pago") return `pago`;
-  if (dias < 0)            return `venceu há ${Math.abs(dias)} dia${Math.abs(dias) > 1 ? "s" : ""}`;
-  if (dias === 0)          return `vence hoje (dia ${dia})`;
-  if (dias === 1)          return `vence amanhã (dia ${dia})`;
-  return `vence dia ${dia} (em ${dias} dia${dias > 1 ? "s" : ""})`;
-}
-
-function emojiLembrete(l: LembreteRow): string {
-  if (l.status === "pago") return "✅";
-  const dias = diasAteVencimento(l.proxima_data);
-  if (dias <= 1) return "⚠️";
-  return "⏰";
 }
 
 async function send(telefone: string, text: string): Promise<void> {
@@ -210,23 +193,89 @@ async function avancarCriar(user: UserRow, telefone: string, state: CriarState):
   }
 }
 
+function fmtValorBR(n: number): string {
+  const decimais = n % 1 === 0 ? 0 : 2;
+  return "R$ " + n.toLocaleString("pt-BR", { minimumFractionDigits: decimais, maximumFractionDigits: 2 });
+}
+
+function linhaItemLembrete(l: LembreteRow): string {
+  const dias = diasAteVencimento(l.proxima_data);
+  const v    = fmtValorBR(Number(l.valor));
+  const t    = capitalizeFirst(l.titulo);
+  const dia  = l.dia_vencimento;
+  if (dias < 0) {
+    const n = Math.abs(dias);
+    return `${t} · ${v} · venceu há ${n} dia${n > 1 ? "s" : ""}`;
+  }
+  if (dias === 0) return `${t} · ${v} · hoje (dia ${dia})`;
+  if (dias === 1) return `${t} · ${v} · amanhã`;
+  if (dias <= 7)  return `${t} · ${v} · em ${dias} dias (dia ${dia})`;
+  return `${t} · ${v} · em ${dias} dias`;
+}
+
 async function listarHandler(user: UserRow, telefone: string): Promise<ProcessResult> {
   try {
     log.webhook("lembrete: listarHandler", { userId: user.id });
-    const ls = await listarLembretes(user.id);
-    log.webhook("lembrete: listarHandler resultado", { userId: user.id, total: ls.length, ids: ls.map(x => x.id), titulos: ls.map(x => x.titulo) });
-    if (ls.length === 0) {
-      await send(telefone, "Você ainda não tem lembretes 🙂\nEx: \"lembra de pagar luz dia 10, 180\"");
+    const { pendentes, pagosMes } = await listarLembretesParaTela(user.id);
+    log.webhook("lembrete: listarHandler resultado", {
+      userId: user.id,
+      pendentes: pendentes.length,
+      pagosMes:  pagosMes.length,
+      idsPend:   pendentes.map(x => x.id),
+      idsPagos:  pagosMes.map(x => x.id),
+    });
+
+    // Vazio total: nenhuma conta cadastrada
+    if (pendentes.length === 0 && pagosMes.length === 0) {
+      await send(
+        telefone,
+        '🍃 Você não tem nenhuma conta cadastrada.\n\nQuer começar? Manda algo como:\n"lembra de pagar luz dia 10, 180 reais, todo mês"',
+      );
       return { success: false, userId: user.id, erro: "lembretes vazios" };
     }
-    const linhas: string[] = ["📋 Suas contas do mês:", ""];
-    let totalPagar = 0;
-    for (const l of ls) {
-      const v = Number(l.valor);
-      linhas.push(`${emojiLembrete(l)} ${capitalizeFirst(l.titulo)} · ${fmtValor(v)} · ${fmtDataLembrete(l)}`);
-      if (l.status === "pendente") totalPagar += v;
+
+    // Só pagos: tudo em dia esse mês
+    if (pendentes.length === 0 && pagosMes.length > 0) {
+      const totalPago = pagosMes.reduce((s, l) => s + Number(l.valor), 0);
+      await send(
+        telefone,
+        `✅ Tudo em dia esse mês!\n\nJá pago: ${fmtValorBR(totalPago)}\nNada pendente. Bom trabalho 👏`,
+      );
+      return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "lembrete_listar_em_dia" } };
     }
-    linhas.push("", `Total a pagar: ${fmtValor(totalPagar)}`);
+
+    // Agrupa pendentes por urgência
+    const atrasadas: LembreteRow[] = [];
+    const hoje:      LembreteRow[] = [];
+    const semana:    LembreteRow[] = [];
+    const depois:    LembreteRow[] = [];
+    for (const l of pendentes) {
+      const d = diasAteVencimento(l.proxima_data);
+      if (d < 0)       atrasadas.push(l);
+      else if (d === 0) hoje.push(l);
+      else if (d <= 7)  semana.push(l);
+      else              depois.push(l);
+    }
+
+    const linhas: string[] = ["📋 Suas contas", ""];
+    const pushGrupo = (titulo: string, items: LembreteRow[]) => {
+      if (items.length === 0) return;
+      linhas.push(`${titulo} (${items.length})`);
+      for (const l of items) linhas.push("   " + linhaItemLembrete(l));
+      linhas.push("");
+    };
+    pushGrupo("🚨 ATRASADAS",     atrasadas);
+    pushGrupo("⏰ VENCE HOJE",    hoje);
+    pushGrupo("📅 ESSA SEMANA",   semana);
+    pushGrupo("🗓️ PRÓXIMOS DIAS", depois);
+
+    const totalPagar = pendentes.reduce((s, l) => s + Number(l.valor), 0);
+    const totalPago  = pagosMes.reduce((s, l) => s + Number(l.valor), 0);
+
+    linhas.push("──────────");
+    linhas.push(`💰 A pagar: ${fmtValorBR(totalPagar)}`);
+    if (totalPago > 0) linhas.push(`✅ Já pago esse mês: ${fmtValorBR(totalPago)}`);
+
     await send(telefone, linhas.join("\n"));
     return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "lembrete_listar" } };
   } catch (err) {
