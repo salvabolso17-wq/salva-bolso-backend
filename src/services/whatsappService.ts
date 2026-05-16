@@ -20,7 +20,7 @@ import { resetInactivityNudge } from "./notificationService";
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand, handleDetalhadoCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
 import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
-import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo } from "./handlers/recurring";
+import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo, handleConfirmarDesfazer } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
 import { tryHandleLembretes } from "./handlers/lembretes";
@@ -648,8 +648,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_status_vencida" | "onboarding_fixa_status_vencida_solo" | "onboarding_fixa_status_vencida_batch";
-    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia" | "waiting_status_vencida" | "waiting_status_vencida_batch";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_status_vencida" | "onboarding_fixa_status_vencida_solo" | "onboarding_fixa_status_vencida_batch" | "pagamento_recente" | "confirmar_desfazer";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia" | "waiting_status_vencida" | "waiting_status_vencida_batch" | "aguardando_desfazer";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -680,6 +680,30 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       // Não matched: deixa o pending vivo e segue fluxo normal (parse de gasto etc.)
     }
 
+    // Detector de "desfazer" pós-pagamento — silent fallthrough se não match
+    if (pending.action === "pagamento_recente" && pending.step === "aguardando_desfazer") {
+      if (/^(n[ãa]o|nao|errei|espera|calma|opa|pera[ií]+|desfaz|desfazer|n[ãa]o\s+era|n[ãa]o\s+foi|ainda\s+n[ãa]o|t[ôo]\s+errado|t[áa]\s+errado|cancela\s+isso|volta)\b/i.test(textoTrim)) {
+        const data = pending.tx_ids as { titulo: string; valor: number };
+        await pool.query(
+          `UPDATE pending_actions
+             SET action = 'confirmar_desfazer', step = 'waiting_confirmation',
+                 expires_at = NOW() + INTERVAL '5 minutes'
+           WHERE user_id = $1`,
+          [user.id]
+        );
+        await whatsapp.sendText({
+          to:   message.telefone,
+          text: `Opa, quer desfazer o pagamento de *${capitalizeFirst(data.titulo)}* (${fmtValor(data.valor)})?\n💡 _sim_ • _não_`,
+        });
+        return { success: false, userId: user.id, erro: "aguardando confirmação desfazer" };
+      }
+      // Não matched: deixa pending vivo, segue fluxo normal
+    }
+
+    if (pending.action === "confirmar_desfazer" && pending.step === "waiting_confirmation") {
+      return await handleConfirmarDesfazer(user, message.telefone, textoTrim, pending.tx_ids);
+    }
+
     if (pending.action === "confirmar_pagar_fixa" && pending.step === "waiting_confirmation") {
       return await handleConfirmarPagarFixa(user, message.telefone, textoTrim, pending.tx_ids);
     } else if (pending.action === "onboarding_fixa_aguardando_dia" && pending.step === "waiting_dia") {
@@ -703,7 +727,34 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           ? await handleApagarSelecao(user, message.telefone, txId)
           : await handleCorrigirSelecao(user, message.telefone, txId);
       }
+
+      // Match por texto natural (descricao ILIKE)
       if (!isKnownCommand(textoTrim)) {
+        const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+        const target = norm(textoTrim).replace(/^(o|a|os|as|um|uma|uns|umas|n[uú]mero)\s+/, "").trim();
+        if (target.length >= 2) {
+          const txInfo = await pool.query<{ id: number; descricao: string; categoria: string }>(
+            `SELECT id, descricao, categoria FROM transactions WHERE id = ANY($1::int[])`,
+            [txIds]
+          );
+          const matches = txInfo.rows.filter(r => {
+            const d = norm((r.descricao || r.categoria || ""));
+            return d.includes(target) || target.includes(d);
+          });
+          if (matches.length === 1) {
+            return pending.action === "apagar"
+              ? await handleApagarSelecao(user, message.telefone, matches[0].id)
+              : await handleCorrigirSelecao(user, message.telefone, matches[0].id);
+          }
+          if (matches.length > 1) {
+            const lista = matches.map((m, i) => `${i + 1}. ${m.descricao ?? m.categoria}`).join("\n");
+            await whatsapp.sendText({
+              to:   message.telefone,
+              text: `Achei mais de um. Qual?\n${lista}\n\n💡 Manda o número ou nome mais específico`,
+            });
+            return { success: false, userId: user.id, erro: "Aguardando seleção (múltiplos matches)" };
+          }
+        }
         await whatsapp.sendText({
           to:   message.telefone,
           text: `Manda o nome ou número do gasto que quer corrigir.\n💡 _Ex: o aluguel_ • _número 2_`,
@@ -1452,6 +1503,25 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
             });
           } catch (err) {
             log.error("falha ao enviar confirmação fixa marcada pago", err, { to: message.telefone });
+          }
+          try {
+            const insTxRow = insRes.rows[0] as { id: number };
+            await pool.query(
+              `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+               VALUES ($1, 'pagamento_recente', 'aguardando_desfazer', $2::jsonb, NOW() + INTERVAL '10 minutes')
+               ON CONFLICT (user_id) DO UPDATE
+                 SET action = 'pagamento_recente', step = 'aguardando_desfazer', tx_ids = $2::jsonb,
+                     selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+              [user.id, JSON.stringify({
+                lembrete_pago_id:    lembrete.id,
+                transaction_id:      insTxRow.id,
+                proximo_lembrete_id: mp?.proximo?.id ?? null,
+                titulo:              lembrete.titulo,
+                valor:               parsed.valor,
+              })]
+            );
+          } catch (err) {
+            log.error("falha ao gravar pagamento_recente (Camada 1)", err, { userId: user.id });
           }
           return {
             success:      true,

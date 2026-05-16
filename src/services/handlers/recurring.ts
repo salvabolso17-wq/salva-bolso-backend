@@ -655,21 +655,97 @@ export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, t
 
     // Marca pendente → pago e cria o próximo mês (lógica em modules/lembretes.ts)
     const { marcarPago } = await import("../modules/lembretes");
-    await marcarPago(user.id, row.id);
+    const mp = await marcarPago(user.id, row.id);
 
-    await pool.query(
+    const insTx = await pool.query<{ id: number }>(
       `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
-       VALUES ($1, 'saida', $2, 'Moradia', $3)`,
+       VALUES ($1, 'saida', $2, 'Moradia', $3)
+       RETURNING id`,
       [user.id, valor, row.titulo]
     );
     recordAction(user.id, "registered_transaction");
     resetInactivityNudge(user.id).catch(() => {});
     await whatsapp.sendText({ to: telefone, text: `✅ Marquei o pagamento de *${capitalizeFirst(row.titulo)}*.` });
+    try {
+      await pool.query(
+        `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+         VALUES ($1, 'pagamento_recente', 'aguardando_desfazer', $2::jsonb, NOW() + INTERVAL '10 minutes')
+         ON CONFLICT (user_id) DO UPDATE
+           SET action = 'pagamento_recente', step = 'aguardando_desfazer', tx_ids = $2::jsonb,
+               selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+        [user.id, JSON.stringify({
+          lembrete_pago_id:    row.id,
+          transaction_id:      insTx.rows[0].id,
+          proximo_lembrete_id: mp?.proximo?.id ?? null,
+          titulo:              row.titulo,
+          valor,
+        })]
+      );
+    } catch (err) {
+      log.error("falha ao gravar pagamento_recente (handlePagarRecorrenteAI)", err, { userId: user.id });
+    }
     return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "pagar_recorrente", nome: row.titulo, valor } };
   } catch (err) {
     log.error("handlePagarRecorrenteAI falhou", err, { userId: user.id });
     return { success: false, userId: user.id, erro: "erro pagar recorrente" };
   }
+}
+
+// ── Desfazer pagamento recente ───────────────────────────────────────────────
+export async function handleConfirmarDesfazer(
+  user: UserRow, telefone: string, texto: string, txIdsRaw: unknown
+): Promise<ProcessResult> {
+  type Payload = {
+    lembrete_pago_id:    number;
+    transaction_id:      number;
+    proximo_lembrete_id: number | null;
+    titulo:              string;
+    valor:               number;
+  };
+  const data = (txIdsRaw ?? {}) as Payload;
+  const t = texto.trim();
+  const isSim = /(sim|s|isso|exato|por\s+favor|desfaz|pode)/i.test(t);
+  const isNao = /(n[ãa]o|nao|deixa|t[áa]\s+certo|ok|tudo\s+bem)/i.test(t);
+
+  if (!isSim && !isNao) {
+    await whatsapp.sendText({ to: telefone, text: "Só responde *sim* ou *não* 🙂\n💡 _sim_ • _não_" });
+    return { success: false, userId: user.id, erro: "resposta inválida desfazer" };
+  }
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+  if (isSim) {
+    try {
+      await pool.query(
+        `UPDATE lembretes SET status = 'pendente', atualizado_em = NOW()
+         WHERE id = $1 AND user_id = $2`,
+        [data.lembrete_pago_id, user.id]
+      );
+      await pool.query(
+        `DELETE FROM transactions WHERE id = $1 AND user_id = $2`,
+        [data.transaction_id, user.id]
+      );
+      if (data.proximo_lembrete_id) {
+        await pool.query(
+          `DELETE FROM lembretes WHERE id = $1 AND user_id = $2`,
+          [data.proximo_lembrete_id, user.id]
+        );
+      }
+    } catch (err) {
+      log.error("handleConfirmarDesfazer reverter falhou", err, { userId: user.id });
+    }
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `✅ Desfeito. *${capitalizeFirst(data.titulo)}* voltou pra pendente.`,
+    });
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "desfazer_pagamento", lembrete_id: data.lembrete_pago_id } };
+  }
+
+  await whatsapp.sendText({
+    to:   telefone,
+    text: "Beleza, mantive como pago.\n💡 Se precisar corrigir depois, manda _corrigir_",
+  });
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "desfazer_recusado" } };
 }
 
 // ── Confirmar match fraco com fixa (Camada 2) ────────────────────────────────
