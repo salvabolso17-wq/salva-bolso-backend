@@ -67,21 +67,7 @@ export async function handleConfirmarRecorrente(user: UserRow, telefone: string,
         to:   telefone,
         text: `Perfeito 🙂\nVou acompanhar ${nomes} automaticamente. Se algum vencer em outro dia, manda "muda <nome> pra dia X".`,
       });
-      log.whatsapp("lembretes confirmados (lista)", { to: telefone, userId: user.id, count: items.length });
-      if (novos.length > 0) {
-        await pool.query(
-          `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
-           VALUES ($1, 'confirmar_fixa_mes_atual', 'waiting_status', $2::jsonb, NOW() + INTERVAL '1 hour')
-           ON CONFLICT (user_id) DO UPDATE
-             SET action = 'confirmar_fixa_mes_atual', step = 'waiting_status', tx_ids = $2::jsonb,
-                 selected_tx_id = NULL, expires_at = NOW() + INTERVAL '1 hour'`,
-          [user.id, JSON.stringify({ queue: novos })]
-        );
-        await whatsapp.sendText({
-          to:   telefone,
-          text: `E a *${capitalizeFirst(novos[0].titulo)}* desse mês — já tá paga ou ainda vai pagar?\n💡 Ex: já paguei  •  ainda vou pagar`,
-        });
-      }
+      log.whatsapp("lembretes confirmados (lista)", { to: telefone, userId: user.id, count: items.length, novos: novos.length });
       return { success: false, userId: user.id, erro: "Lembretes confirmados (lote)" };
     }
 
@@ -127,64 +113,110 @@ export async function handleConfirmarRecorrenteMulti(user: UserRow, telefone: st
     return { success: false, userId: user.id, erro: "Aguardando seleção válida" };
   }
 
-  const selectedItems = selectedIndices.map(i => items[i]);
-  const itemsComDia = selectedItems.map(it => ({ nome: it.nome, valor: it.valor, dia: null as number | null }));
+  const selectedItems = selectedIndices.map(i => items[i]).map(it => ({ nome: it.nome, valor: it.valor }));
 
   await pool.query(
-    `INSERT INTO pending_actions (user_id, action, step, tx_ids)
-     VALUES ($1, 'dia_recorrente_multi', 'waiting_dia_individual', $2::jsonb)
+    `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+     VALUES ($1, 'dias_recorrentes_batch', 'waiting_dias_batch', $2::jsonb, NOW() + INTERVAL '1 hour')
      ON CONFLICT (user_id) DO UPDATE
-       SET action = 'dia_recorrente_multi', step = 'waiting_dia_individual', tx_ids = $2::jsonb,
+       SET action = 'dias_recorrentes_batch', step = 'waiting_dias_batch', tx_ids = $2::jsonb,
            selected_tx_id = NULL, expires_at = NOW() + INTERVAL '1 hour'`,
-    [user.id, JSON.stringify(itemsComDia)]
+    [user.id, JSON.stringify({ items: selectedItems })]
   );
 
+  const bullets   = selectedItems.map(it => `• ${capitalizeFirst(it.nome)} ${fmtValor(it.valor)}`).join("\n");
+  const diasEx    = [5, 10, 15];
+  const exemplo   = selectedItems.map((it, i) => `${it.nome} ${diasEx[i % diasEx.length]}`).join(", ");
   await whatsapp.sendText({
-    to: telefone,
-    text: `📅 Que dia do mês vence a *${capitalizeFirst(itemsComDia[0].nome)}*?\n💡 _Ex: 5_`,
+    to:   telefone,
+    text: `✅ ${selectedItems.length} anotadas:\n${bullets}\n\n📅 Manda os dias de vencimento assim:\n💡 _${exemplo}_`,
   });
 
-  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "dia_recorrente_multi_inicio" } };
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "dias_recorrentes_batch_pedido" } };
 }
 
-export async function handleDiaRecorrenteMulti(user: UserRow, telefone: string, texto: string, itemsRaw: unknown): Promise<ProcessResult> {
-  type Item = { nome: string; valor: number; dia: number | null };
-  const items = (Array.isArray(itemsRaw) ? itemsRaw : []) as Item[];
+function parseBatchDias(
+  texto: string,
+  items: { nome: string; valor: number }[]
+):
+  | { ok: true; dias: number[] }
+  | { ok: false; reason: "missing"; missingNames: string[] }
+  | { ok: false; reason: "invalid" } {
+
+  const dias: (number | null)[] = items.map(() => null);
+  const t = texto.toLowerCase();
+  let namedMatched = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const nome = items[i].nome.toLowerCase();
+    const idx = t.indexOf(nome);
+    if (idx !== -1) {
+      const after = t.slice(idx + nome.length, idx + nome.length + 20);
+      const m = after.match(/(\d{1,2})/);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n >= 1 && n <= 31) {
+          dias[i] = n;
+          namedMatched++;
+        } else {
+          return { ok: false, reason: "invalid" };
+        }
+      }
+    }
+  }
+
+  if (namedMatched === items.length) {
+    return { ok: true, dias: dias as number[] };
+  }
+
+  // Fallback ordenado quando nenhum nome casou
+  if (namedMatched === 0) {
+    const allNums = (texto.match(/\d{1,2}/g) || []).map(s => parseInt(s, 10));
+    if (allNums.some(n => n < 1 || n > 31)) return { ok: false, reason: "invalid" };
+    if (allNums.length === items.length)    return { ok: true, dias: allNums };
+    if (allNums.length < items.length) {
+      const missing = items.slice(allNums.length).map(i => i.nome);
+      return { ok: false, reason: "missing", missingNames: missing };
+    }
+    return { ok: false, reason: "invalid" };
+  }
+
+  // Match parcial nomeado
+  const missingNames = items.filter((_, i) => dias[i] === null).map(it => it.nome);
+  return { ok: false, reason: "missing", missingNames };
+}
+
+export async function handleDiasRecorrentesBatch(
+  user: UserRow, telefone: string, texto: string, txIdsRaw: unknown
+): Promise<ProcessResult> {
+  type Item = { nome: string; valor: number };
+  const payload = (txIdsRaw ?? {}) as { items?: Item[] };
+  const items = Array.isArray(payload.items) ? payload.items : [];
   if (items.length === 0) {
     await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     return { success: false, userId: user.id, erro: "items vazio" };
   }
 
-  const m = texto.trim().match(/^(\d{1,2})/);
-  const dia = m ? parseInt(m[1], 10) : NaN;
-  if (isNaN(dia) || dia < 1 || dia > 31) {
-    await whatsapp.sendText({ to: telefone, text: "Só o número do dia (1 a 31) 🙂\n💡 _Ex: 5_" });
-    return { success: false, userId: user.id, erro: "dia invalido" };
+  const parsed = parseBatchDias(texto, items);
+  if (!parsed.ok && parsed.reason === "invalid") {
+    const diasEx  = [5, 10, 15];
+    const exemplo = items.map((it, i) => `${it.nome} ${diasEx[i % diasEx.length]}`).join(", ");
+    await whatsapp.sendText({ to: telefone, text: `Esses números não bateram. Manda assim:\n_${exemplo}_` });
+    return { success: false, userId: user.id, erro: "dias inválidos" };
   }
-  const diaClamp = Math.min(dia, 28);
-
-  const idx = items.findIndex(i => i.dia === null);
-  if (idx === -1) {
-    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
-    return { success: false, userId: user.id, erro: "nenhum item pendente" };
-  }
-  items[idx].dia = diaClamp;
-
-  const prox = items.findIndex(i => i.dia === null);
-  if (prox !== -1) {
-    await pool.query(
-      `UPDATE pending_actions SET tx_ids = $1::jsonb, expires_at = NOW() + INTERVAL '1 hour' WHERE user_id = $2`,
-      [JSON.stringify(items), user.id]
-    );
-    await whatsapp.sendText({ to: telefone, text: `📅 E a *${capitalizeFirst(items[prox].nome)}*?\n💡 _Ex: 10_` });
-    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "dia_recorrente_multi_proximo" } };
+  if (!parsed.ok && parsed.reason === "missing") {
+    const faltante = parsed.missingNames[0];
+    await whatsapp.sendText({ to: telefone, text: `Faltou o dia de *${capitalizeFirst(faltante)}*. Manda só esse: _${faltante} 5_` });
+    return { success: false, userId: user.id, erro: "dias faltando" };
   }
 
-  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+  const diasFinais = (parsed as { ok: true; dias: number[] }).dias.map(d => Math.min(d, 28));
+
   let totalFixo = 0;
-  const novos: { lembrete_id: number; titulo: string; valor: number }[] = [];
-  for (const item of items) {
-    const r = await pool.query<{ id: number; titulo: string; valor: string }>(
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const diaClamp = diasFinais[i];
+    await pool.query(
       `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status, ultimo_aviso_em)
        SELECT $1::int, $2::text, $3::numeric, $4::int, TRUE,
               (
@@ -203,50 +235,29 @@ export async function handleDiaRecorrenteMulti(user: UserRow, telefone: string, 
        WHERE NOT EXISTS (
          SELECT 1 FROM lembretes
          WHERE user_id = $1::int AND LOWER(titulo) = LOWER($2::text) AND fixa = TRUE AND status = 'pendente'
-       )
-       RETURNING id, titulo, valor`,
-      [user.id, item.nome, item.valor, item.dia!],
+       )`,
+      [user.id, item.nome, item.valor, diaClamp]
     );
-    if (r.rows[0]) {
-      novos.push({ lembrete_id: r.rows[0].id, titulo: r.rows[0].titulo, valor: Number(r.rows[0].valor) });
-    }
     totalFixo += item.valor;
   }
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
 
   recordAction(user.id, "created_recurring");
   setLastCommand(user.id, "recorrentes");
   setLastContext(user.id, "recurring");
 
-  const diasUnicos = [...new Set(items.map(i => i.dia))];
-  const lista = items.map(i => `• ${capitalizeFirst(i.nome)} — dia ${i.dia}`);
   const linhas = [
-    "🔄 Anotado!",
+    "✅ Tudo certo!",
+    `💰 Total fixo: ${fmtValor(totalFixo)}`,
     "",
-    ...lista,
+    "Tem mais fixa? Manda do mesmo jeito.",
+    "Ou manda *pronto* pra começar a anotar gastos do dia.",
     "",
-    `💰 *Total fixo: ${fmtValor(totalFixo)}*`,
-    "",
-    diasUnicos.length === 1
-      ? `📅 Te aviso antes do dia ${diasUnicos[0]}.`
-      : "📅 Te aviso antes de cada vencimento.",
+    "💡 Já pagou alguma esse mês? Manda assim: _paguei netflix_",
   ];
-
   await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-  if (novos.length > 0) {
-    await pool.query(
-      `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
-       VALUES ($1, 'confirmar_fixa_mes_atual', 'waiting_status', $2::jsonb, NOW() + INTERVAL '1 hour')
-       ON CONFLICT (user_id) DO UPDATE
-         SET action = 'confirmar_fixa_mes_atual', step = 'waiting_status', tx_ids = $2::jsonb,
-             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '1 hour'`,
-      [user.id, JSON.stringify({ queue: novos })]
-    );
-    await whatsapp.sendText({
-      to:   telefone,
-      text: `E a *${capitalizeFirst(novos[0].titulo)}* desse mês — já tá paga ou ainda vai pagar?\n💡 Ex: já paguei  •  ainda vou pagar`,
-    });
-  }
-  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "dia_recorrente_multi_concluido" } };
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "dias_recorrentes_batch_concluido" } };
 }
 
 // ── Listagens — agora lendo `lembretes` ──────────────────────────────────────
@@ -654,65 +665,3 @@ export async function handleAguardandoPagamentoAviso(
   }
 }
 
-// ── Confirmar status da fixa no mês atual ────────────────────────────────────
-// Após criar lembrete fixo, pergunta se já foi pago neste mês.
-// "já paguei" → insere transaction + marcarPago. "ainda vou pagar" → mantém pendente.
-// Processa fila se houver múltiplos lembretes.
-export async function handleConfirmarFixaMesAtual(
-  user: UserRow, telefone: string, texto: string, txIdsRaw: unknown
-): Promise<ProcessResult> {
-  type Item = { lembrete_id: number; titulo: string; valor: number };
-  const data = (txIdsRaw ?? {}) as { queue?: Item[] };
-  const queue = Array.isArray(data.queue) ? data.queue.slice() : [];
-  if (queue.length === 0) {
-    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
-    return { success: false, userId: user.id, erro: "queue vazia" };
-  }
-
-  const atual = queue[0];
-  const t = texto.trim().toLowerCase();
-  const isPago     = /\b(j[aá]\s+paguei|paguei|t[aá]\s+pago|pago|sim|quitado|quitei)\b/i.test(t);
-  const isPendente = /\b(ainda\s+vou|n[aã]o|nao|vou\s+pagar|pendente|falta)\b/i.test(t);
-
-  if (!isPago && !isPendente) {
-    await whatsapp.sendText({ to: telefone, text: 'Só responde "já paguei" ou "ainda vou pagar" 🙂' });
-    return { success: false, userId: user.id, erro: "resposta inválida fixa mes atual" };
-  }
-
-  if (isPago) {
-    try {
-      const { marcarPago } = await import("../modules/lembretes");
-      await marcarPago(user.id, atual.lembrete_id);
-      await pool.query(
-        `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
-         VALUES ($1, 'saida', $2, 'Moradia', $3)`,
-        [user.id, atual.valor, atual.titulo]
-      );
-      recordAction(user.id, "registered_transaction");
-      resetInactivityNudge(user.id).catch(() => {});
-      await whatsapp.sendText({ to: telefone, text: `✅ *${capitalizeFirst(atual.titulo)}* (${fmtValor(atual.valor)}) registrado como pago.` });
-    } catch (err) {
-      log.error("handleConfirmarFixaMesAtual marcarPago falhou", err, { userId: user.id });
-    }
-  } else {
-    await whatsapp.sendText({ to: telefone, text: "Beleza, vou te lembrar quando chegar o dia 💪" });
-  }
-
-  const restante = queue.slice(1);
-  if (restante.length === 0) {
-    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
-    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "confirmar_fixa_mes_atual_concluido" } };
-  }
-
-  await pool.query(
-    `UPDATE pending_actions
-       SET tx_ids = $1::jsonb, expires_at = NOW() + INTERVAL '1 hour'
-     WHERE user_id = $2`,
-    [JSON.stringify({ queue: restante }), user.id]
-  );
-  await whatsapp.sendText({
-    to:   telefone,
-    text: `E a *${capitalizeFirst(restante[0].titulo)}* desse mês — já tá paga ou ainda vai pagar?\n💡 Ex: já paguei  •  ainda vou pagar`,
-  });
-  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "confirmar_fixa_mes_atual_proximo" } };
-}
