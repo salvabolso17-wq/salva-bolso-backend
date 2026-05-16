@@ -31,17 +31,44 @@ export const NEVER_RECURRING = [
 
 // Pequena base auxiliar de serviços/contas reconhecidamente mensais
 export const RECURRING_SERVICE_HINTS = [
-  // Streaming
-  "netflix", "spotify", "disney", "hbomax", "primevideo", "youtube", "appletv",
-  "paramount", "crunchyroll", "telecine", "globoplay",
-  // Cloud / produtividade
-  "icloud", "dropbox", "notion", "figma", "canva", "adobe", "github",
-  "chatgpt", "openai", "midjourney", "linkedin", "zoom", "slack",
+  // Streaming vídeo
+  "netflix", "disney", "disneyplus", "hbomax", "max", "primevideo", "prime video",
+  "youtube", "youtubepremium", "appletv", "apple tv", "paramount", "paramountplus",
+  "crunchyroll", "telecine", "globoplay", "starplus", "star plus", "looke", "mubi", "pluto",
+  // Streaming música/áudio
+  "spotify", "deezer", "tidal", "applemusic", "apple music", "amazonmusic", "amazon music",
+  "audible", "storytel", "scribd", "kindle", "kindleunlimited",
+  // IA / produtividade
+  "chatgpt", "openai", "claude", "anthropic", "perplexity", "gemini", "copilot",
+  "cursor", "midjourney", "runway", "elevenlabs", "notion", "figma", "canva",
+  "adobe", "creativecloud", "creative cloud", "lightroom", "photoshop",
+  "linkedin", "linkedinpremium", "zoom", "slack", "trello", "asana", "monday",
+  "miro", "loom", "calendly", "grammarly",
+  // Dev / cloud
+  "github", "githubcopilot", "gitlab", "vercel", "netlify", "heroku", "supabase",
+  "aws", "amazonaws", "gcp", "azure", "digitalocean", "cloudflare", "mongodb",
+  "icloud", "dropbox", "googledrive", "google drive", "googleone", "google one",
+  "onedrive", "hospedagem", "dominio", "registrobr", "godaddy", "hostgator",
+  // Saúde / academia
+  "academia", "smartfit", "smart fit", "bluefit", "gympass", "totalpass", "wellhub",
+  "unimed", "amil", "hapvida", "sulamerica", "sul america", "bradescosaude",
+  "bradesco saude", "notredame", "planodesaude", "plano de saude",
+  // Educação
+  "alura", "udemy", "coursera", "dio", "rocketseat", "kultivi", "duolingo", "babbel",
+  "hotmart", "skool", "domestika",
+  // Pet
+  "petlove", "petz", "cobasi",
   // Telecoms
-  "claro", "vivo", "tim", "nextel",
+  "claro", "vivo", "tim", "nextel", "oi", "algar", "sky", "clarotv", "claro tv",
+  "internet", "fibra",
   // Contas mensais comuns
-  "internet", "aluguel", "academia", "condominio", "mei",
-  "contador", "hospedagem", "dominio",
+  "aluguel", "condominio", "condomínio", "iptu", "luz", "energia", "agua", "água",
+  "gas", "gás", "mei", "contador", "contabilidade",
+  // Apps / clubes
+  "primebrasil", "amazonprime", "amazon prime", "ifoodclub", "ifood club",
+  "mercadolivre meli", "melimais", "nubank ultravioleta", "uber one",
+  // Religião / doações
+  "dizimo", "dízimo", "oferta",
 ];
 
 // Detecta sinais de frequência mensal/contínua no texto original da mensagem
