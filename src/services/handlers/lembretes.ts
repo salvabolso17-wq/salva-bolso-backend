@@ -162,9 +162,9 @@ async function avancarCriar(user: UserRow, telefone: string, state: CriarState):
       state.valor = Number(existentes[0].valor);
     } else {
       const r = await pool.query<{ valor: string }>(
-        `SELECT valor FROM transacoes
+        `SELECT valor FROM transactions
          WHERE user_id = $1
-           AND tipo = 'gasto'
+           AND tipo = 'saida'
            AND LOWER(descricao) LIKE $2
            AND criado_em >= NOW() - INTERVAL '30 days'
          ORDER BY criado_em DESC LIMIT 1`,
