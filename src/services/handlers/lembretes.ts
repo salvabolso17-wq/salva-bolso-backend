@@ -351,9 +351,9 @@ async function aplicarPagar(user: UserRow, telefone: string, l: LembreteRow): Pr
     if (r.proximo) {
       const proxDia = r.proximo.dia_vencimento;
       const proxMes = new Date(dataToISO(r.proximo.proxima_data) + "T00:00:00Z").toLocaleString("pt-BR", { month: "long", timeZone: "UTC" });
-      await send(telefone, `✅ ${capitalizeFirst(r.pago.titulo)} quitada.\nPróximo lembrete: dia ${proxDia} de ${proxMes}.`);
+      await send(telefone, `✅ Marquei o pagamento de *${capitalizeFirst(r.pago.titulo)}*.\nPróximo lembrete: dia ${proxDia} de ${proxMes}.`);
     } else {
-      await send(telefone, `✅ ${capitalizeFirst(r.pago.titulo)} quitada.`);
+      await send(telefone, `✅ Marquei o pagamento de *${capitalizeFirst(r.pago.titulo)}*.`);
     }
     return { success: true, userId: user.id, transacao: { id: r.pago.id }, interpretado: { comando: "lembrete_pagar" } };
   } catch (err) {

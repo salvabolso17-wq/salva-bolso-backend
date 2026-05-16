@@ -4,7 +4,10 @@ import { log } from "../../utils/logger";
 import { fmtValor } from "../../utils/formatting";
 import { fetchPeriodMetrics } from "../reportService";
 import { parseValor, parseTransaction } from "../../utils/parseTransaction";
+import { jaVenceuEsteMes, marcarPago } from "./lembretes";
 import type { UserRow, ProcessResult } from "../types";
+
+const MSG_CONVITE_GASTOS = "Manda teus gastos do dia:\n🛒 _50 mercado_ • 🚗 _35 uber_";
 
 // Soma das contas fixas ativas (lembretes fixa=true, status != cancelado)
 async function somaContasFixas(userId: number): Promise<number> {
@@ -186,18 +189,81 @@ export async function handleOnboardingFixaDia(
     log.error("erro ao inserir lembrete no onboarding (passo dia)", e);
   }
 
-  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
-
   if (!novoLembrete) {
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     await whatsapp.sendText({ to: telefone, text: `${capitalizeFirst(data.titulo)} já está nas suas contas fixas 🙂` });
     return { success: false, userId: user.id, erro: "lembrete já existe" };
   }
 
+  if (jaVenceuEsteMes(novoLembrete.dia_vencimento)) {
+    await pool.query(
+      `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+       VALUES ($1, 'onboarding_fixa_status_vencida', 'waiting_status_vencida', $2::jsonb, NOW() + INTERVAL '1 hour')
+       ON CONFLICT (user_id) DO UPDATE
+         SET action = 'onboarding_fixa_status_vencida', step = 'waiting_status_vencida', tx_ids = $2::jsonb,
+             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '1 hour'`,
+      [user.id, JSON.stringify({
+        lembrete_id: novoLembrete.id,
+        titulo:      novoLembrete.titulo,
+        valor:       novoLembrete.valor,
+        dia:         novoLembrete.dia_vencimento,
+      })]
+    );
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `✅ *${capitalizeFirst(novoLembrete.titulo)}* anotado — ${fmtValor(novoLembrete.valor)}, todo dia ${novoLembrete.dia_vencimento}.\n\nO vencimento desse mês já passou. Já pagou?\n💡 _sim_ • _não_`,
+    });
+    return { success: false, userId: user.id, erro: "onboarding fixa solo aguardando status vencida" };
+  }
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
   await whatsapp.sendText({
     to:   telefone,
-    text: `✅ *${capitalizeFirst(novoLembrete.titulo)}* anotado — ${fmtValor(novoLembrete.valor)}, todo dia ${novoLembrete.dia_vencimento}.\nTe aviso antes do vencimento 💪\n\nTem mais conta fixa? Manda do mesmo jeito.\nOu manda *pronto* pra começar a anotar gastos do dia.`,
+    text: `✅ Te aviso antes do vencimento 💪\n\n${MSG_CONVITE_GASTOS}`,
   });
   return { success: false, userId: user.id, erro: "onboarding fixa solo concluído" };
+}
+
+export async function handleOnboardingFixaStatusVencida(
+  user: UserRow, telefone: string, texto: string, txIdsRaw: unknown
+): Promise<ProcessResult> {
+  type Payload = { lembrete_id: number; titulo: string; valor: number; dia: number };
+  const data = (txIdsRaw ?? {}) as Payload;
+  const t = texto.trim();
+
+  const isSim = /(sim|s|paguei|j[áa]\s+paguei|t[áa]\s+pago|pago|quitei)/i.test(t);
+  const isNao = /(n[ãa]o|nao|n|ainda|falta|vou\s+pagar|amanh[ãa])/i.test(t);
+
+  if (!isSim && !isNao) {
+    await whatsapp.sendText({ to: telefone, text: "Só responde *sim* ou *não* 🙂" });
+    return { success: false, userId: user.id, erro: "onboarding fixa status vencida invalido" };
+  }
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+  if (isSim) {
+    try {
+      await marcarPago(user.id, data.lembrete_id);
+      await pool.query(
+        `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+         VALUES ($1, 'saida', $2, 'Outros', $3)`,
+        [user.id, data.valor, data.titulo]
+      );
+    } catch (e) {
+      log.error("erro ao marcar fixa vencida do onboarding como pago", e);
+    }
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `✅ Marcado como pago. Te aviso no próximo mês 💪\n\n${MSG_CONVITE_GASTOS}`,
+    });
+    return { success: false, userId: user.id, erro: "onboarding fixa vencida paga" };
+  }
+
+  await whatsapp.sendText({
+    to:   telefone,
+    text: `✅ Te aviso antes do vencimento 💪\n\n${MSG_CONVITE_GASTOS}`,
+  });
+  return { success: false, userId: user.id, erro: "onboarding fixa vencida pendente" };
 }
 
 function capitalizeFirst(str: string): string {

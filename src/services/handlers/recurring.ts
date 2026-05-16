@@ -213,10 +213,11 @@ export async function handleDiasRecorrentesBatch(
   const diasFinais = (parsed as { ok: true; dias: number[] }).dias.map(d => Math.min(d, 28));
 
   let totalFixo = 0;
+  const novos: { lembrete_id: number; titulo: string; valor: number; dia: number }[] = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const diaClamp = diasFinais[i];
-    await pool.query(
+    const r = await pool.query<{ id: number; titulo: string; valor: string; dia_vencimento: number }>(
       `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status, ultimo_aviso_em)
        SELECT $1::int, $2::text, $3::numeric, $4::int, TRUE,
               (
@@ -235,29 +236,167 @@ export async function handleDiasRecorrentesBatch(
        WHERE NOT EXISTS (
          SELECT 1 FROM lembretes
          WHERE user_id = $1::int AND LOWER(titulo) = LOWER($2::text) AND fixa = TRUE AND status = 'pendente'
-       )`,
+       )
+       RETURNING id, titulo, valor, dia_vencimento`,
       [user.id, item.nome, item.valor, diaClamp]
     );
+    if (r.rows[0]) {
+      novos.push({
+        lembrete_id: r.rows[0].id,
+        titulo:      r.rows[0].titulo,
+        valor:       Number(r.rows[0].valor),
+        dia:         r.rows[0].dia_vencimento,
+      });
+    }
     totalFixo += item.valor;
   }
-
-  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
 
   recordAction(user.id, "created_recurring");
   setLastCommand(user.id, "recorrentes");
   setLastContext(user.id, "recurring");
 
-  const linhas = [
-    "✅ Tudo certo!",
-    `💰 Total fixo: ${fmtValor(totalFixo)}`,
-    "",
-    "Tem mais fixa? Manda do mesmo jeito.",
-    "Ou manda *pronto* pra começar a anotar gastos do dia.",
-    "",
-    "💡 Já pagou alguma esse mês? Manda assim: _paguei netflix_",
-  ];
-  await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "dias_recorrentes_batch_concluido" } };
+  const { jaVenceuEsteMes } = await import("../modules/lembretes");
+  const vencidas = novos.filter(n => jaVenceuEsteMes(n.dia));
+  const qtd = items.length;
+  const prefixoBatch = `✅ ${qtd} fixas anotadas.\n💰 Total fixo: ${fmtValor(totalFixo)}`;
+
+  if (vencidas.length === 0) {
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `${prefixoBatch}\n\nManda teus gastos do dia:\n🛒 _50 mercado_ • 🚗 _35 uber_`,
+    });
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "dias_recorrentes_batch_concluido" } };
+  }
+
+  if (vencidas.length === 1) {
+    const v = vencidas[0];
+    await pool.query(
+      `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+       VALUES ($1, 'onboarding_fixa_status_vencida_solo', 'waiting_status_vencida', $2::jsonb, NOW() + INTERVAL '1 hour')
+       ON CONFLICT (user_id) DO UPDATE
+         SET action = 'onboarding_fixa_status_vencida_solo', step = 'waiting_status_vencida', tx_ids = $2::jsonb,
+             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '1 hour'`,
+      [user.id, JSON.stringify({ lembrete_id: v.lembrete_id, titulo: v.titulo, valor: v.valor, dia: v.dia })]
+    );
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `${prefixoBatch}\n\n*${capitalizeFirst(v.titulo)}* (dia ${v.dia}) já venceu esse mês. Já pagou?\n💡 _sim_ • _não_`,
+    });
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "dias_recorrentes_batch_aguardando_vencida_solo" } };
+  }
+
+  // 2+ vencidas
+  await pool.query(
+    `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+     VALUES ($1, 'onboarding_fixa_status_vencida_batch', 'waiting_status_vencida_batch', $2::jsonb, NOW() + INTERVAL '1 hour')
+     ON CONFLICT (user_id) DO UPDATE
+       SET action = 'onboarding_fixa_status_vencida_batch', step = 'waiting_status_vencida_batch', tx_ids = $2::jsonb,
+           selected_tx_id = NULL, expires_at = NOW() + INTERVAL '1 hour'`,
+    [user.id, JSON.stringify(vencidas)]
+  );
+  const listaNum = vencidas.map((v, i) => `${i + 1}. ${capitalizeFirst(v.titulo)} ${fmtValor(v.valor)} (dia ${v.dia})`).join("\n");
+  await whatsapp.sendText({
+    to:   telefone,
+    text: `${prefixoBatch}\n\nEssas já venceram esse mês — já pagou alguma?\n${listaNum}\n\n💡 Manda os números (ex: _1 e 2_), _todas_ ou _nenhuma_`,
+  });
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "dias_recorrentes_batch_aguardando_vencida_batch" } };
+}
+
+export async function handleOnboardingFixaStatusBatch(
+  user: UserRow, telefone: string, texto: string, itemsRaw: unknown
+): Promise<ProcessResult> {
+  type Item = { lembrete_id: number; titulo: string; valor: number; dia: number };
+  const items = (Array.isArray(itemsRaw) ? itemsRaw : []) as Item[];
+  if (items.length === 0) {
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    return { success: false, userId: user.id, erro: "items vazio" };
+  }
+
+  const t = texto.trim().toLowerCase();
+  const isTodas = /^(todas?|todos?|sim|tudo|ambas?|os\s+dois|as\s+duas)[\?!.]*$/i.test(t);
+  const isNenhuma = /^(nenhuma|nenhum|n[ãa]o|nao|n)[\?!.]*$/i.test(t);
+
+  let selecionadas: Item[] = [];
+  if (isTodas) {
+    selecionadas = items.slice();
+  } else if (isNenhuma) {
+    selecionadas = [];
+  } else {
+    const nums = (t.match(/\d+/g) || []).map(n => parseInt(n, 10) - 1).filter(i => i >= 0 && i < items.length);
+    if (nums.length === 0) {
+      await whatsapp.sendText({ to: telefone, text: "Não entendi. Manda os números (ex: _1 e 2_), _todas_ ou _nenhuma_ 🙂" });
+      return { success: false, userId: user.id, erro: "resposta inválida status batch" };
+    }
+    selecionadas = nums.map(i => items[i]);
+  }
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+  if (selecionadas.length > 0) {
+    const { marcarPago } = await import("../modules/lembretes");
+    for (const sel of selecionadas) {
+      try {
+        await marcarPago(user.id, sel.lembrete_id);
+        await pool.query(
+          `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+           VALUES ($1, 'saida', $2, 'Outros', $3)`,
+          [user.id, sel.valor, sel.titulo]
+        );
+      } catch (err) {
+        log.error("erro ao marcar fixa vencida (batch) como pago", err, { userId: user.id, lembrete_id: sel.lembrete_id });
+      }
+    }
+  }
+
+  const linhaPagas = selecionadas.length > 0
+    ? `✅ Marquei ${selecionadas.map(s => capitalizeFirst(s.titulo)).join(", ")} como pagas.\n\n`
+    : "";
+  await whatsapp.sendText({
+    to:   telefone,
+    text: `${linhaPagas}Manda teus gastos do dia:\n🛒 _50 mercado_ • 🚗 _35 uber_`,
+  });
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "onboarding_fixa_status_vencida_batch_concluido", marcadas: selecionadas.length } };
+}
+
+export async function handleOnboardingFixaStatusVencidaSolo(
+  user: UserRow, telefone: string, texto: string, txIdsRaw: unknown
+): Promise<ProcessResult> {
+  type Payload = { lembrete_id: number; titulo: string; valor: number; dia: number };
+  const data = (txIdsRaw ?? {}) as Payload;
+  const t = texto.trim();
+
+  const isSim = /(sim|s|paguei|j[áa]\s+paguei|t[áa]\s+pago|pago|quitei)/i.test(t);
+  const isNao = /(n[ãa]o|nao|n|ainda|falta|vou\s+pagar|amanh[ãa])/i.test(t);
+
+  if (!isSim && !isNao) {
+    await whatsapp.sendText({ to: telefone, text: "Só responde *sim* ou *não* 🙂" });
+    return { success: false, userId: user.id, erro: "resposta inválida vencida solo (batch)" };
+  }
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+  let linhaPagas = "";
+  if (isSim) {
+    try {
+      const { marcarPago } = await import("../modules/lembretes");
+      await marcarPago(user.id, data.lembrete_id);
+      await pool.query(
+        `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+         VALUES ($1, 'saida', $2, 'Outros', $3)`,
+        [user.id, data.valor, data.titulo]
+      );
+      linhaPagas = `✅ Marquei ${capitalizeFirst(data.titulo)} como paga.\n\n`;
+    } catch (err) {
+      log.error("erro ao marcar fixa vencida solo (batch) como pago", err, { userId: user.id });
+    }
+  }
+
+  await whatsapp.sendText({
+    to:   telefone,
+    text: `${linhaPagas}Manda teus gastos do dia:\n🛒 _50 mercado_ • 🚗 _35 uber_`,
+  });
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "onboarding_fixa_status_vencida_solo_concluido", marcou: isSim } };
 }
 
 // ── Listagens — agora lendo `lembretes` ──────────────────────────────────────
@@ -527,7 +666,7 @@ export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, t
     );
     recordAction(user.id, "registered_transaction");
     resetInactivityNudge(user.id).catch(() => {});
-    await whatsapp.sendText({ to: telefone, text: `✅ *${capitalizeFirst(row.titulo)}* (${fmtValor(valor)}) registrado como pago.` });
+    await whatsapp.sendText({ to: telefone, text: `✅ Marquei o pagamento de *${capitalizeFirst(row.titulo)}*.` });
     return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "pagar_recorrente", nome: row.titulo, valor } };
   } catch (err) {
     log.error("handlePagarRecorrenteAI falhou", err, { userId: user.id });
@@ -578,7 +717,7 @@ export async function handleConfirmarPagarFixa(
       resetInactivityNudge(user.id).catch(() => {});
       await whatsapp.sendText({
         to:   telefone,
-        text: `✅ ${capitalizeFirst(data.titulo)} marcada como paga (${fmtValor(data.valor_gasto)}).`,
+        text: `✅ Marquei o pagamento de *${capitalizeFirst(data.titulo)}*.`,
       });
       return {
         success:      true,
@@ -644,14 +783,14 @@ export async function handleAguardandoPagamentoAviso(
         const MESES = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
         const mesNum = parseInt(m[2], 10);
         const diaNum = parseInt(m[3], 10);
-        proxStr = ` Próximo: ${diaNum} de ${MESES[mesNum]}.`;
+        proxStr = `\nPróximo lembrete: dia ${diaNum} de ${MESES[mesNum]}.`;
       }
     }
 
     await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
     await whatsapp.sendText({
       to:   telefone,
-      text: `✅ ${capitalizeFirst(data.titulo)} (${fmtValor(data.valor)}) marcada como paga.${proxStr}`,
+      text: `✅ Marquei o pagamento de *${capitalizeFirst(data.titulo)}*.${proxStr}`,
     });
     return {
       success:      true,

@@ -303,3 +303,9 @@ export function diasAteVencimento(proxima_data: string | Date): number {
   if (isNaN(a) || isNaN(b)) return 0;
   return Math.round((b - a) / (24 * 60 * 60 * 1000));
 }
+
+export function jaVenceuEsteMes(dia_vencimento: number): boolean {
+  const hoje = nowBRT();
+  const diaHoje = hoje.getUTCDate();
+  return dia_vencimento < diaHoje;
+}

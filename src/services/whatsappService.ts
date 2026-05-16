@@ -12,7 +12,7 @@ import { isSubscriptionActive, isBlockedFreemium, checkAndSendExpirationNotice }
 import { isCuriosityPhrase, buildFeaturesMenuText, isKnownCommand, isAmbiguousIntent, buildContextualHint, handleAjudaCommand, handleSpendingConcern, handleNextStepSuggestion } from "./modules/menuBuilder";
 import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente, matchesKnownService } from "./modules/recurringDetection";
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip } from "./modules/insightsEngine";
-import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas, handleOnboardingFixaDia } from "./modules/onboarding";
+import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas, handleOnboardingFixaDia, handleOnboardingFixaStatusVencida } from "./modules/onboarding";
 import { classifyIntentWithAI } from "./modules/intentAI";
 import { resetInactivityNudge } from "./notificationService";
 
@@ -20,7 +20,7 @@ import { resetInactivityNudge } from "./notificationService";
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
 import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
-import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso } from "./handlers/recurring";
+import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
 import { tryHandleLembretes } from "./handlers/lembretes";
@@ -649,8 +649,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia";
-    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_status_vencida" | "onboarding_fixa_status_vencida_solo" | "onboarding_fixa_status_vencida_batch";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia" | "waiting_status_vencida" | "waiting_status_vencida_batch";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -661,37 +661,6 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   );
 
   log.webhook("DEBUG_PENDING_STATE", { userId: user.id, hasPending: pendingRow.rows.length > 0, pending: pendingRow.rows[0] });
-
-  // ── "pronto" durante onboarding de fixa → fecha fluxo e convida primeiro gasto ──
-  {
-    const trimmed = message.texto.trim();
-    if (/^(pronto|prontinho|acabei|[eé]\s+isso|s[oó]\s+isso|chega)[\?!.\s]*$/i.test(trimmed)) {
-      const pendingNow = pendingRow.rows[0];
-      const temPendingFixa = !!pendingNow && (
-        pendingNow.action === "onboarding_fixa_aguardando_dia" ||
-        pendingNow.action === "dias_recorrentes_batch"
-      );
-      let temFixaRecente = false;
-      if (!temPendingFixa) {
-        const rec = await pool.query(
-          `SELECT 1 FROM lembretes
-           WHERE user_id = $1 AND fixa = TRUE
-             AND criado_em > NOW() - INTERVAL '10 minutes'
-           LIMIT 1`,
-          [user.id]
-        );
-        temFixaRecente = (rec.rowCount ?? 0) > 0;
-      }
-      if (temPendingFixa || temFixaRecente) {
-        await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
-        await whatsapp.sendText({
-          to:   message.telefone,
-          text: "Show 💪\n\nManda teu primeiro gasto:\n🛒 _50 mercado_ • 🚗 _35 uber_",
-        });
-        return { success: false, userId: user.id, erro: "onboarding fixa concluído via pronto" };
-      }
-    }
-  }
 
   if (pendingRow.rows.length > 0) {
     const pending   = pendingRow.rows[0];
@@ -716,6 +685,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       return await handleConfirmarPagarFixa(user, message.telefone, textoTrim, pending.tx_ids);
     } else if (pending.action === "onboarding_fixa_aguardando_dia" && pending.step === "waiting_dia") {
       return await handleOnboardingFixaDia(user, message.telefone, textoTrim, pending.tx_ids);
+    } else if (pending.action === "onboarding_fixa_status_vencida" && pending.step === "waiting_status_vencida") {
+      return await handleOnboardingFixaStatusVencida(user, message.telefone, textoTrim, pending.tx_ids);
+    } else if (pending.action === "onboarding_fixa_status_vencida_solo" && pending.step === "waiting_status_vencida") {
+      return await handleOnboardingFixaStatusVencidaSolo(user, message.telefone, textoTrim, pending.tx_ids);
+    } else if (pending.action === "onboarding_fixa_status_vencida_batch" && pending.step === "waiting_status_vencida_batch") {
+      return await handleOnboardingFixaStatusBatch(user, message.telefone, textoTrim, pending.tx_ids);
     } else if (pending.action === "onboarding" && pending.step === "waiting_onboarding_renda") {
        return await handleOnboardingRenda(user, message.telefone, textoTrim);
     } else if (pending.action === "onboarding" && pending.step === "waiting_onboarding_fixas") {
@@ -1459,7 +1434,6 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           recordAction(user.id, "registered_transaction");
           resetInactivityNudge(user.id).catch(() => {});
 
-          const mesAtual = MESES_NOME[new Date().getMonth() + 1];
           let proxStr = "";
           if (mp?.proximo?.proxima_data) {
             const iso = String(mp.proximo.proxima_data).slice(0, 10);
@@ -1467,13 +1441,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
             if (m) {
               const mesNum = parseInt(m[2], 10);
               const diaNum = parseInt(m[3], 10);
-              proxStr = ` Próximo lembrete: ${diaNum} de ${MESES_NOME[mesNum]} 💪`;
+              proxStr = `\nPróximo lembrete: dia ${diaNum} de ${MESES_NOME[mesNum]}.`;
             }
           }
           try {
             await whatsapp.sendText({
               to:   message.telefone,
-              text: `✅ ${capitalizeFirst(lembrete.titulo)} de ${mesAtual} marcada como paga.${proxStr}`,
+              text: `✅ Marquei o pagamento de *${capitalizeFirst(lembrete.titulo)}*.${proxStr}`,
             });
           } catch (err) {
             log.error("falha ao enviar confirmação fixa marcada pago", err, { to: message.telefone });
