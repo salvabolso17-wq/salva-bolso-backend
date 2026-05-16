@@ -869,6 +869,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handleExtratoCommand(user, message.telefone, `extrato ${mesAtual}`);
   }
 
+  // Comandos exatos sem número — interceptar antes do AI pra evitar classificação errada
+  {
+    const t = message.texto.trim().toLowerCase();
+    if (t === "corrigir") return await handleCorrigirCommand(user, message.telefone);
+    if (t === "apagar")   return await handleApagarCommand(user, message.telefone);
+  }
+
   // ── AI-first: Claude classifica mensagens sem número ─────────────────────
   if (!/\d/.test(message.texto)) {
     try {
