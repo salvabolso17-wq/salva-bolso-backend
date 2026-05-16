@@ -220,16 +220,10 @@ export async function handleDiasRecorrentesBatch(
     const r = await pool.query<{ id: number; titulo: string; valor: string; dia_vencimento: number }>(
       `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status, ultimo_aviso_em)
        SELECT $1::int, $2::text, $3::numeric, $4::int, TRUE,
-              (
-                CASE
-                  WHEN $4::int >= EXTRACT(DAY FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int
-                  THEN make_date(
-                    EXTRACT(YEAR  FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int,
-                    EXTRACT(MONTH FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int,
-                    $4::int
-                  )
-                  ELSE ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date + INTERVAL '1 month')::date
-                END
+              make_date(
+                EXTRACT(YEAR  FROM (NOW() AT TIME ZONE 'America/Sao_Paulo'))::int,
+                EXTRACT(MONTH FROM (NOW() AT TIME ZONE 'America/Sao_Paulo'))::int,
+                LEAST($4::int, 28)
               ),
               'pendente',
               (NOW() AT TIME ZONE 'America/Sao_Paulo')::date
