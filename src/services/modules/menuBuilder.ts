@@ -63,13 +63,8 @@ export function buildContextualHint(texto: string): string {
   if (/guardar|juntar|economiz|\bmeta\b|objetivo|poupan/.test(t))      return 'Para criar uma meta:\nguardar 200 viagem 🎯';
   if (/sal[aá]rio|renda|freelance|recebi|ganho|ganhei|entrou/.test(t)) return 'Para registrar renda:\n+3000 salário';
   // Só sugere registro se claramente não for uma pergunta
-  if (!ehPergunta && /dinheiro|gast|paguei|comprei|gastei/.test(t))    return 'Me manda o valor e o que foi:\n50 mercado';
-  const fallbacks = [
-    "Pode me mandar um gasto ou perguntar sobre o mês.",
-    "Me manda o valor e o que foi — ou me pergunta qualquer coisa.",
-    "Pode registrar um gasto ou pedir o saldo do mês.",
-  ];
-  return fallbacks[new Date().getHours() % fallbacks.length];
+  if (!ehPergunta && /dinheiro|gast|paguei|comprei|gastei/.test(t))    return 'Manda no formato: _valor + descrição_\n💡 _Ex: 50 mercado_ • _35 uber_';
+  return "Não entendi 🤔 Tenta assim:\n💡 _50 mercado_ (registrar gasto)\n💡 _minhas contas_ (ver lembretes)\n💡 _meus gastos_ (resumo do mês)";
 }
 
 export async function handleAjudaCommand(user: UserRow, telefone: string): Promise<ProcessResult> {

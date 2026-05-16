@@ -186,7 +186,7 @@ async function avancarCriar(user: UserRow, telefone: string, state: CriarState):
   }
   if (!state.dia) {
     await setContext(user.id, FLUXO_CRIAR, state);
-    await send(telefone, `Show. Que dia do mês vence?`);
+    await send(telefone, `Falta o dia de vencimento.\n💡 _Ex: 5_`);
     return { success: false, userId: user.id, erro: "lembrete_criar aguardando dia" };
   }
   if (state.fixa === undefined) {

@@ -59,7 +59,7 @@ export async function handleOnboardingRenda(user: UserRow, telefone: string, tex
        return { success: false, userId: user.id, erro: "onboarding abortado (gasto)" };
     }
 
-    await whatsapp.sendText({ to: telefone, text: "Hum, não entendi o valor 🤔\n💡 _Ex: 3500_ ou digite _'pular'_" });
+    await whatsapp.sendText({ to: telefone, text: "Manda só o valor da renda.\n💡 _Ex: 2500_" });
     return { success: false, userId: user.id, erro: "onboarding renda invalida" };
   }
 
@@ -147,7 +147,7 @@ export async function handleOnboardingFixaDia(
   const m = texto.trim().match(/^(\d{1,2})/);
   const dia = m ? parseInt(m[1], 10) : NaN;
   if (isNaN(dia) || dia < 1 || dia > 31) {
-    await whatsapp.sendText({ to: telefone, text: "Só o número do dia (1 a 31) 🙂\n💡 _Ex: 5_" });
+    await whatsapp.sendText({ to: telefone, text: "Só números de 1 a 31.\n💡 _Ex: 15_" });
     return { success: false, userId: user.id, erro: "onboarding fixa dia invalido" };
   }
   const diaClamp = Math.min(dia, 28);
@@ -229,7 +229,7 @@ export async function handleOnboardingFixaStatusVencida(
   const isNao = /(n[ãa]o|nao|n|ainda|falta|vou\s+pagar|amanh[ãa])/i.test(t);
 
   if (!isSim && !isNao) {
-    await whatsapp.sendText({ to: telefone, text: "Só responde *sim* ou *não* 🙂" });
+    await whatsapp.sendText({ to: telefone, text: "Só responde *sim* ou *não* 🙂\n💡 _já paguei_ • _vou pagar_" });
     return { success: false, userId: user.id, erro: "onboarding fixa status vencida invalido" };
   }
 

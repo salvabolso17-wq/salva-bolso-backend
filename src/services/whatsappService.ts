@@ -706,7 +706,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       if (!isKnownCommand(textoTrim)) {
         await whatsapp.sendText({
           to:   message.telefone,
-          text: `Envie um número de 1 a ${txIds.length}, ou "cancelar".`,
+          text: `Manda o nome ou número do gasto que quer corrigir.\n💡 _Ex: o aluguel_ • _número 2_`,
         });
         return { success: false, userId: user.id, erro: "Aguardando seleção" };
       }

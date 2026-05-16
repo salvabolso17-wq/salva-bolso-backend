@@ -368,7 +368,7 @@ export async function handleOnboardingFixaStatusVencidaSolo(
   const isNao = /(n[ãa]o|nao|n|ainda|falta|vou\s+pagar|amanh[ãa])/i.test(t);
 
   if (!isSim && !isNao) {
-    await whatsapp.sendText({ to: telefone, text: "Só responde *sim* ou *não* 🙂" });
+    await whatsapp.sendText({ to: telefone, text: "Só responde *sim* ou *não* 🙂\n💡 _já paguei_ • _vou pagar_" });
     return { success: false, userId: user.id, erro: "resposta inválida vencida solo (batch)" };
   }
 
@@ -635,7 +635,7 @@ export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, t
       [user.id, `%${nome}%`]
     );
     if (result.rows.length === 0) {
-      await whatsapp.sendText({ to: telefone, text: `Não encontrei _${nome}_ nas contas fixas.\nUse _recorrentes_ para ver a lista.` });
+      await whatsapp.sendText({ to: telefone, text: "Não achei. Manda o nome certo.\n💡 _Ex: paguei o aluguel_ • _paguei netflix_" });
       return { success: false, userId: user.id, erro: "lembrete não encontrado" };
     }
     const row = result.rows[0];
