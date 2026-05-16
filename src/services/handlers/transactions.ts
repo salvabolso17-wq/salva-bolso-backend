@@ -134,6 +134,14 @@ export async function handleApagarSelecao(user: UserRow, telefone: string, txId:
 
   await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
 
+  // Captura criado_em da transaction antes de apagar (pra correlacionar com lembrete pago)
+  const preRes = await pool.query<{ descricao: string; criado_em: Date }>(
+    `SELECT descricao, criado_em FROM transactions WHERE id = $1 AND user_id = $2`,
+    [txId, user.id]
+  );
+  const preDesc      = preRes.rows[0]?.descricao ?? "";
+  const preCriadoEm  = preRes.rows[0]?.criado_em ?? null;
+
   const txResult = await pool.query<{ tipo: string; valor: string; categoria: string; descricao: string }>(
     `DELETE FROM transactions WHERE id = $1 AND user_id = $2 RETURNING tipo, valor, categoria, descricao`,
     [txId, user.id]
@@ -145,15 +153,55 @@ export async function handleApagarSelecao(user: UserRow, telefone: string, txId:
   }
 
   const tx = txResult.rows[0];
-  const linhas = [
-    "✅ Lançamento removido:",
-    "",
-    `${tx.descricao ?? tx.categoria} — ${fmtValor(Number(tx.valor))}`,
-  ];
+
+  // Reverter lembrete pago associado (se a transaction veio de pagamento de fixa)
+  let revertedTitulo: string | null = null;
+  if (preDesc && preCriadoEm) {
+    try {
+      const lembreteRes = await pool.query<{ id: number; titulo: string; proxima_data: Date | string }>(
+        `SELECT id, titulo, proxima_data FROM lembretes
+         WHERE user_id = $1
+           AND fixa = TRUE
+           AND status = 'pago'
+           AND LOWER(titulo) ILIKE '%' || LOWER($2) || '%'
+           AND ABS(EXTRACT(EPOCH FROM (atualizado_em - $3::timestamp))) < 60
+         ORDER BY atualizado_em DESC
+         LIMIT 1`,
+        [user.id, preDesc, preCriadoEm]
+      );
+      if (lembreteRes.rows[0]) {
+        const lembPago = lembreteRes.rows[0];
+        await pool.query(
+          `UPDATE lembretes SET status = 'pendente', atualizado_em = NOW() WHERE id = $1 AND user_id = $2`,
+          [lembPago.id, user.id]
+        );
+        await pool.query(
+          `DELETE FROM lembretes
+           WHERE user_id = $1
+             AND fixa = TRUE
+             AND status = 'pendente'
+             AND LOWER(titulo) ILIKE '%' || LOWER($2) || '%'
+             AND proxima_data > $3::date`,
+          [user.id, lembPago.titulo, String(lembPago.proxima_data).slice(0, 10)]
+        );
+        revertedTitulo = lembPago.titulo;
+      }
+    } catch (err) {
+      log.error("falha ao reverter lembrete em handleApagarSelecao", err, { userId: user.id, txId });
+    }
+  }
+
+  const linhas = revertedTitulo
+    ? [`✅ Removido. *${capitalizeFirst(revertedTitulo)}* voltou pra pendente.`]
+    : [
+        "✅ Lançamento removido:",
+        "",
+        `${tx.descricao ?? tx.categoria} — ${fmtValor(Number(tx.valor))}`,
+      ];
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-    log.whatsapp("apagar confirmado", { to: telefone, txId });
+    log.whatsapp("apagar confirmado", { to: telefone, txId, revertedLembrete: revertedTitulo });
   } catch (err) {
     log.error("falha ao enviar apagar confirmacao", err, { to: telefone });
   }
@@ -162,7 +210,7 @@ export async function handleApagarSelecao(user: UserRow, telefone: string, txId:
     success:      true,
     userId:       user.id,
     transacao:    {},
-    interpretado: { comando: "apagar", txId, valor: Number(tx.valor), categoria: tx.categoria },
+    interpretado: { comando: "apagar", txId, valor: Number(tx.valor), categoria: tx.categoria, revertedLembrete: revertedTitulo },
   };
 }
 
@@ -230,26 +278,64 @@ export async function handleCorrigirSelecao(user: UserRow, telefone: string, txI
 
   await pool.query(
     `UPDATE pending_actions
-     SET step = 'waiting_new_value', selected_tx_id = $2, expires_at = NOW() + INTERVAL '10 minutes'
+     SET step = 'waiting_correcao_acao', selected_tx_id = $2, expires_at = NOW() + INTERVAL '10 minutes'
      WHERE user_id = $1`,
     [user.id, txId]
   );
 
+  const desc = tx.descricao ?? tx.categoria;
   const linhas = [
-    "Envie o novo valor e descrição.",
-    `Ex: ${fmtValor(Number(tx.valor))} ${tx.descricao ?? tx.categoria}`,
+    `O que quer fazer com *${desc}* (${fmtValor(Number(tx.valor))})?`,
     "",
-    `Ou "cancelar" para desistir.`,
+    "1. Editar valor/descrição",
+    "2. Apagar lançamento",
+    "",
+    `💡 Manda o número ou "cancelar"`,
   ];
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-    log.whatsapp("corrigir step2 enviado", { to: telefone, txId });
+    log.whatsapp("corrigir submenu enviado", { to: telefone, txId });
   } catch (err) {
-    log.error("falha ao enviar corrigir step2", err, { to: telefone });
+    log.error("falha ao enviar corrigir submenu", err, { to: telefone });
   }
 
-  return { success: false, userId: user.id, erro: "Aguardando novo valor" };
+  return { success: false, userId: user.id, erro: "Aguardando escolha corrigir/apagar" };
+}
+
+export async function handleCorrigirAcao(user: UserRow, telefone: string, texto: string, txId: number): Promise<ProcessResult> {
+  const t = texto.trim();
+  if (/^1[\?!.]*$/.test(t) || /^editar/i.test(t)) {
+    const txResult = await pool.query<{ valor: string; categoria: string; descricao: string }>(
+      `SELECT valor, categoria, descricao FROM transactions WHERE id = $1 AND user_id = $2`,
+      [txId, user.id]
+    );
+    if (txResult.rows.length === 0) {
+      await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+      await whatsapp.sendText({ to: telefone, text: "Lançamento não encontrado." });
+      return { success: false, userId: user.id, erro: "Transação não encontrada" };
+    }
+    const tx = txResult.rows[0];
+    await pool.query(
+      `UPDATE pending_actions
+       SET step = 'waiting_new_value', expires_at = NOW() + INTERVAL '10 minutes'
+       WHERE user_id = $1`,
+      [user.id]
+    );
+    const linhas = [
+      "Envie o novo valor e descrição.",
+      `Ex: ${fmtValor(Number(tx.valor))} ${tx.descricao ?? tx.categoria}`,
+      "",
+      `Ou "cancelar" para desistir.`,
+    ];
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    return { success: false, userId: user.id, erro: "Aguardando novo valor" };
+  }
+  if (/^2[\?!.]*$/.test(t) || /^apagar/i.test(t)) {
+    return await handleApagarSelecao(user, telefone, txId);
+  }
+  await whatsapp.sendText({ to: telefone, text: `💡 Manda *1* (editar) ou *2* (apagar). Ou "cancelar".` });
+  return { success: false, userId: user.id, erro: "escolha corrigir/apagar inválida" };
 }
 
 export async function handleCorrigirNovoValor(user: UserRow, telefone: string, texto: string, txId: number): Promise<ProcessResult> {

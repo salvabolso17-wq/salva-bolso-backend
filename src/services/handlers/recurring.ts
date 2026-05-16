@@ -622,6 +622,10 @@ export async function handleConfirmarApagarRecorrente(user: UserRow, telefone: s
 // via marcarPago. Também registra a transação correspondente.
 export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
   try {
+    // Detecta negação: "Não paguei X" → oferece corrigir, NÃO marca pago
+    if (/^\s*(n[ãa]o|nao|n)\s+(paguei|pago|t[áa]\s+pago|quitei|quitada|paga)\b/i.test(texto)) {
+      return await ofertarCorrecaoNegacao(user, telefone, texto);
+    }
     const nome = extractRecorrenteName(texto);
     if (!nome) {
       await whatsapp.sendText({ to: telefone, text: "💡 Ex: _já paguei o aluguel_" });
@@ -689,6 +693,97 @@ export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, t
     log.error("handlePagarRecorrenteAI falhou", err, { userId: user.id });
     return { success: false, userId: user.id, erro: "erro pagar recorrente" };
   }
+}
+
+// ── Negação detectada ("Não paguei X") → oferece corrigir ────────────────────
+export async function ofertarCorrecaoNegacao(
+  user: UserRow, telefone: string, texto: string
+): Promise<ProcessResult> {
+  log.webhook("negação detectada", { userId: user.id, texto });
+  await pool.query(
+    `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+     VALUES ($1, 'aguardando_correcao', 'waiting_corrigir_alvo', $2::jsonb, NOW() + INTERVAL '5 minutes')
+     ON CONFLICT (user_id) DO UPDATE
+       SET action = 'aguardando_correcao', step = 'waiting_corrigir_alvo', tx_ids = $2::jsonb,
+           selected_tx_id = NULL, expires_at = NOW() + INTERVAL '5 minutes'`,
+    [user.id, JSON.stringify({ texto_original: texto })]
+  );
+  await whatsapp.sendText({
+    to:   telefone,
+    text: "Hmm, entendi que você *não pagou*. Quer que eu corrija algum pagamento marcado por engano?\n💡 _corrigir o aluguel_ • _corrigir mei_",
+  });
+  return { success: false, userId: user.id, erro: "aguardando correção de negação" };
+}
+
+export async function handleAguardandoCorrecao(
+  user: UserRow, telefone: string, texto: string
+): Promise<ProcessResult> {
+  const m = texto.trim().match(/^corrigir\s+(?:o\s+|a\s+|os\s+|as\s+)?(.+?)[\?!.]*$/i);
+  if (!m) {
+    await whatsapp.sendText({ to: telefone, text: "💡 Manda _corrigir <nome>_ (ex: _corrigir o aluguel_) ou _cancelar_." });
+    return { success: false, userId: user.id, erro: "aguardando_correcao input inválido" };
+  }
+  const alvo = m[1].trim();
+  if (alvo.length < 2) {
+    await whatsapp.sendText({ to: telefone, text: "💡 Manda _corrigir <nome>_ (ex: _corrigir o aluguel_)." });
+    return { success: false, userId: user.id, erro: "alvo muito curto" };
+  }
+
+  // Procura lembrete fixo recém-pago compatível
+  const lembRes = await pool.query<{ id: number; titulo: string; proxima_data: Date | string; valor: string; atualizado_em: Date }>(
+    `SELECT id, titulo, proxima_data, valor, atualizado_em FROM lembretes
+     WHERE user_id = $1 AND fixa = TRUE AND status = 'pago'
+       AND LOWER(titulo) ILIKE '%' || LOWER($2) || '%'
+       AND atualizado_em > NOW() - INTERVAL '2 hours'
+     ORDER BY atualizado_em DESC
+     LIMIT 1`,
+    [user.id, alvo]
+  );
+
+  if (lembRes.rows.length === 0) {
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    await whatsapp.sendText({ to: telefone, text: `Não achei pagamento recente de *${capitalizeFirst(alvo)}*. Use _corrigir_ pra ver a lista de lançamentos.` });
+    return { success: false, userId: user.id, erro: "lembrete pago não encontrado" };
+  }
+
+  const lembPago = lembRes.rows[0];
+
+  // Encontra a transaction correspondente (mesma janela de tempo)
+  const txRes = await pool.query<{ id: number }>(
+    `SELECT id FROM transactions
+     WHERE user_id = $1 AND tipo = 'saida'
+       AND LOWER(descricao) ILIKE '%' || LOWER($2) || '%'
+       AND ABS(EXTRACT(EPOCH FROM (criado_em - $3::timestamp))) < 60
+     ORDER BY criado_em DESC
+     LIMIT 1`,
+    [user.id, lembPago.titulo, lembPago.atualizado_em]
+  );
+
+  try {
+    if (txRes.rows[0]) {
+      await pool.query(`DELETE FROM transactions WHERE id = $1 AND user_id = $2`, [txRes.rows[0].id, user.id]);
+    }
+    await pool.query(
+      `UPDATE lembretes SET status = 'pendente', atualizado_em = NOW() WHERE id = $1 AND user_id = $2`,
+      [lembPago.id, user.id]
+    );
+    await pool.query(
+      `DELETE FROM lembretes
+       WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente'
+         AND LOWER(titulo) ILIKE '%' || LOWER($2) || '%'
+         AND proxima_data > $3::date`,
+      [user.id, lembPago.titulo, String(lembPago.proxima_data).slice(0, 10)]
+    );
+  } catch (err) {
+    log.error("handleAguardandoCorrecao reverter falhou", err, { userId: user.id });
+  }
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+  await whatsapp.sendText({
+    to:   telefone,
+    text: `✅ Removido. *${capitalizeFirst(lembPago.titulo)}* voltou pra pendente.`,
+  });
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "aguardando_correcao_aplicado", lembrete_id: lembPago.id } };
 }
 
 // ── Desfazer pagamento recente ───────────────────────────────────────────────

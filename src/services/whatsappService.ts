@@ -19,8 +19,8 @@ import { resetInactivityNudge } from "./notificationService";
 // ── Handlers ──────────────────────────────────────────────────────────────────
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand, handleDetalhadoCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
-import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
-import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo, handleConfirmarDesfazer } from "./handlers/recurring";
+import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleCorrigirAcao, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
+import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo, handleConfirmarDesfazer, ofertarCorrecaoNegacao, handleAguardandoCorrecao } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
 import { tryHandleLembretes } from "./handlers/lembretes";
@@ -648,8 +648,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_status_vencida" | "onboarding_fixa_status_vencida_solo" | "onboarding_fixa_status_vencida_batch" | "pagamento_recente" | "confirmar_desfazer";
-    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia" | "waiting_status_vencida" | "waiting_status_vencida_batch" | "aguardando_desfazer";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_status_vencida" | "onboarding_fixa_status_vencida_solo" | "onboarding_fixa_status_vencida_batch" | "pagamento_recente" | "confirmar_desfazer" | "aguardando_correcao";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia" | "waiting_status_vencida" | "waiting_status_vencida_batch" | "aguardando_desfazer" | "waiting_corrigir_alvo" | "waiting_correcao_acao";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -787,6 +787,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         await whatsapp.sendText({ to: message.telefone, text: "Não entendi quais. Pode mandar os números? (ex: 1 e 2)\nOu 'nenhum' para pular." });
         return { success: false, userId: user.id, erro: "Aguardando seleção válida" };
       }
+    } else if (pending.step === "waiting_correcao_acao") {
+      return await handleCorrigirAcao(user, message.telefone, textoTrim, pending.selected_tx_id!);
+    } else if (pending.action === "aguardando_correcao" && pending.step === "waiting_corrigir_alvo") {
+      return await handleAguardandoCorrecao(user, message.telefone, textoTrim);
     } else if (pending.step === "waiting_new_value") {
       if (!isKnownCommand(textoTrim)) {
         return await handleCorrigirNovoValor(user, message.telefone, message.texto, pending.selected_tx_id!);
@@ -1459,6 +1463,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     tipo:      parsed.tipo,
     descricao: parsed.descricao,
   });
+
+  // ── Negação ("Não paguei X") antes da Camada 1: oferece corrigir, não marca pago ─
+  if (parsed.tipo === "saida" && /^\s*(n[ãa]o|nao|n)\s+(paguei|pago|t[áa]\s+pago|quitei|quitada|paga)\b/i.test(message.texto)) {
+    return await ofertarCorrecaoNegacao(user, message.telefone, message.texto);
+  }
 
   // ── Match forte com lembrete fixo pendente (fuzzy ILIKE, ±5%) → auto-paga ──
   if (parsed.tipo === "saida") {
