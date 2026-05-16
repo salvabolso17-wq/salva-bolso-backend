@@ -45,7 +45,11 @@ export async function handleConfirmarRecorrente(user: UserRow, telefone: string,
            SELECT $1::int, $2::text, $3::numeric,
                   LEAST(EXTRACT(DAY FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int, 28),
                   TRUE,
-                  ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date + INTERVAL '1 month')::date,
+                  make_date(
+                    EXTRACT(YEAR  FROM (NOW() AT TIME ZONE 'America/Sao_Paulo'))::int,
+                    EXTRACT(MONTH FROM (NOW() AT TIME ZONE 'America/Sao_Paulo'))::int,
+                    LEAST(EXTRACT(DAY FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int, 28)
+                  ),
                   'pendente',
                   (NOW() AT TIME ZONE 'America/Sao_Paulo')::date
            WHERE NOT EXISTS (
