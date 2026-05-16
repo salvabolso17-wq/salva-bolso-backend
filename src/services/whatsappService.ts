@@ -1477,14 +1477,18 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // Primeiro gasto registrado → anexa parabéns (ou welcome do fast-track) à confirmação
   if (parsed.tipo === "saida") {
     try {
-      const cntRegistros = await pool.query<{ total: string }>(
-        `SELECT
-           (SELECT COUNT(*) FROM transactions WHERE user_id = $1 AND tipo = 'saida')
-         + (SELECT COUNT(*) FROM recurring_expenses WHERE user_id = $1 AND ativo = TRUE)
-         + (SELECT COUNT(*) FROM lembretes WHERE user_id = $1 AND status IN ('pendente','pago')) AS total`,
+      const cntGastos = await pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count
+         FROM transactions t
+         WHERE t.user_id = $1 AND t.tipo = 'saida'
+           AND NOT EXISTS (
+             SELECT 1 FROM lembretes l
+             WHERE l.user_id = $1 AND l.fixa = TRUE
+               AND LOWER(l.titulo) = LOWER(t.descricao)
+           )`,
         [user.id]
       );
-      if (Number(cntRegistros.rows[0].total) === 1) {
+      if (Number(cntGastos.rows[0].count) === 1) {
         if (fastTrackPrimeiraInteracao) {
           linhasConfirmacao.push(
             "",
