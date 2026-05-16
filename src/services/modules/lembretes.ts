@@ -105,7 +105,40 @@ export async function criarLembrete(
     [userId, tituloNorm, valor, dia, fixa, proxima],
   );
   log.db("criarLembrete INSERT ok", { userId, lembreteId: r.rows[0].id, titulo: tituloNorm });
-  return r.rows[0];
+  const novo = r.rows[0];
+
+  // Se já existe gasto pontual deste mês com mesmo título e valor próximo, este lembrete
+  // já está coberto. Marca pago e adianta pra próximo mês (se fixo).
+  if (fixa) {
+    const dup = await pool.query<{ id: number }>(
+      `SELECT id FROM transactions
+       WHERE user_id = $1
+         AND tipo = 'saida'
+         AND LOWER(TRIM(descricao)) = LOWER(TRIM($2))
+         AND ABS(valor - $3) < 0.50
+         AND date_trunc('month', criado_em AT TIME ZONE 'America/Sao_Paulo')
+             = date_trunc('month', (NOW() AT TIME ZONE 'America/Sao_Paulo'))
+       LIMIT 1`,
+      [userId, tituloNorm, valor],
+    );
+    if (dup.rows.length > 0) {
+      await pool.query(
+        `UPDATE lembretes SET status = 'pago', atualizado_em = NOW() WHERE id = $1`,
+        [novo.id],
+      );
+      const novaData = proxMesParaDia(novo.dia_vencimento, novo.proxima_data);
+      const prox = await pool.query<LembreteRow>(
+        `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status)
+         VALUES ($1, $2, $3, $4, TRUE, $5, 'pendente')
+         RETURNING *`,
+        [userId, novo.titulo, novo.valor, novo.dia_vencimento, novaData],
+      );
+      log.db("criarLembrete — gasto deste mes ja existia, marcado pago + proximo mes criado", { userId, lembreteId: novo.id, proximoId: prox.rows[0]?.id });
+      return { ...novo, status: 'pago', _proximo: prox.rows[0] } as LembreteRow & { _proximo?: LembreteRow };
+    }
+  }
+
+  return novo;
 }
 
 export async function listarLembretes(userId: number): Promise<LembreteRow[]> {

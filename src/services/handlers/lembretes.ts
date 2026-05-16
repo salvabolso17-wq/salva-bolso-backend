@@ -200,11 +200,18 @@ async function avancarCriar(user: UserRow, telefone: string, state: CriarState):
     const l = await criarLembrete(user.id, state.titulo, state.valor, state.dia, state.fixa);
     await clearContext(user.id);
     log.webhook("lembrete criado", { userId: user.id, lembreteId: l.id, titulo: l.titulo, valor: state.valor, dia: state.dia, fixa: state.fixa });
-    const tipo = l.fixa ? "conta fixa" : "pontual";
-    await send(
-      telefone,
-      `📌 Lembrete criado:\n${capitalizeFirst(l.titulo)} · ${fmtValor(Number(l.valor))} · todo dia ${l.dia_vencimento} · ${tipo}\nVou te avisar 3, 2 e 1 dia antes do vencimento.`,
-    );
+    if (l.status === 'pago') {
+      await send(
+        telefone,
+        `📌 Já tinha esse gasto anotado este mês — marquei a conta como paga e criei o próximo lembrete pra ${l.dia_vencimento}/${(new Date().getMonth()+2)} 👍`,
+      );
+    } else {
+      const tipo = l.fixa ? "conta fixa" : "pontual";
+      await send(
+        telefone,
+        `📌 Lembrete criado:\n${capitalizeFirst(l.titulo)} · ${fmtValor(Number(l.valor))} · todo dia ${l.dia_vencimento} · ${tipo}\nVou te avisar 3, 2 e 1 dia antes do vencimento.`,
+      );
+    }
     return { success: true, userId: user.id, transacao: { id: l.id }, interpretado: { comando: "lembrete_criar" } };
   } catch (err) {
     log.error("falha criarLembrete", err, { userId: user.id });
