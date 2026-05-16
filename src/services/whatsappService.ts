@@ -12,7 +12,7 @@ import { isSubscriptionActive, isBlockedFreemium, checkAndSendExpirationNotice }
 import { isCuriosityPhrase, buildFeaturesMenuText, isKnownCommand, isAmbiguousIntent, buildContextualHint, handleAjudaCommand, handleSpendingConcern, handleNextStepSuggestion } from "./modules/menuBuilder";
 import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente, matchesKnownService } from "./modules/recurringDetection";
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip } from "./modules/insightsEngine";
-import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas } from "./modules/onboarding";
+import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas, handleOnboardingFixaDia, handleOnboardingFixaStatus } from "./modules/onboarding";
 import { classifyIntentWithAI } from "./modules/intentAI";
 import { resetInactivityNudge } from "./notificationService";
 
@@ -649,8 +649,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dia_recorrente_multi" | "confirmar_fixa_mes_atual" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso";
-    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dia_individual" | "waiting_status" | "waiting_paguei";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dia_recorrente_multi" | "confirmar_fixa_mes_atual" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_aguardando_status";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dia_individual" | "waiting_status" | "waiting_paguei" | "waiting_dia";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -683,6 +683,10 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
     if (pending.action === "confirmar_pagar_fixa" && pending.step === "waiting_confirmation") {
       return await handleConfirmarPagarFixa(user, message.telefone, textoTrim, pending.tx_ids);
+    } else if (pending.action === "onboarding_fixa_aguardando_dia" && pending.step === "waiting_dia") {
+      return await handleOnboardingFixaDia(user, message.telefone, textoTrim, pending.tx_ids);
+    } else if (pending.action === "onboarding_fixa_aguardando_status" && pending.step === "waiting_status") {
+      return await handleOnboardingFixaStatus(user, message.telefone, textoTrim, pending.tx_ids);
     } else if (pending.action === "onboarding" && pending.step === "waiting_onboarding_renda") {
        return await handleOnboardingRenda(user, message.telefone, textoTrim);
     } else if (pending.action === "onboarding" && pending.step === "waiting_onboarding_fixas") {
