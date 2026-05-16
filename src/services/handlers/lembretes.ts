@@ -154,6 +154,26 @@ function pickEscolha(t: string, max: number): number | null {
 
 async function avancarCriar(user: UserRow, telefone: string, state: CriarState): Promise<ProcessResult> {
   log.webhook("lembrete: avancarCriar", { userId: user.id, state, callstack: (new Error().stack ?? "").split("\n").slice(2, 4).join(" ← ") });
+
+  // Reusar valor já conhecido (evita perguntar de novo se Spotify/Aluguel já existe)
+  if (state.titulo && !state.valor) {
+    const existentes = await buscarLembretesPorTitulo(user.id, state.titulo);
+    if (existentes.length > 0) {
+      state.valor = Number(existentes[0].valor);
+    } else {
+      const r = await pool.query<{ valor: string }>(
+        `SELECT valor FROM transacoes
+         WHERE user_id = $1
+           AND tipo = 'gasto'
+           AND LOWER(descricao) LIKE $2
+           AND criado_em >= NOW() - INTERVAL '30 days'
+         ORDER BY criado_em DESC LIMIT 1`,
+        [user.id, `%${state.titulo.toLowerCase()}%`],
+      );
+      if (r.rows[0]) state.valor = Number(r.rows[0].valor);
+    }
+  }
+
   if (!state.titulo) {
     await setContext(user.id, FLUXO_CRIAR, state);
     await send(telefone, "Boa, vamos lá. Me conta o nome da conta e o valor.\n(ex: \"Luz, 180\" ou \"Aluguel de R$ 1.200\")");
