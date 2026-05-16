@@ -131,7 +131,8 @@ export async function handleResumoCommand(user: UserRow, telefone: string): Prom
     linhas.push("Nenhum gasto registrado este mês.");
   } else {
     for (const cat of metrics.gastos_por_categoria) {
-      linhas.push(`${cat.categoria}: ${fmtValor(cat.total)}`);
+      const emoji = CATEGORIA_EMOJI[cat.categoria] ?? "•";
+      linhas.push(`${emoji} ${cat.categoria} — ${fmtValor(cat.total)}`);
     }
     linhas.push("");
     linhas.push(`Total gasto: ${fmtValor(metrics.total_saidas)}`);

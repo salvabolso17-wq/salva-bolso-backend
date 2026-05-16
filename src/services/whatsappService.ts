@@ -874,6 +874,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const t = message.texto.trim().toLowerCase();
     if (t === "corrigir") return await handleCorrigirCommand(user, message.telefone);
     if (t === "apagar")   return await handleApagarCommand(user, message.telefone);
+    if (/^(lista\s+(de\s+)?gastos?|quais\s+foram\s+os\s+gastos?|gastos?\s+detalhad[ao]s?|todos\s+os\s+gastos?|detalhad[ao]s?)[\?!.]*$/.test(t)) {
+      return await handleListarGastosMesCommand(user, message.telefone);
+    }
   }
 
   // ── AI-first: Claude classifica mensagens sem número ─────────────────────
