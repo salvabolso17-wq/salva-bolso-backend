@@ -262,6 +262,58 @@ export async function handleHojeCommand(user: UserRow, telefone: string): Promis
   };
 }
 
+export async function handleListarGastosMesCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
+  log.webhook("comando listar gastos mes", { userId: user.id });
+
+  const now       = new Date();
+  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const result = await pool.query<{ descricao: string; valor: string; categoria: string }>(
+    `SELECT descricao, valor, categoria
+     FROM transactions
+     WHERE user_id = $1
+       AND tipo = 'saida'
+       AND criado_em >= $2
+       AND criado_em < $3
+     ORDER BY criado_em DESC
+     LIMIT 50`,
+    [user.id, inicioMes, fimMes]
+  );
+
+  const meses = ["janeiro","fevereiro","março","abril","maio","junho",
+                 "julho","agosto","setembro","outubro","novembro","dezembro"];
+
+  const linhas = [`Gastos de ${meses[now.getMonth()]}/${now.getFullYear()}`, ""];
+
+  if (result.rows.length === 0) {
+    linhas.push("Nenhum gasto registrado este mês.");
+  } else {
+    let total = 0;
+    for (const row of result.rows) {
+      const valor = Number(row.valor);
+      total += valor;
+      linhas.push(`${row.descricao ?? "Sem descrição"} — ${fmtValor(valor)}`);
+    }
+    linhas.push("");
+    linhas.push(`Total: ${fmtValor(total)} (${result.rows.length} lançamentos)`);
+  }
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+    log.whatsapp("listar gastos mes enviado", { to: telefone, count: result.rows.length });
+  } catch (err) {
+    log.error("falha ao enviar listar gastos mes", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "listar gastos mes", count: result.rows.length },
+  };
+}
+
 export async function handleSemanaCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando semana", { userId: user.id });
 

@@ -17,7 +17,7 @@ import { classifyIntentWithAI } from "./modules/intentAI";
 import { resetInactivityNudge } from "./notificationService";
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
-import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria } from "./handlers/reports";
+import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
 import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
 import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiaRecorrenteMulti } from "./handlers/recurring";
@@ -250,6 +250,14 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     /quanto\s+(tenho|sobrou|resta|restou|tenho\s+de\s+saldo)|quanto\s+gastei\s+(esse|este|no)\s+m[eê]s|o\s+que\s+sobrou|quanto\s+est[aá]\s+sobrando|saldo\s+do\s+m[eê]s|quero\s+(ver\s+)?o\s+saldo|meu\s+saldo|quero\s+ver\s+o?\s*(meu\s+)?saldo/.test(t)
   ) {
     return await handleSaldoCommand(user, telefone);
+  }
+
+  // "lista de gastos" / "quais foram os gastos" / "gastos detalhados" → item por item
+  if (
+    !temNumero &&
+    /^(lista\s+(de\s+)?gastos?|quais\s+foram\s+os\s+gastos?|gastos?\s+detalhad[ao]s?|me\s+mostra\s+os\s+gastos?\s+detalhad[ao]s?|todos\s+os\s+gastos?)[\?!.]*$/i.test(t)
+  ) {
+    return await handleListarGastosMesCommand(user, telefone);
   }
 
   // Consulta de gastos via linguagem natural
