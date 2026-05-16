@@ -201,9 +201,10 @@ async function avancarCriar(user: UserRow, telefone: string, state: CriarState):
     await clearContext(user.id);
     log.webhook("lembrete criado", { userId: user.id, lembreteId: l.id, titulo: l.titulo, valor: state.valor, dia: state.dia, fixa: state.fixa });
     if (l.status === 'pago') {
+      const proxMes = ((new Date().getMonth() + 1) % 12) + 1;
       await send(
         telefone,
-        `📌 Já tinha esse gasto anotado este mês — marquei a conta como paga e criei o próximo lembrete pra ${l.dia_vencimento}/${(new Date().getMonth()+2)} 👍`,
+        `📌 ${capitalizeFirst(l.titulo)} salvo nas contas fixas.\nO desse mês já tá pago (você anotou agora). Próximo lembrete: dia ${l.dia_vencimento}/${proxMes} ✅`,
       );
     } else {
       const tipo = l.fixa ? "conta fixa" : "pontual";
