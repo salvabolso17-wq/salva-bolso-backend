@@ -17,7 +17,7 @@ import { classifyIntentWithAI } from "./modules/intentAI";
 import { resetInactivityNudge } from "./notificationService";
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
-import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand } from "./handlers/reports";
+import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand, handleDetalhadoCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
 import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
 import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo } from "./handlers/recurring";
@@ -252,12 +252,12 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     return await handleSaldoCommand(user, telefone);
   }
 
-  // "lista de gastos" / "quais foram os gastos" / "gastos detalhados" → item por item
+  // "lista de gastos" / "quais foram os gastos" / "gastos detalhados" → extrato detalhado do mês
   if (
     !temNumero &&
-    /^(lista\s+(de\s+)?gastos?|quais\s+foram\s+os\s+gastos?|gastos?\s+detalhad[ao]s?|me\s+mostra\s+os\s+gastos?\s+detalhad[ao]s?|todos\s+os\s+gastos?)[\?!.]*$/i.test(t)
+    /^(lista\s+(de\s+)?gastos?|quais\s+foram(\s+os\s+gastos?)?|gastos?\s+detalhad[ao]s?|me\s+mostra\s+os\s+gastos?\s+detalhad[ao]s?|todos\s+os\s+gastos?|ver\s+tudo|detalhad[ao]s?)[\?!.]*$/i.test(t)
   ) {
-    return await handleListarGastosMesCommand(user, telefone);
+    return await handleDetalhadoCommand(user, telefone);
   }
 
   // Consulta de gastos via linguagem natural
@@ -413,13 +413,12 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     return await handleRecorrentesTotalCommand(user, telefone);
   }
 
-  // "extrato" / "ver extrato" / "meu extrato" → extrato do mês atual
+  // "extrato" / "ver extrato" / "meu extrato" → detalhado do mês atual
   if (
     !temNumero &&
     /^(extrato|ver\s+extrato|meu\s+extrato|quero\s+(ver\s+)?o?\s*extrato)[\?!.]*$/i.test(t)
   ) {
-    const mesAtual = MESES_NOME[new Date().getMonth() + 1];
-    return await handleExtratoCommand(user, telefone, `extrato ${mesAtual}`);
+    return await handleDetalhadoCommand(user, telefone);
   }
 
   // "buscar" / "buscar gastos" / "quero buscar" → pede o termo
@@ -878,13 +877,12 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     log.error("tryHandleLembretes excecao", err, { userId: user.id });
   }
 
-  // ── Intenção de histórico/registros — redireciona para extrato ──────────
+  // ── Intenção de histórico/registros — redireciona para detalhado ────────
   if (
     !parseTransaction(message.texto.trim()) &&
     /tudo\s+que\s+(j[aá]\s+)?(anotei|registrei|lan[cç]ei)|ver\s+(meus?\s+)?(registros?|lan[cç]amentos?|hist[oó]rico|anotat?[uú]?)|meus?\s+(lan[cç]amentos?|registros?|hist[oó]rico de\s+gastos?)|hist[oó]rico\s+de\s+gastos?/i.test(message.texto.trim())
   ) {
-    const mesAtual = MESES_NOME[new Date().getMonth() + 1];
-    return await handleExtratoCommand(user, message.telefone, `extrato ${mesAtual}`);
+    return await handleDetalhadoCommand(user, message.telefone);
   }
 
   // Comandos exatos sem número — interceptar antes do AI pra evitar classificação errada
@@ -892,8 +890,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     const t = message.texto.trim().toLowerCase();
     if (t === "corrigir") return await handleCorrigirCommand(user, message.telefone);
     if (t === "apagar")   return await handleApagarCommand(user, message.telefone);
-    if (/^(lista\s+(de\s+)?gastos?|quais\s+foram\s+os\s+gastos?|gastos?\s+detalhad[ao]s?|todos\s+os\s+gastos?|detalhad[ao]s?)[\?!.]*$/.test(t)) {
-      return await handleListarGastosMesCommand(user, message.telefone);
+    if (/^completo[\?!.]*$/.test(t)) {
+      return await handleDetalhadoCommand(user, message.telefone, { completo: true });
+    }
+    if (/^(detalhad[ao]s?|extrato|quais\s+foram(\s+os\s+gastos?)?|ver\s+tudo|lista\s+(de\s+)?gastos?|gastos?\s+detalhad[ao]s?|todos\s+os\s+gastos?)[\?!.]*$/.test(t)) {
+      return await handleDetalhadoCommand(user, message.telefone);
     }
   }
 
@@ -910,7 +911,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           case "semana":      return await handleSemanaCommand(user, message.telefone);
           case "ranking":     return await handleRankingCommand(user, message.telefone);
           case "metas":       return await handleMetasCommand(user, message.telefone);
-          case "extrato":     return await handleExtratoCommand(user, message.telefone, `extrato ${MESES_NOME[new Date().getMonth() + 1]}`);
+          case "extrato":     return await handleDetalhadoCommand(user, message.telefone);
           case "ajuda":       return await handleAjudaCommand(user, message.telefone);
           case "proximas":    return await handleProximasCommand(user, message.telefone);
           case "comparar":    return await handleCompararCommand(user, message.telefone);
@@ -994,7 +995,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     setLastCommand(user.id, "saldo");
     return await handleSaldoCommand(user, message.telefone);
   }
-  if (/^resumo$/i.test(message.texto.trim())) {
+  if (/^(resumo|meus?\s+gastos?|gastos?\s+do\s+m[eê]s)[\?!.]*$/i.test(message.texto.trim())) {
     setLastCommand(user.id, "resumo");
     return await handleResumoCommand(user, message.telefone);
   }
@@ -1376,7 +1377,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           case "semana":     return await handleSemanaCommand(user, message.telefone);
           case "ranking":    return await handleRankingCommand(user, message.telefone);
           case "metas":      return await handleMetasCommand(user, message.telefone);
-          case "extrato":    return await handleExtratoCommand(user, message.telefone, `extrato ${MESES_NOME[new Date().getMonth() + 1]}`);
+          case "extrato":    return await handleDetalhadoCommand(user, message.telefone);
           case "ajuda":      return await handleAjudaCommand(user, message.telefone);
           case "proximas":   return await handleProximasCommand(user, message.telefone);
           case "comparar":   return await handleCompararCommand(user, message.telefone);

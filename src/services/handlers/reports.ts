@@ -6,6 +6,7 @@ import { fetchPeriodMetrics } from "../reportService";
 import { parseValor } from "../../utils/parseTransaction";
 import { recordAction } from "../conversationEngine";
 import { checkAndSendOnboardingTip } from "../modules/insightsEngine";
+import { resumoMesAtual } from "../modules/gastos";
 import type { UserRow, ProcessResult } from "../types";
 
 const DESAFIOS: Record<string, string[]> = {
@@ -116,34 +117,58 @@ export async function handleSaldoCommand(user: UserRow, telefone: string): Promi
 export async function handleResumoCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando resumo", { userId: user.id });
 
-  const now       = new Date();
-  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const r = await resumoMesAtual(user.id);
+  const mesNome = capitalizeFirst(MESES_NOME[r.mes]);
+  const header  = `📊 ${mesNome}/${r.ano}`;
 
-  const metrics = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
+  if (r.fixas.length === 0 && r.dia_a_dia_lancamentos.length === 0) {
+    const texto = `${header}\n\nNenhum gasto esse mês ainda. Manda o primeiro:\n🛒 _50 mercado_ • 🚗 _35 uber_`;
+    try { await whatsapp.sendText({ to: telefone, text: texto }); } catch (err) { log.error("falha ao enviar resumo (vazio)", err, { to: telefone }); }
+    recordAction(user.id, "queried_summary");
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "resumo", vazio: true } };
+  }
 
-  const meses = ["janeiro","fevereiro","março","abril","maio","junho",
-                 "julho","agosto","setembro","outubro","novembro","dezembro"];
+  const blocos: string[] = [header];
+  if (r.renda != null) {
+    blocos.push("");
+    blocos.push(`💰 Renda: ${fmtValor(r.renda)}`);
+  }
 
-  const linhas = [`Resumo de ${meses[now.getMonth()]}/${now.getFullYear()}`, ""];
-
-  if (metrics.gastos_por_categoria.length === 0) {
-    linhas.push("Nenhum gasto registrado este mês.");
-  } else {
-    for (const cat of metrics.gastos_por_categoria) {
-      const emoji = CATEGORIA_EMOJI[cat.categoria] ?? "•";
-      linhas.push(`${emoji} ${cat.categoria} — ${fmtValor(cat.total)}`);
-    }
-    linhas.push("");
-    linhas.push(`Total gasto: ${fmtValor(metrics.total_saidas)}`);
-    if (metrics.categoria_top) {
-      linhas.push(`Maior categoria: ${metrics.categoria_top}`);
+  if (r.fixas.length > 0) {
+    blocos.push("");
+    blocos.push(`🏠 *Fixas — ${fmtValor(r.total_fixas)}*`);
+    const sorted = r.fixas.slice().sort((a, b) => b.valor - a.valor);
+    if (sorted.length > 6) {
+      for (let i = 0; i < 5; i++) blocos.push(`• ${capitalizeFirst(sorted[i].titulo)} ${fmtValor(sorted[i].valor)}`);
+      blocos.push(`• + ${sorted.length - 5} outras`);
+    } else {
+      for (const f of sorted) blocos.push(`• ${capitalizeFirst(f.titulo)} ${fmtValor(f.valor)}`);
     }
   }
 
+  if (r.dia_a_dia_lancamentos.length > 0) {
+    blocos.push("");
+    blocos.push(`🛒 *Dia a dia — ${fmtValor(r.total_dia)}*`);
+    for (const c of r.porCategoriaDiaADia) {
+      const emoji = CATEGORIA_EMOJI[c.categoria] ?? "•";
+      blocos.push(`${emoji} ${c.categoria} — ${fmtValor(c.total)}`);
+    }
+  }
+
+  blocos.push("");
+  if (r.renda != null) {
+    const sobra = r.renda - r.total_geral;
+    blocos.push(`💸 Total gasto: ${fmtValor(r.total_geral)}`);
+    blocos.push(`📊 *Sobra: ${fmtValor(sobra)}*`);
+  } else {
+    blocos.push(`💸 *Total: ${fmtValor(r.total_geral)}*`);
+  }
+  blocos.push("");
+  blocos.push("💡 Manda _detalhado_ pra ver tudo");
+
   try {
-    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-    log.whatsapp("resumo enviado", { to: telefone, categorias: metrics.gastos_por_categoria.length });
+    await whatsapp.sendText({ to: telefone, text: blocos.join("\n") });
+    log.whatsapp("resumo enviado", { to: telefone, total: r.total_geral, fixas: r.fixas.length, dia: r.dia_a_dia_lancamentos.length });
   } catch (err) {
     log.error("falha ao enviar resumo", err, { to: telefone });
   }
@@ -153,7 +178,69 @@ export async function handleResumoCommand(user: UserRow, telefone: string): Prom
     success:      true,
     userId:       user.id,
     transacao:    {},
-    interpretado: { comando: "resumo", totalGasto: metrics.total_saidas, categorias: metrics.gastos_por_categoria.length },
+    interpretado: { comando: "resumo", total: r.total_geral, fixas: r.fixas.length, dia: r.dia_a_dia_lancamentos.length },
+  };
+}
+
+export async function handleDetalhadoCommand(user: UserRow, telefone: string, opts?: { completo?: boolean }): Promise<ProcessResult> {
+  log.webhook("comando detalhado", { userId: user.id, completo: !!opts?.completo });
+
+  const r = await resumoMesAtual(user.id);
+  const mesNome = capitalizeFirst(MESES_NOME[r.mes]);
+  const header  = `📋 Extrato — ${mesNome}/${r.ano}`;
+
+  if (r.fixas.length === 0 && r.dia_a_dia_lancamentos.length === 0) {
+    const texto = `${header}\n\nNenhum lançamento esse mês ainda.`;
+    try { await whatsapp.sendText({ to: telefone, text: texto }); } catch (err) { log.error("falha ao enviar detalhado (vazio)", err, { to: telefone }); }
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "detalhado", vazio: true } };
+  }
+
+  const blocos: string[] = [header];
+
+  if (r.fixas.length > 0) {
+    blocos.push("");
+    blocos.push("🏠 *Fixas:*");
+    const sorted = r.fixas.slice().sort((a, b) => a.dia_vencimento - b.dia_vencimento);
+    for (const f of sorted) {
+      blocos.push(`• ${capitalizeFirst(f.titulo)} — ${fmtValor(f.valor)} (dia ${f.dia_vencimento})`);
+    }
+  }
+
+  if (r.dia_a_dia_lancamentos.length > 0) {
+    blocos.push("");
+    blocos.push("🛒 *Dia a dia:*");
+    const sorted = r.dia_a_dia_lancamentos.slice().sort((a, b) => new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime());
+    const limite = opts?.completo ? sorted.length : 15;
+    const mostrar = sorted.slice(0, limite);
+    for (const l of mostrar) {
+      const d  = new Date(l.criado_em);
+      const dd = String(d.getUTCDate()).padStart(2, "0");
+      const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const desc = l.descricao || "—";
+      blocos.push(`• ${dd}/${mm} — ${desc} ${fmtValor(l.valor)}`);
+    }
+    if (!opts?.completo && sorted.length > limite) {
+      const restantes = sorted.length - limite;
+      blocos.push(`... e + ${restantes} lançamentos`);
+      blocos.push("💡 Manda _completo_ pra ver todos");
+    }
+  }
+
+  blocos.push("");
+  blocos.push(`💸 Total: ${fmtValor(r.total_geral)} (${r.qtd_lancamentos} lançamentos)`);
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: blocos.join("\n") });
+    log.whatsapp("detalhado enviado", { to: telefone, total: r.total_geral, qtd: r.qtd_lancamentos, completo: !!opts?.completo });
+  } catch (err) {
+    log.error("falha ao enviar detalhado", err, { to: telefone });
+  }
+
+  return {
+    success:      true,
+    userId:       user.id,
+    transacao:    {},
+    interpretado: { comando: "detalhado", total: r.total_geral, qtd: r.qtd_lancamentos, completo: !!opts?.completo },
   };
 }
 
