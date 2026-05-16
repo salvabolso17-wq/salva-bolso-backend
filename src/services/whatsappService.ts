@@ -10,7 +10,7 @@ import type { UserRow, ProcessResult } from "./types";
 // ── Modules ───────────────────────────────────────────────────────────────────
 import { isSubscriptionActive, isBlockedFreemium, checkAndSendExpirationNotice } from "./modules/premiumGuard";
 import { isCuriosityPhrase, buildFeaturesMenuText, isKnownCommand, isAmbiguousIntent, buildContextualHint, handleAjudaCommand, handleSpendingConcern, handleNextStepSuggestion } from "./modules/menuBuilder";
-import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente } from "./modules/recurringDetection";
+import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente, matchesKnownService } from "./modules/recurringDetection";
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip } from "./modules/insightsEngine";
 import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas } from "./modules/onboarding";
 import { classifyIntentWithAI } from "./modules/intentAI";
@@ -1509,6 +1509,29 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   if (parsed.tipo === "saida") {
+    // Serviços claramente recorrentes (Spotify, Netflix, etc.) → pergunta imediata sem cooldown
+    if (matchesKnownService(parsed.descricao)) {
+      try {
+        const sugeriu = await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao, parsed.valor, parsed.categoria, message.texto);
+        if (sugeriu) {
+          recordInsightSent(user.id);
+          return {
+            success: true,
+            userId: user.id,
+            transacao: transacaoRow,
+            interpretado: {
+              valor:     parsed.valor,
+              descricao: parsed.descricao,
+              categoria: parsed.categoria,
+              tipo:      parsed.tipo,
+            },
+          };
+        }
+      } catch (err) {
+        log.error("falha sugestao recorrente direta (servico conhecido)", err, { userId: user.id });
+      }
+    }
+
     // Cadeia sequencial com exclusão mútua: só 1 mensagem secundária por gasto.
     // Cada função retorna true se enviou algo — a cadeia para na primeira que disparar.
     // Session cooldown: no máximo 1 mensagem secundária a cada 10 minutos por sessão.
