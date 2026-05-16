@@ -1489,20 +1489,29 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         [user.id]
       );
       if (Number(cntGastos.rows[0].count) === 1) {
-        if (fastTrackPrimeiraInteracao) {
-          linhasConfirmacao.push(
-            "",
-            "🎁 Teus 7 dias grátis começaram.",
-            "",
-            "Quanto mais você anotar, mais claro fica onde dá pra economizar.",
-          );
-        } else {
-          linhasConfirmacao.push(
-            "",
-            "🎉 Esse é só o começo.",
-            "",
-            "Quanto mais você anotar, mais claro fica onde dá pra economizar.",
-          );
+        const lockDate = new Date('1970-01-01');
+        const lock = await pool.query(
+          `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+           VALUES ($1, 'parabens_primeiro_gasto', 1, $2)
+           ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+          [user.id, lockDate]
+        );
+        if ((lock.rowCount ?? 0) > 0) {
+          if (fastTrackPrimeiraInteracao) {
+            linhasConfirmacao.push(
+              "",
+              "🎁 Teus 7 dias grátis começaram.",
+              "",
+              "Quanto mais você anotar, mais claro fica onde dá pra economizar.",
+            );
+          } else {
+            linhasConfirmacao.push(
+              "",
+              "🎉 Esse é só o começo.",
+              "",
+              "Quanto mais você anotar, mais claro fica onde dá pra economizar.",
+            );
+          }
         }
       }
     } catch (err) {
