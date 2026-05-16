@@ -107,8 +107,9 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
   if (parsed && parsed.tipo === "saida") {
     // Insere como lembrete fixo (dia=hoje BRT, próximo mês). Usuário pode reajustar com "muda X pra dia Y".
     const descricao = parsed.descricao || "conta fixa";
+    let novoLembrete: { id: number; titulo: string; valor: number } | null = null;
     try {
-      await pool.query(
+      const ins = await pool.query<{ id: number; titulo: string; valor: string }>(
         `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status, ultimo_aviso_em)
          SELECT $1::int, $2::text, $3::numeric,
                 LEAST(EXTRACT(DAY FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)::int, 28),
@@ -119,21 +120,15 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
          WHERE NOT EXISTS (
            SELECT 1 FROM lembretes
            WHERE user_id = $1::int AND LOWER(titulo) = LOWER($2::text) AND fixa = TRUE AND status = 'pendente'
-         )`,
+         )
+         RETURNING id, titulo, valor`,
         [user.id, descricao, parsed.valor]
       );
+      if (ins.rows[0]) {
+        novoLembrete = { id: ins.rows[0].id, titulo: ins.rows[0].titulo, valor: Number(ins.rows[0].valor) };
+      }
     } catch (e) {
       log.error("erro ao inserir lembrete no onboarding", e);
-    }
-
-    try {
-      await pool.query(
-        `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
-         VALUES ($1, 'saida', $2, 'Moradia', $3)`,
-        [user.id, parsed.valor, descricao]
-      );
-    } catch (e) {
-      log.error("erro ao inserir transaction da conta fixa no onboarding", e);
     }
 
     const renda      = Number(user.renda ?? 0);
@@ -151,6 +146,21 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
       "🛒 _50 mercado_ • 🚗 _35 uber_",
     ].join("\n");
     await whatsapp.sendText({ to: telefone, text: msg });
+
+    if (novoLembrete) {
+      await pool.query(
+        `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+         VALUES ($1, 'confirmar_fixa_mes_atual', 'waiting_status', $2::jsonb, NOW() + INTERVAL '1 hour')
+         ON CONFLICT (user_id) DO UPDATE
+           SET action = 'confirmar_fixa_mes_atual', step = 'waiting_status', tx_ids = $2::jsonb,
+               selected_tx_id = NULL, expires_at = NOW() + INTERVAL '1 hour'`,
+        [user.id, JSON.stringify({ queue: [{ lembrete_id: novoLembrete.id, titulo: novoLembrete.titulo, valor: novoLembrete.valor }] })]
+      );
+      await whatsapp.sendText({
+        to:   telefone,
+        text: `E a *${capitalizeFirst(novoLembrete.titulo)}* desse mês — já tá paga ou ainda vai pagar?\n💡 Ex: já paguei  •  ainda vou pagar`,
+      });
+    }
     return { success: false, userId: user.id, erro: "onboarding finalizado (com fixa)" };
   }
 

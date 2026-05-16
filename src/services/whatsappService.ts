@@ -20,7 +20,7 @@ import { resetInactivityNudge } from "./notificationService";
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
 import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
-import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiaRecorrenteMulti } from "./handlers/recurring";
+import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiaRecorrenteMulti, handleConfirmarFixaMesAtual } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
 import { tryHandleLembretes } from "./handlers/lembretes";
@@ -649,8 +649,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dia_recorrente_multi";
-    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dia_individual";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dia_recorrente_multi" | "confirmar_fixa_mes_atual";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dia_individual" | "waiting_status";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -780,6 +780,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
     } else if (pending.action === "apagar_recorrente" && pending.step === "waiting_confirmation") {
       return await handleConfirmarApagarRecorrente(user, message.telefone, textoTrim, pending.tx_ids);
+    } else if (pending.action === "confirmar_fixa_mes_atual" && pending.step === "waiting_status") {
+      return await handleConfirmarFixaMesAtual(user, message.telefone, textoTrim, pending.tx_ids);
     } else if (pending.action === "registrar_parcela" && pending.step === "waiting_parcela_valor") {
       if (!isKnownCommand(textoTrim)) {
         return await handleRegistrarParcelaValor(
@@ -1389,6 +1391,63 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     tipo:      parsed.tipo,
     descricao: parsed.descricao,
   });
+
+  // ── Match com lembrete fixo pendente (fuzzy ILIKE, ±10%) → marca como pago ─
+  if (parsed.tipo === "saida") {
+    try {
+      const fixaMatch = await pool.query<{ id: number; titulo: string; valor: string; dia_vencimento: number }>(
+        `SELECT id, titulo, valor, dia_vencimento FROM lembretes
+         WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente'
+           AND LOWER(titulo) ILIKE LOWER('%' || $2 || '%')
+         LIMIT 1`,
+        [user.id, parsed.descricao]
+      );
+      if (fixaMatch.rows[0]) {
+        const lembrete = fixaMatch.rows[0];
+        const recValor = Number(lembrete.valor);
+        const diff = Math.abs(recValor - parsed.valor) / recValor;
+        if (recValor > 0 && diff <= 0.10) {
+          const { marcarPago } = await import("./modules/lembretes");
+          const mp = await marcarPago(user.id, lembrete.id);
+          const insRes = await pool.query(
+            `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING *`,
+            [user.id, parsed.tipo, parsed.valor, parsed.categoria, parsed.descricao]
+          );
+          recordAction(user.id, "registered_transaction");
+          resetInactivityNudge(user.id).catch(() => {});
+
+          let proxStr = "";
+          if (mp?.proximo?.proxima_data) {
+            const iso = String(mp.proximo.proxima_data).slice(0, 10);
+            const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (m) {
+              const mesNum = parseInt(m[2], 10);
+              const diaNum = parseInt(m[3], 10);
+              proxStr = `\nPróximo lembrete: dia ${diaNum} de ${MESES_NOME[mesNum]}.`;
+            }
+          }
+          try {
+            await whatsapp.sendText({
+              to:   message.telefone,
+              text: `✅ ${capitalizeFirst(lembrete.titulo)} (${fmtValor(parsed.valor)}) registrado e marcado como pago.${proxStr}`,
+            });
+          } catch (err) {
+            log.error("falha ao enviar confirmação fixa marcada pago", err, { to: message.telefone });
+          }
+          return {
+            success:      true,
+            userId:       user.id,
+            transacao:    insRes.rows[0] as Record<string, unknown>,
+            interpretado: { valor: parsed.valor, descricao: parsed.descricao, categoria: parsed.categoria, tipo: parsed.tipo, marcou_pago: true },
+          };
+        }
+      }
+    } catch (err) {
+      log.error("falha em match com lembrete fixo", err, { userId: user.id });
+    }
+  }
 
   // ── Checagem de recorrente duplicado ─────────────────────────────────────
   if (parsed.tipo === "saida") {
