@@ -20,7 +20,7 @@ import { resetInactivityNudge } from "./notificationService";
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
 import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
-import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiaRecorrenteMulti, handleConfirmarFixaMesAtual } from "./handlers/recurring";
+import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiaRecorrenteMulti, handleConfirmarFixaMesAtual, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
 import { tryHandleLembretes } from "./handlers/lembretes";
@@ -649,8 +649,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dia_recorrente_multi" | "confirmar_fixa_mes_atual";
-    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dia_individual" | "waiting_status";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dia_recorrente_multi" | "confirmar_fixa_mes_atual" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dia_individual" | "waiting_status" | "waiting_paguei";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -673,7 +673,17 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       return { success: false, userId: user.id, erro: "Ação cancelada" };
     }
 
-    if (pending.action === "onboarding" && pending.step === "waiting_onboarding_renda") {
+    // Camada 3: resposta "já paguei" a aviso de vencimento — silent fallthrough se não match
+    if (pending.action === "aguardando_pagamento_aviso" && pending.step === "waiting_paguei") {
+      if (/(j[aá]\s+paguei|paguei|ta\s+pago|t[aá]\s+pago|pago|quitei|quitado)/i.test(textoTrim)) {
+        return await handleAguardandoPagamentoAviso(user, message.telefone, pending.tx_ids);
+      }
+      // Não matched: deixa o pending vivo e segue fluxo normal (parse de gasto etc.)
+    }
+
+    if (pending.action === "confirmar_pagar_fixa" && pending.step === "waiting_confirmation") {
+      return await handleConfirmarPagarFixa(user, message.telefone, textoTrim, pending.tx_ids);
+    } else if (pending.action === "onboarding" && pending.step === "waiting_onboarding_renda") {
        return await handleOnboardingRenda(user, message.telefone, textoTrim);
     } else if (pending.action === "onboarding" && pending.step === "waiting_onboarding_fixas") {
        return await handleOnboardingFixas(user, message.telefone, textoTrim);
@@ -1392,7 +1402,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     descricao: parsed.descricao,
   });
 
-  // ── Match com lembrete fixo pendente (fuzzy ILIKE, ±10%) → marca como pago ─
+  // ── Match forte com lembrete fixo pendente (fuzzy ILIKE, ±5%) → auto-paga ──
   if (parsed.tipo === "saida") {
     try {
       const fixaMatch = await pool.query<{ id: number; titulo: string; valor: string; dia_vencimento: number }>(
@@ -1405,8 +1415,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       if (fixaMatch.rows[0]) {
         const lembrete = fixaMatch.rows[0];
         const recValor = Number(lembrete.valor);
-        const diff = Math.abs(recValor - parsed.valor) / recValor;
-        if (recValor > 0 && diff <= 0.10) {
+        const diff = recValor > 0 ? Math.abs(recValor - parsed.valor) / recValor : 1;
+        if (recValor > 0 && diff <= 0.05) {
           const { marcarPago } = await import("./modules/lembretes");
           const mp = await marcarPago(user.id, lembrete.id);
           const insRes = await pool.query(
@@ -1418,6 +1428,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           recordAction(user.id, "registered_transaction");
           resetInactivityNudge(user.id).catch(() => {});
 
+          const mesAtual = MESES_NOME[new Date().getMonth() + 1];
           let proxStr = "";
           if (mp?.proximo?.proxima_data) {
             const iso = String(mp.proximo.proxima_data).slice(0, 10);
@@ -1425,13 +1436,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
             if (m) {
               const mesNum = parseInt(m[2], 10);
               const diaNum = parseInt(m[3], 10);
-              proxStr = `\nPróximo lembrete: dia ${diaNum} de ${MESES_NOME[mesNum]}.`;
+              proxStr = ` Próximo lembrete: ${diaNum} de ${MESES_NOME[mesNum]} 💪`;
             }
           }
           try {
             await whatsapp.sendText({
               to:   message.telefone,
-              text: `✅ ${capitalizeFirst(lembrete.titulo)} (${fmtValor(parsed.valor)}) registrado e marcado como pago.${proxStr}`,
+              text: `✅ ${capitalizeFirst(lembrete.titulo)} de ${mesAtual} marcada como paga.${proxStr}`,
             });
           } catch (err) {
             log.error("falha ao enviar confirmação fixa marcada pago", err, { to: message.telefone });
@@ -1445,7 +1456,51 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         }
       }
     } catch (err) {
-      log.error("falha em match com lembrete fixo", err, { userId: user.id });
+      log.error("falha em match forte com lembrete fixo", err, { userId: user.id });
+    }
+  }
+
+  // ── Match fraco com lembrete fixo pendente (5%-30%) → confirma antes ──────
+  if (parsed.tipo === "saida") {
+    try {
+      const fracoMatch = await pool.query<{ id: number; titulo: string; valor: string; dia_vencimento: number }>(
+        `SELECT id, titulo, valor, dia_vencimento FROM lembretes
+         WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente'
+           AND LOWER(titulo) ILIKE LOWER('%' || $2 || '%')
+           AND ABS(valor - $3) / valor BETWEEN 0.05 AND 0.30
+         LIMIT 1`,
+        [user.id, parsed.descricao, parsed.valor]
+      );
+      if (fracoMatch.rows[0]) {
+        const lembrete = fracoMatch.rows[0];
+        const recValor = Number(lembrete.valor);
+        await pool.query(
+          `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+           VALUES ($1, 'confirmar_pagar_fixa', 'waiting_confirmation', $2::jsonb, NOW() + INTERVAL '30 minutes')
+           ON CONFLICT (user_id) DO UPDATE
+             SET action = 'confirmar_pagar_fixa', step = 'waiting_confirmation', tx_ids = $2::jsonb,
+                 selected_tx_id = NULL, expires_at = NOW() + INTERVAL '30 minutes'`,
+          [user.id, JSON.stringify({
+            lembrete_id:     lembrete.id,
+            titulo:          lembrete.titulo,
+            valor_lembrete:  recValor,
+            valor_gasto:     parsed.valor,
+            descricao_gasto: parsed.descricao,
+            categoria_gasto: parsed.categoria,
+          })]
+        );
+        try {
+          await whatsapp.sendText({
+            to:   message.telefone,
+            text: `Vi que você tem *${capitalizeFirst(lembrete.titulo)} ${fmtValor(recValor)}* pendente. Esse pagamento é dela?\n1. Sim, é essa\n2. Não, é outro gasto`,
+          });
+        } catch (err) {
+          log.error("falha ao perguntar match fraco fixa", err, { to: message.telefone });
+        }
+        return { success: false, userId: user.id, erro: "aguardando confirmação match fraco fixa" };
+      }
+    } catch (err) {
+      log.error("falha em match fraco com lembrete fixo", err, { userId: user.id });
     }
   }
 

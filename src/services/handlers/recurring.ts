@@ -524,6 +524,136 @@ export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, t
   }
 }
 
+// ── Confirmar match fraco com fixa (Camada 2) ────────────────────────────────
+// Resposta a "Vi que você tem X pendente. Esse pagamento é dela? 1/2".
+export async function handleConfirmarPagarFixa(
+  user: UserRow, telefone: string, texto: string, txIdsRaw: unknown
+): Promise<ProcessResult> {
+  type Payload = {
+    lembrete_id:     number;
+    titulo:          string;
+    valor_lembrete:  number;
+    valor_gasto:     number;
+    descricao_gasto: string;
+    categoria_gasto: string;
+  };
+  const data = (txIdsRaw ?? {}) as Payload;
+  const t = texto.trim().toLowerCase();
+  const isSim = /^(1|sim|s|[eé]|isso|[eé]\s+essa|essa|essa\s+mesma|pode|confirmo|certo|isso\s+mesmo)[\?!.]*$/i.test(t);
+  const isNao = /^(2|n[aã]o|nao|n|outro|outra|outro\s+gasto|[eé]\s+outro|nao\s+[eé]|n[aã]o\s+[eé])[\?!.]*$/i.test(t);
+
+  if (!isSim && !isNao) {
+    await whatsapp.sendText({ to: telefone, text: "Só responde 1 ou 2 🙂" });
+    return { success: false, userId: user.id, erro: "resposta inválida confirmar pagar fixa" };
+  }
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+  if (isSim) {
+    try {
+      const { marcarPago } = await import("../modules/lembretes");
+      await marcarPago(user.id, data.lembrete_id);
+      await pool.query(
+        `UPDATE lembretes SET valor = $1, atualizado_em = NOW() WHERE id = $2 AND user_id = $3`,
+        [data.valor_gasto, data.lembrete_id, user.id]
+      );
+      const ins = await pool.query(
+        `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+         VALUES ($1, 'saida', $2, $3, $4)
+         RETURNING *`,
+        [user.id, data.valor_gasto, data.categoria_gasto || 'Moradia', data.titulo]
+      );
+      recordAction(user.id, "registered_transaction");
+      resetInactivityNudge(user.id).catch(() => {});
+      await whatsapp.sendText({
+        to:   telefone,
+        text: `✅ ${capitalizeFirst(data.titulo)} marcada como paga (${fmtValor(data.valor_gasto)}).`,
+      });
+      return {
+        success:      true,
+        userId:       user.id,
+        transacao:    ins.rows[0] as Record<string, unknown>,
+        interpretado: { comando: "confirmar_pagar_fixa", lembrete_id: data.lembrete_id, valor: data.valor_gasto, marcou_pago: true },
+      };
+    } catch (err) {
+      log.error("handleConfirmarPagarFixa sim falhou", err, { userId: user.id });
+      return { success: false, userId: user.id, erro: "erro ao confirmar pagar fixa" };
+    }
+  }
+
+  // isNao
+  try {
+    const ins = await pool.query(
+      `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+       VALUES ($1, 'saida', $2, $3, $4)
+       RETURNING *`,
+      [user.id, data.valor_gasto, data.categoria_gasto || 'Outros', data.descricao_gasto]
+    );
+    recordAction(user.id, "registered_transaction");
+    resetInactivityNudge(user.id).catch(() => {});
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `Beleza, registrei ${data.descricao_gasto} (${fmtValor(data.valor_gasto)}) como gasto separado.`,
+    });
+    return {
+      success:      true,
+      userId:       user.id,
+      transacao:    ins.rows[0] as Record<string, unknown>,
+      interpretado: { comando: "confirmar_pagar_fixa", lembrete_id: data.lembrete_id, valor: data.valor_gasto, marcou_pago: false },
+    };
+  } catch (err) {
+    log.error("handleConfirmarPagarFixa nao falhou", err, { userId: user.id });
+    return { success: false, userId: user.id, erro: "erro ao registrar gasto separado" };
+  }
+}
+
+// ── Resposta "já paguei" a aviso proativo (Camada 3) ─────────────────────────
+export async function handleAguardandoPagamentoAviso(
+  user: UserRow, telefone: string, txIdsRaw: unknown
+): Promise<ProcessResult> {
+  type Payload = { lembrete_id: number; titulo: string; valor: number };
+  const data = (txIdsRaw ?? {}) as Payload;
+  try {
+    const { marcarPago } = await import("../modules/lembretes");
+    const mp = await marcarPago(user.id, data.lembrete_id);
+    const ins = await pool.query(
+      `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
+       VALUES ($1, 'saida', $2, 'Moradia', $3)
+       RETURNING *`,
+      [user.id, data.valor, data.titulo]
+    );
+    recordAction(user.id, "registered_transaction");
+    resetInactivityNudge(user.id).catch(() => {});
+
+    let proxStr = "";
+    if (mp?.proximo?.proxima_data) {
+      const iso = String(mp.proximo.proxima_data).slice(0, 10);
+      const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (m) {
+        const MESES = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+        const mesNum = parseInt(m[2], 10);
+        const diaNum = parseInt(m[3], 10);
+        proxStr = ` Próximo: ${diaNum} de ${MESES[mesNum]}.`;
+      }
+    }
+
+    await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `✅ ${capitalizeFirst(data.titulo)} (${fmtValor(data.valor)}) marcada como paga.${proxStr}`,
+    });
+    return {
+      success:      true,
+      userId:       user.id,
+      transacao:    ins.rows[0] as Record<string, unknown>,
+      interpretado: { comando: "aguardando_pagamento_aviso_pago", lembrete_id: data.lembrete_id, valor: data.valor },
+    };
+  } catch (err) {
+    log.error("handleAguardandoPagamentoAviso falhou", err, { userId: user.id });
+    return { success: false, userId: user.id, erro: "erro ao processar pagamento via aviso" };
+  }
+}
+
 // ── Confirmar status da fixa no mês atual ────────────────────────────────────
 // Após criar lembrete fixo, pergunta se já foi pago neste mês.
 // "já paguei" → insere transaction + marcarPago. "ainda vou pagar" → mantém pendente.
