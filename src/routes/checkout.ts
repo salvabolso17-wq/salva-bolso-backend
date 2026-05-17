@@ -70,9 +70,10 @@ router.post("/criar", async (req: Request, res: Response) => {
     }
     return res.json({ status: sub.status });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[CHECKOUT] erro:", msg);
-    res.status(500).json({ erro: msg });
+    const raw = err instanceof Error ? err.message : String(err);
+    console.error("[CHECKOUT] erro:", raw);
+    // Tentar repassar estrutura original do Asaas para o frontend tratar
+    try { res.status(500).json({ erro: raw }); } catch { /* já respondido */ }
   }
 });
 

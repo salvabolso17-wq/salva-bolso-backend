@@ -62,6 +62,7 @@
                         <input id="f-card-cvv" type="text" placeholder="CVV" maxlength="4" autocomplete="cc-csc" inputmode="numeric">
                     </div>
                     <input id="f-card-name" type="text" placeholder="Nome no cartão" autocomplete="cc-name">
+                    <input id="f-cep" type="text" placeholder="CEP (somente números)" maxlength="9" inputmode="numeric">
                 </div>
 
                 <div class="error-msg" id="error-msg"></div>
@@ -120,6 +121,9 @@
         document.getElementById('f-card-expiry').addEventListener('input', function() {
             this.value = this.value.replace(/\D/g,'').slice(0,4).replace(/(\d{2})(\d)/,'$1/$2');
         });
+        document.getElementById('f-cep').addEventListener('input', function() {
+            this.value = this.value.replace(/\D/g,'').slice(0,8).replace(/(\d{5})(\d)/,'$1-$2');
+        });
 
         document.getElementById('copy-btn').addEventListener('click', () => {
             const code = document.getElementById('pix-code').textContent;
@@ -161,7 +165,7 @@
                         email:         email,
                         cpfCnpj:       cpf,
                         phone:         tel,
-                        postalCode:    '00000000',
+                        postalCode:    document.getElementById('f-cep').value.replace(/\D/g,''),
                         addressNumber: '0',
                     };
                 }
@@ -173,7 +177,19 @@
                 });
                 const data = await res.json();
 
-                if (!res.ok) throw new Error(data.erro || 'Erro desconhecido.');
+                if (!res.ok) {
+                    let erroMsg = 'Erro ao processar pagamento.';
+                    try {
+                        const parsed = JSON.parse(data.erro);
+                        erroMsg = parsed?.errors?.[0]?.description ?? parsed?.description ?? erroMsg;
+                    } catch { erroMsg = data.erro || erroMsg; }
+                    erroMsg = erroMsg
+                        .replace(/Invalid card number/i, 'Número do cartão inválido')
+                        .replace(/Card declined/i, 'Cartão recusado')
+                        .replace(/An error occurred/i, 'Erro ao processar. Tente novamente.')
+                        .replace(/Network error/i, 'Erro de conexão. Verifique sua internet.');
+                    throw new Error(erroMsg);
+                }
 
                 document.getElementById('main-content').style.display = 'none';
 
