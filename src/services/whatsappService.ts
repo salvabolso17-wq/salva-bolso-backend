@@ -11,7 +11,7 @@ import type { UserRow, ProcessResult } from "./types";
 import { isSubscriptionActive, isBlockedFreemium, checkAndSendExpirationNotice } from "./modules/premiumGuard";
 import { isCuriosityPhrase, buildFeaturesMenuText, isKnownCommand, isAmbiguousIntent, buildContextualHint, handleAjudaCommand, handleSpendingConcern, handleNextStepSuggestion } from "./modules/menuBuilder";
 import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente, matchesKnownService } from "./modules/recurringDetection";
-import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip } from "./modules/insightsEngine";
+import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip, checkAndSendDiscoveryMessage } from "./modules/insightsEngine";
 import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas, handleOnboardingFixaDia, handleOnboardingFixaStatusVencida } from "./modules/onboarding";
 import { classifyIntentWithAI } from "./modules/intentAI";
 import { resetInactivityNudge } from "./notificationService";
@@ -1878,6 +1878,9 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           recordInsightSent(user.id); return;
         }
         if (await sendContextualMicroInsight(user.id, message.telefone, parsed.categoria)) {
+          recordInsightSent(user.id); return;
+        }
+        if (await checkAndSendDiscoveryMessage(user.id, message.telefone)) {
           recordInsightSent(user.id); return;
         }
         if (await checkAndSuggestRecorrente(user.id, message.telefone, parsed.descricao, parsed.valor, parsed.categoria, message.texto)) {

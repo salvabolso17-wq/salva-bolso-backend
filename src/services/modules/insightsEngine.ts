@@ -333,3 +333,33 @@ export async function sendContextualMicroInsight(userId: number, telefone: strin
     return false;
   }
 }
+
+// ── Mensagem de descoberta de features após 15 gastos ────────────────────────
+export async function checkAndSendDiscoveryMessage(userId: number, telefone: string): Promise<boolean> {
+  try {
+    const r = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
+      [userId]
+    );
+    if (Number(r.rows[0].count) !== 15) return false;
+
+    const LIFETIME = new Date("2000-01-01");
+    const ins = await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, 'discovery_15', 1, $2)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, LIFETIME]
+    );
+    if ((ins.rowCount ?? 0) === 0) return false;
+
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `🎉 Você já registrou 15 gastos!\n\nAproveite tudo que tenho pra oferecer:\n\n📊 *resumo* — seus gastos por categoria\n💰 *saldo* — quanto ainda sobra no mês\n🏠 *contas fixas* — suas despesas mensais\n🎯 *metas* — guardar pra um objetivo\n\nÉ só mandar o comando 😊`,
+    });
+    log.whatsapp("discovery 15 gastos enviado", { to: telefone, userId });
+    return true;
+  } catch (err) {
+    log.error("falha discovery message", err, { userId });
+    return false;
+  }
+}
