@@ -36,7 +36,12 @@ export async function executarAvisos(): Promise<{ candidatos: number; enviados: 
               ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date - 1)
               AND ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date + 3)
          AND (l.ultimo_aviso_em IS NULL
-              OR l.ultimo_aviso_em < (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)`,
+              OR l.ultimo_aviso_em < (NOW() AT TIME ZONE 'America/Sao_Paulo')::date)
+         AND (
+           (u.subscription_status = 'trial'  AND u.trial_ends_at > NOW())
+           OR
+           (u.subscription_status = 'active' AND u.subscription_expires_at > NOW())
+         )`,
     );
     candidatos = r.rowCount ?? 0;
 
