@@ -23,7 +23,7 @@ import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handle
 import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo, handleConfirmarDesfazer, ofertarCorrecaoNegacao, handleAguardandoCorrecao } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
-import { tryHandleLembretes } from "./handlers/lembretes";
+import { tryHandleLembretes, listarHandler } from "./handlers/lembretes";
 
 function firstNameOf(rawName?: string | null): string | null {
   if (!rawName) return null;
@@ -359,7 +359,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   ) {
     if (/recorrente|proxima/.test(_lastCmd)) {
       setLastCommand(user.id, "recorrentes");
-      return await handleRecorrentesCommand(user, telefone);
+      return await listarHandler(user, telefone);
     }
     if (/meta/.test(_lastCmd)) {
       setLastCommand(user.id, "metas");
@@ -367,7 +367,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     }
     // Default: recorrentes (pergunta mais comum fora de contexto)
     setLastCommand(user.id, "recorrentes");
-    return await handleRecorrentesCommand(user, telefone);
+    return await listarHandler(user, telefone);
   }
 
   // "meus gastos" / "minha situação" → resumo do mês
@@ -385,7 +385,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     /^(meus?\s+)?(recorrentes?|gastos\s+fixos?|contas\s+fixas?|contas\s+mensais|recorrentes?\s+que\s+eu\s+tenho)[?!.]*$/i.test(t)
   ) {
     setLastCommand(user.id, "recorrentes");
-    return await handleRecorrentesCommand(user, telefone);
+    return await listarHandler(user, telefone);
   }
 
   if (
@@ -982,7 +982,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         switch (_aiCmd) {
           case "saldo":       return await handleSaldoCommand(user, message.telefone);
           case "resumo":      return await handleResumoCommand(user, message.telefone);
-          case "recorrentes": return await handleRecorrentesCommand(user, message.telefone);
+          case "recorrentes": return await listarHandler(user, message.telefone);
           case "hoje":        return await handleHojeCommand(user, message.telefone);
           case "semana":      return await handleSemanaCommand(user, message.telefone);
           case "ranking":     return await handleRankingCommand(user, message.telefone);
@@ -1141,7 +1141,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
   if (/^recorrentes$/i.test(message.texto.trim())) {
     setLastCommand(user.id, "recorrentes");
-    return await handleRecorrentesCommand(user, message.telefone);
+    return await listarHandler(user, message.telefone);
   }
   if (/^pr[oó]ximas$/i.test(message.texto.trim())) {
     setLastCommand(user.id, "proximas");
@@ -1319,7 +1319,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
     if (isQuestion && !temNumero) {
       setLastCommand(user.id, "recorrentes");
-      return await handleRecorrentesCommand(user, message.telefone);
+      return await listarHandler(user, message.telefone);
     }
   }
 
@@ -1466,7 +1466,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         switch (aiCommand) {
           case "saldo":      return await handleSaldoCommand(user, message.telefone);
           case "resumo":     return await handleResumoCommand(user, message.telefone);
-          case "recorrentes": return await handleRecorrentesCommand(user, message.telefone);
+          case "recorrentes": return await listarHandler(user, message.telefone);
           case "hoje":       return await handleHojeCommand(user, message.telefone);
           case "semana":     return await handleSemanaCommand(user, message.telefone);
           case "ranking":    return await handleRankingCommand(user, message.telefone);

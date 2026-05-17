@@ -235,10 +235,10 @@ function linhaItemLembrete(l: LembreteRow): string {
   if (dias === 0)  return `${t} — ${v} · hoje`;
   if (dias === 1)  return `${t} — ${v} · amanhã`;
   if (dias <= 7)   return `${t} — ${v} (dia ${dia})`;
-  return           `${t} — ${v} (dia ${dia})`;
+  return           `${t} — ${v}`;
 }
 
-async function listarHandler(user: UserRow, telefone: string): Promise<ProcessResult> {
+export async function listarHandler(user: UserRow, telefone: string): Promise<ProcessResult> {
   try {
     log.webhook("lembrete: listarHandler", { userId: user.id });
     const { pendentes, pagosMes } = await listarLembretesParaTela(user.id);
