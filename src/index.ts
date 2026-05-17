@@ -17,6 +17,7 @@ import webhooksRoutes from "./routes/webhooks";
 import insightsRoutes from "./routes/insights";
 import healthDeepRoutes from "./routes/healthDeep";
 import adminRoutes from "./routes/admin";
+import checkoutRouter from "./routes/checkout";
 import * as path from 'path';
 
 const app = express();
@@ -36,6 +37,7 @@ app.use("/webhooks", webhooksRoutes);
 app.use("/insights", insightsRoutes);
 app.use("/healthz/deep", healthDeepRoutes);
 app.use("/admin", adminRoutes);
+app.use("/api/checkout", checkoutRouter);
 
 // Global error handler — catches sync throws and next(err) calls
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {

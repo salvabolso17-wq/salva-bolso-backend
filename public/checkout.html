@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Assinar Salva Bolso Premium</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="icon" href="/favicon.ico">
+    <script src="https://www.asaas.com/static/js/asaas.js"></script>
+    <style>
+        .checkout-form { display: flex; flex-direction: column; gap: 14px; margin-top: 20px; }
+        .checkout-form input { background: #1a1a2e; border: 1px solid #374151; border-radius: 10px; padding: 13px 16px; color: #fff; font-size: 15px; outline: none; transition: border-color .2s; }
+        .checkout-form input:focus { border-color: #10b981; }
+        .checkout-form input::placeholder { color: #6b7280; }
+        .payment-tabs { display: flex; gap: 8px; margin-top: 20px; }
+        .payment-tab { flex: 1; padding: 11px 0; border-radius: 10px; border: 1px solid #374151; background: #1a1a2e; color: #9ca3af; font-size: 14px; font-weight: 600; cursor: pointer; transition: all .2s; }
+        .payment-tab.active { border-color: #10b981; color: #10b981; background: rgba(16,185,129,.08); }
+        .card-fields { display: none; flex-direction: column; gap: 14px; margin-top: 4px; }
+        .card-fields.visible { display: flex; }
+        .card-row { display: flex; gap: 10px; }
+        .card-row input { flex: 1; }
+        .error-msg { color: #ef4444; font-size: 13px; text-align: center; min-height: 18px; }
+        .success-box { display: none; text-align: center; padding: 24px 0; }
+        .success-box h2 { color: #10b981; margin-bottom: 12px; }
+        .pix-box { display: none; text-align: center; padding: 12px 0; }
+        .pix-box img { max-width: 200px; border-radius: 12px; margin: 12px auto; display: block; }
+        .pix-code { background: #1a1a2e; border: 1px solid #374151; border-radius: 10px; padding: 12px; font-size: 11px; word-break: break-all; color: #9ca3af; margin-top: 8px; }
+        .copy-btn { margin-top: 10px; background: #10b981; color: #fff; border: none; border-radius: 10px; padding: 10px 24px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="background-pattern"></div>
+    <div class="container">
+        <div class="brand-header">
+            <span class="premium-badge">✨ Salva Bolso Premium</span>
+        </div>
+
+        <div id="main-content">
+            <!-- Toggle plano -->
+            <div class="pricing-toggle">
+                <button id="btn-mensal" class="toggle-btn active">Mensal · R$14,90</button>
+                <button id="btn-anual" class="toggle-btn">Anual · R$99,90 <span class="discount-badge">-44%</span></button>
+            </div>
+
+            <!-- Tabs pagamento -->
+            <div class="payment-tabs">
+                <button class="payment-tab active" data-type="PIX">PIX</button>
+                <button class="payment-tab" data-type="CREDIT_CARD">Cartão</button>
+                <button class="payment-tab" data-type="BOLETO">Boleto</button>
+            </div>
+
+            <!-- Formulário -->
+            <div class="checkout-form">
+                <input id="f-nome" type="text" placeholder="Nome completo" autocomplete="name">
+                <input id="f-cpf" type="text" placeholder="CPF (somente números)" maxlength="14" autocomplete="off">
+                <input id="f-tel" type="tel" placeholder="WhatsApp (com DDD)" autocomplete="tel">
+                <input id="f-email" type="email" placeholder="E-mail" autocomplete="email">
+
+                <!-- Campos cartão -->
+                <div class="card-fields" id="card-fields">
+                    <input id="c-numero" type="text" placeholder="Número do cartão" maxlength="19" autocomplete="cc-number">
+                    <div class="card-row">
+                        <input id="c-validade" type="text" placeholder="MM/AA" maxlength="5" autocomplete="cc-exp">
+                        <input id="c-cvv" type="text" placeholder="CVV" maxlength="4" autocomplete="cc-csc">
+                    </div>
+                    <input id="c-nome" type="text" placeholder="Nome no cartão" autocomplete="cc-name">
+                </div>
+
+                <div class="error-msg" id="error-msg"></div>
+
+                <button class="cta-button" id="btn-assinar">
+                    Assinar agora
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- PIX resultado -->
+        <div class="pix-box" id="pix-box">
+            <h2 style="color:#10b981">Pague com PIX</h2>
+            <p style="color:#9ca3af;font-size:14px">Escaneie o QR Code ou copie o código abaixo</p>
+            <img id="pix-img" src="" alt="QR Code PIX">
+            <div class="pix-code" id="pix-code"></div>
+            <button class="copy-btn" id="copy-btn">Copiar código PIX</button>
+            <p style="color:#6b7280;font-size:12px;margin-top:12px">Após o pagamento, envie uma mensagem no WhatsApp para ativar sua conta.</p>
+        </div>
+
+        <!-- Sucesso cartão/boleto -->
+        <div class="success-box" id="success-box">
+            <h2>✅ Tudo certo!</h2>
+            <p style="color:#9ca3af">Pagamento processado. Envie uma mensagem no WhatsApp para ativar seu acesso Premium.</p>
+            <a href="https://wa.me/5511999999999" class="cta-button" style="display:inline-block;margin-top:16px;text-decoration:none">Abrir WhatsApp</a>
+        </div>
+
+        <div class="social-proof" style="margin-top:24px">
+            🔒 Pagamento seguro · Cancele quando quiser · Suporte direto no WhatsApp
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        let plano = 'mensal';
+        let billingType = 'PIX';
+
+        // Ler query string
+        const qs = new URLSearchParams(window.location.search);
+        if (qs.get('plano') === 'anual') {
+            plano = 'anual';
+            document.getElementById('btn-anual').classList.add('active');
+            document.getElementById('btn-mensal').classList.remove('active');
+        }
+
+        document.getElementById('btn-mensal').addEventListener('click', () => {
+            plano = 'mensal';
+            document.getElementById('btn-mensal').classList.add('active');
+            document.getElementById('btn-anual').classList.remove('active');
+        });
+        document.getElementById('btn-anual').addEventListener('click', () => {
+            plano = 'anual';
+            document.getElementById('btn-anual').classList.add('active');
+            document.getElementById('btn-mensal').classList.remove('active');
+        });
+
+        document.querySelectorAll('.payment-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.payment-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                billingType = tab.dataset.type;
+                document.getElementById('card-fields').classList.toggle('visible', billingType === 'CREDIT_CARD');
+            });
+        });
+
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            const code = document.getElementById('pix-code').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                document.getElementById('copy-btn').textContent = 'Copiado!';
+                setTimeout(() => document.getElementById('copy-btn').textContent = 'Copiar código PIX', 2000);
+            });
+        });
+
+        document.getElementById('btn-assinar').addEventListener('click', async () => {
+            const nome  = document.getElementById('f-nome').value.trim();
+            const cpf   = document.getElementById('f-cpf').value.replace(/\D/g,'');
+            const tel   = document.getElementById('f-tel').value.replace(/\D/g,'');
+            const email = document.getElementById('f-email').value.trim();
+            const errEl = document.getElementById('error-msg');
+            errEl.textContent = '';
+
+            if (!nome || !cpf || !tel || !email) { errEl.textContent = 'Preencha todos os campos.'; return; }
+
+            const btn = document.getElementById('btn-assinar');
+            btn.disabled = true;
+            btn.textContent = 'Processando...';
+
+            try {
+                let creditCardToken = undefined;
+                let creditCardHolderInfo = undefined;
+
+                if (billingType === 'CREDIT_CARD') {
+                    const [expMes, expAno] = (document.getElementById('c-validade').value || '').split('/');
+                    const cardData = {
+                        holderName: document.getElementById('c-nome').value.trim(),
+                        number: document.getElementById('c-numero').value.replace(/\s/g,''),
+                        expiryMonth: expMes,
+                        expiryYear: expAno ? '20' + expAno : '',
+                        ccv: document.getElementById('c-cvv').value.trim(),
+                    };
+                    const tokenResult = await AsaasSecurityBridge.tokenize(cardData);
+                    if (!tokenResult || !tokenResult.token) throw new Error('Falha ao tokenizar cartão.');
+                    creditCardToken = tokenResult.token;
+                    creditCardHolderInfo = { name: nome, email, cpfCnpj: cpf, phone: tel };
+                }
+
+                const res = await fetch('/api/checkout/criar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nome, cpf, telefone: tel, email, plano, billingType, creditCardToken, creditCardHolderInfo }),
+                });
+                const data = await res.json();
+
+                if (!res.ok) throw new Error(data.erro || 'Erro desconhecido.');
+
+                document.getElementById('main-content').style.display = 'none';
+
+                if (billingType === 'PIX') {
+                    document.getElementById('pix-img').src = 'data:image/png;base64,' + data.pixQrCodeImage;
+                    document.getElementById('pix-code').textContent = data.pixQrCodePayload;
+                    document.getElementById('pix-box').style.display = 'block';
+                } else if (billingType === 'BOLETO') {
+                    window.open(data.bankSlipUrl, '_blank');
+                    document.getElementById('success-box').style.display = 'block';
+                } else {
+                    document.getElementById('success-box').style.display = 'block';
+                }
+            } catch (e) {
+                errEl.textContent = e.message || 'Erro ao processar. Tente novamente.';
+                btn.disabled = false;
+                btn.textContent = 'Assinar agora';
+            }
+        });
+    })();
+    </script>
+</body>
+</html>
