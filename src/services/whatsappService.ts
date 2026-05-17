@@ -1413,6 +1413,24 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   log.parser("analisando", { texto: textoParsear });
 
+  // ── "X todo mês" → registra direto como recorrente ────────────────────────
+  {
+    const _todoMesMatch = message.texto.trim().match(
+      /^(\d+(?:[.,]\d+)?)\s+(.+?)\s+(?:todo\s+m[eê]s|por\s+m[eê]s|mensalmente|todo\s+mes)\s*[\?!.]*$/i
+    );
+    if (_todoMesMatch) {
+      const valor = parseFloat(_todoMesMatch[1].replace(',', '.'));
+      const nome  = _todoMesMatch[2].trim();
+      if (valor > 0 && nome.length >= 2) {
+        try {
+          return await handleRecorrenteCommand(user, message.telefone, `${valor} ${nome}`);
+        } catch (err) {
+          log.error("handleRecorrenteCommand via todo-mes falhou", err, { userId: user.id });
+        }
+      }
+    }
+  }
+
   // ── Multi-line transactions ───────────────────────────────────────────────
   {
     const linhasMulti = detectMultiLine(message.texto);
