@@ -3,6 +3,8 @@ import { whatsapp } from "./whatsapp";
 import { log } from "../utils/logger";
 import { fetchPeriodMetrics } from "./reportService";
 import { buildPlansBlock } from "../utils/plansMessage";
+import { capitalizeFirst } from "../utils/formatting";
+import type { UserRow } from "./types";
 
 const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
@@ -752,6 +754,121 @@ async function sendPostOnboardingNudge(): Promise<void> {
   }
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function getISOWeek(d: Date): number {
+  return Math.ceil((((d.getTime() - new Date(d.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
+}
+
+// Retorna a segunda-feira da semana ISO (00:00 UTC), uso como DATE em mes_referencia
+function isoWeekMonday(d: Date): Date {
+  const dt   = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const dow  = dt.getUTCDay(); // 0=dom..6=sáb
+  const diff = (dow + 6) % 7;   // dias desde segunda
+  dt.setUTCDate(dt.getUTCDate() - diff);
+  return dt;
+}
+
+// ── Relatório semanal (domingo) ──────────────────────────────────────────────
+export async function sendWeeklyReport(): Promise<void> {
+  const users = await pool.query<UserRow>(
+    `SELECT id, telefone, nome, renda, renda_extra, subscription_status, trial_ends_at, subscription_expires_at, criado_em
+     FROM users WHERE subscription_status IN ('active','trial')`
+  );
+  const hoje      = new Date();
+  const semanaRef = isoWeekMonday(hoje);
+  const inicio7   = new Date(hoje); inicio7.setDate(hoje.getDate() - 7);
+  const inicio14  = new Date(hoje); inicio14.setDate(hoje.getDate() - 14);
+  const semanaId  = `${hoje.getFullYear()}-W${getISOWeek(hoje)}`;
+
+  for (const user of users.rows) {
+    try {
+      const ins = await pool.query(
+        `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+         VALUES ($1, 'relatorio_semanal', 1, $2)
+         ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+        [user.id, semanaRef]
+      );
+      if ((ins.rowCount ?? 0) === 0) continue;
+
+      const r = await pool.query<{ categoria: string; total: string }>(
+        `SELECT categoria, SUM(valor) AS total FROM transactions
+         WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2
+         GROUP BY categoria ORDER BY total DESC LIMIT 3`,
+        [user.id, inicio7]
+      );
+      if (r.rows.length === 0) continue;
+
+      const totalSemana = r.rows.reduce((s, x) => s + Number(x.total), 0);
+      const rAnterior = await pool.query<{ total: string }>(
+        `SELECT COALESCE(SUM(valor),0) AS total FROM transactions
+         WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2 AND criado_em < $3`,
+        [user.id, inicio14, inicio7]
+      );
+      const totalAnterior = Number(rAnterior.rows[0].total);
+      const diff = totalSemana - totalAnterior;
+      const diffTxt = diff > 0
+        ? `📈 ${fmtValor(diff)} a mais que na semana passada.`
+        : `📉 ${fmtValor(Math.abs(diff))} a menos que na semana passada. Bom trabalho!`;
+
+      const categorias = r.rows.map(x => `• ${capitalizeFirst(x.categoria)} — ${fmtValor(Number(x.total))}`).join('\n');
+      const msg = `📊 Resumo da semana\n\nVocê gastou ${fmtValor(totalSemana)} essa semana.\n\n${categorias}\n\n${diffTxt}`;
+
+      await whatsapp.sendText({ to: user.telefone, text: msg });
+      log.whatsapp("relatorio semanal enviado", { to: user.telefone, userId: user.id, semanaId });
+    } catch (err) {
+      log.error("sendWeeklyReport falhou", err, { userId: user.id });
+    }
+  }
+}
+
+// ── Resumo mensal (dia 1) ────────────────────────────────────────────────────
+export async function sendMonthlyClosing(): Promise<void> {
+  const hoje       = new Date();
+  const mesPassado = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+  const mesRefDt   = new Date(Date.UTC(mesPassado.getFullYear(), mesPassado.getMonth(), 1));
+  const mesRef     = `${mesPassado.getFullYear()}-${String(mesPassado.getMonth() + 1).padStart(2, '0')}`;
+  const inicio     = new Date(mesPassado.getFullYear(), mesPassado.getMonth(), 1);
+  const fim        = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+
+  const users = await pool.query<UserRow>(
+    `SELECT id, telefone, nome, renda, renda_extra, subscription_status, trial_ends_at, subscription_expires_at, criado_em
+     FROM users WHERE subscription_status IN ('active','trial')`
+  );
+
+  for (const user of users.rows) {
+    try {
+      const ins = await pool.query(
+        `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+         VALUES ($1, 'resumo_mensal', 1, $2)
+         ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+        [user.id, mesRefDt]
+      );
+      if ((ins.rowCount ?? 0) === 0) continue;
+
+      const r = await pool.query<{ categoria: string; total: string }>(
+        `SELECT categoria, SUM(valor) AS total FROM transactions
+         WHERE user_id = $1 AND tipo = 'saida' AND criado_em >= $2 AND criado_em < $3
+         GROUP BY categoria ORDER BY total DESC LIMIT 3`,
+        [user.id, inicio, fim]
+      );
+      if (r.rows.length === 0) continue;
+
+      const totalMes = r.rows.reduce((s, x) => s + Number(x.total), 0);
+      const renda    = Number(user.renda ?? 0);
+      const sobrou   = renda > 0 ? `\n💰 Sobrou ${fmtValor(renda - totalMes)} da sua renda.` : '';
+      const top      = r.rows.map(x => `• ${capitalizeFirst(x.categoria)} — ${fmtValor(Number(x.total))}`).join('\n');
+      const nomeMes  = mesPassado.toLocaleString('pt-BR', { month: 'long' });
+
+      const msg = `📅 Fechamento de ${nomeMes}\n\nVocê gastou ${fmtValor(totalMes)} esse mês.\n\n${top}${sobrou}`;
+
+      await whatsapp.sendText({ to: user.telefone, text: msg });
+      log.whatsapp("resumo mensal enviado", { to: user.telefone, userId: user.id, mesRef });
+    } catch (err) {
+      log.error("sendMonthlyClosing falhou", err, { userId: user.id });
+    }
+  }
+}
+
 export async function runDailyNotifications(): Promise<void> {
   log.webhook("iniciando notificações diárias");
   try { await sendPostOnboardingNudge(); }              catch (err) { log.error("falha nudge onboarding", err); }
@@ -764,5 +881,11 @@ export async function runDailyNotifications(): Promise<void> {
   try { await sendMonthlyClosingNotifications(); }       catch (err) { log.error("falha notif fechamento", err); }
   try { await sendMonthlyScore(); }                     catch (err) { log.error("falha score mensal", err); }
   try { await sendNewMonthFlowNotifications(); }         catch (err) { log.error("falha notif novo mes", err); }
+  if (new Date().getDay() === 0) {
+    try { await sendWeeklyReport(); }                   catch (err) { log.error("falha relatorio semanal", err); }
+  }
+  if (new Date().getDate() === 1) {
+    try { await sendMonthlyClosing(); }                 catch (err) { log.error("falha resumo mensal", err); }
+  }
   log.webhook("notificações diárias concluídas");
 }

@@ -334,6 +334,54 @@ export async function sendContextualMicroInsight(userId: number, telefone: strin
   }
 }
 
+// ── Alerta proativo de limite (80% / 100%) ───────────────────────────────────
+export async function checkAndAlertLimite(userId: number, telefone: string, categoria: string): Promise<boolean> {
+  try {
+    const hoje      = new Date();
+    const mesRefDt  = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), 1));
+    const mesAtual  = hoje.toISOString().slice(0, 7);
+
+    const limiteR = await pool.query<{ valor_limite: string }>(
+      `SELECT valor_limite FROM category_limits WHERE user_id = $1 AND categoria = $2`,
+      [userId, categoria]
+    );
+    if (limiteR.rows.length === 0) return false;
+    const limite = Number(limiteR.rows[0].valor_limite);
+    if (!(limite > 0)) return false;
+
+    const gastoR = await pool.query<{ total: string }>(
+      `SELECT COALESCE(SUM(valor),0) AS total FROM transactions
+       WHERE user_id = $1 AND tipo = 'saida' AND categoria = $2
+         AND to_char(criado_em,'YYYY-MM') = $3`,
+      [userId, categoria, mesAtual]
+    );
+    const gasto = Number(gastoR.rows[0].total);
+    const pct   = gasto / limite;
+    if (pct < 0.8) return false;
+
+    const marco = pct >= 1 ? 100 : 80;
+    const ins = await pool.query(
+      `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+       VALUES ($1, 'alerta_limite', $2, $3)
+       ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+      [userId, marco, mesRefDt]
+    );
+    if ((ins.rowCount ?? 0) === 0) return false;
+
+    const restante = limite - gasto;
+    const msg = pct >= 1
+      ? `🚨 Você estourou o limite de ${capitalizeFirst(categoria)}!\n\nLimite: ${fmtValor(limite)}\nGasto: ${fmtValor(gasto)}`
+      : `⚠️ Você já usou 80% do limite de ${capitalizeFirst(categoria)}.\n\nLimite: ${fmtValor(limite)}\nGasto: ${fmtValor(gasto)}\nAinda restam: ${fmtValor(restante)}`;
+
+    await whatsapp.sendText({ to: telefone, text: msg });
+    log.whatsapp("alerta limite enviado", { to: telefone, userId, categoria, marco, pct });
+    return true;
+  } catch (err) {
+    log.error("falha alerta limite", err, { userId, categoria });
+    return false;
+  }
+}
+
 // ── Mensagem de descoberta de features após 15 gastos ────────────────────────
 export async function checkAndSendDiscoveryMessage(userId: number, telefone: string): Promise<boolean> {
   try {
