@@ -230,12 +230,13 @@ function linhaItemLembrete(l: LembreteRow): string {
   const dias = diasAteVencimento(l.proxima_data);
   const v    = fmtValorBR(Number(l.valor));
   const t    = capitalizeFirst(l.titulo);
+  const tDisplay = t.length > 16 ? t.slice(0, 15) + '.' : t;
   const dia  = l.dia_vencimento;
-  if (dias < 0)   return `${t} — ${v} ⚠️ atrasada`;
-  if (dias === 0)  return `${t} — ${v} · hoje`;
-  if (dias === 1)  return `${t} — ${v} · amanhã`;
-  if (dias <= 7)   return `${t} — ${v} (dia ${dia})`;
-  return           `${t} — ${v}`;
+  if (dias < 0)   return `${tDisplay} — ${v} ⚠️ atrasada`;
+  if (dias === 0)  return `${tDisplay} — ${v} · hoje`;
+  if (dias === 1)  return `${tDisplay} — ${v} · amanhã`;
+  if (dias <= 7)   return `${tDisplay} — ${v} (dia ${dia})`;
+  return           `${tDisplay} — ${v}`;
 }
 
 export async function listarHandler(user: UserRow, telefone: string): Promise<ProcessResult> {
