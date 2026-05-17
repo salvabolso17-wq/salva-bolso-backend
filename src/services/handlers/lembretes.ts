@@ -231,20 +231,11 @@ function linhaItemLembrete(l: LembreteRow): string {
   const v    = fmtValorBR(Number(l.valor));
   const t    = capitalizeFirst(l.titulo);
   const dia  = l.dia_vencimento;
-  if (dias <= -30) {
-    const m = Math.round(Math.abs(dias) / 30);
-    return `${t} · ${v} · venceu há ~${m} ${m === 1 ? "mês" : "meses"}`;
-  }
-  if (dias < 0) {
-    const n = Math.abs(dias);
-    return `${t} · ${v} · venceu há ${n} dia${n > 1 ? "s" : ""}`;
-  }
-  if (dias === 0) return `${t} · ${v} · hoje (dia ${dia})`;
-  if (dias === 1) return `${t} · ${v} · amanhã`;
-  if (dias <= 7)  return `${t} · ${v} · em ${dias} dias (dia ${dia})`;
-  if (dias < 30)  return `${t} · ${v} · em ${dias} dias`;
-  const m = Math.round(dias / 30);
-  return `${t} · ${v} · em ~${m} ${m === 1 ? "mês" : "meses"}`;
+  if (dias < 0)   return `${t} — ${v} ⚠️ atrasada`;
+  if (dias === 0)  return `${t} — ${v} · hoje`;
+  if (dias === 1)  return `${t} — ${v} · amanhã`;
+  if (dias <= 7)   return `${t} — ${v} (dia ${dia})`;
+  return           `${t} — ${v} (dia ${dia})`;
 }
 
 async function listarHandler(user: UserRow, telefone: string): Promise<ProcessResult> {
@@ -294,14 +285,14 @@ async function listarHandler(user: UserRow, telefone: string): Promise<ProcessRe
     const linhas: string[] = ["📋 Suas contas", ""];
     const pushGrupo = (titulo: string, items: LembreteRow[]) => {
       if (items.length === 0) return;
-      linhas.push(`${titulo} (${items.length})`);
-      for (const l of items) linhas.push("   " + linhaItemLembrete(l));
+      linhas.push(titulo);
+      for (const l of items) linhas.push(linhaItemLembrete(l));
       linhas.push("");
     };
-    pushGrupo("🚨 ATRASADAS",     atrasadas);
-    pushGrupo("⏰ VENCE HOJE",    hoje);
-    pushGrupo("📅 ESSA SEMANA",   semana);
-    pushGrupo("🗓️ PRÓXIMOS DIAS", depois);
+    pushGrupo("🚨 Atrasadas",   atrasadas);
+    pushGrupo("⏰ Vence hoje",   hoje);
+    pushGrupo("📅 Essa semana", semana);
+    pushGrupo("🗓️ Próximas",     depois);
 
     const totalPagar = pendentes.reduce((s, l) => s + Number(l.valor), 0);
     const totalPago  = pagosMes.reduce((s, l) => s + Number(l.valor), 0);

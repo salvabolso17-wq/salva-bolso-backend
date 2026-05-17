@@ -417,14 +417,14 @@ export async function handleRecorrentesCommand(user: UserRow, telefone: string):
     return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "recorrentes", count: 0 } };
   }
 
-  const linhas = ["📌 Seus gastos fixos:", ""];
+  const linhas = ["📌 Suas contas fixas", ""];
   let totalMensal = 0;
   for (const row of result.rows) {
     const valor = Number(row.valor);
     totalMensal += valor;
-    linhas.push(`• ${capitalizeFirst(row.titulo)} — ${fmtValor(valor)} (dia ${row.dia_vencimento})`);
+    linhas.push(`${capitalizeFirst(row.titulo)} — ${fmtValor(valor)} (dia ${row.dia_vencimento})`);
   }
-  linhas.push("", `Total mensal: ${fmtValor(totalMensal)}`);
+  linhas.push("", `💰 Total: ${fmtValor(totalMensal)}`);
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
