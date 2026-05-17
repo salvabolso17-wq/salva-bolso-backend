@@ -654,7 +654,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       `SELECT 1 FROM sent_insights WHERE user_id = $1 AND categoria = 'virada_mes' AND mes_referencia = $2::date`,
       [user.id, _mesIso]
     );
-    if (_jaAvisou.rowCount === 0) {
+    if (_hoje.getDate() === 1 && _jaAvisou.rowCount === 0) {
       const _txCount = await pool.query<{ count: string }>(
         `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
         [user.id]
