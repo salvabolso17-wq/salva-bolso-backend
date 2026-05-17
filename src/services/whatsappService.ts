@@ -20,7 +20,7 @@ import { resetInactivityNudge } from "./notificationService";
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand, handleDetalhadoCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
 import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleCorrigirAcao, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
-import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo, handleConfirmarDesfazer, ofertarCorrecaoNegacao, handleAguardandoCorrecao } from "./handlers/recurring";
+import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo, handleConfirmarDesfazer, ofertarCorrecaoNegacao, handleAguardandoCorrecao, handleCancelamentoIntent } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
 import { tryHandleLembretes, listarHandler } from "./handlers/lembretes";
@@ -646,10 +646,44 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
+  // ── Virada do mês: aviso amigável (1x por mês, só para usuários ativos) ──
+  try {
+    const _hoje      = new Date();
+    const _mesIso    = _hoje.toISOString().slice(0, 7) + "-01"; // primeiro dia do mês como DATE
+    const _jaAvisou = await pool.query(
+      `SELECT 1 FROM sent_insights WHERE user_id = $1 AND categoria = 'virada_mes' AND mes_referencia = $2::date`,
+      [user.id, _mesIso]
+    );
+    if (_jaAvisou.rowCount === 0) {
+      const _txCount = await pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM transactions WHERE user_id = $1`,
+        [user.id]
+      );
+      const _txCountDb = Number(_txCount.rows[0]?.count ?? 0);
+      if (_txCountDb > 3) {
+        await pool.query(
+          `INSERT INTO sent_insights (user_id, categoria, marco, mes_referencia)
+           VALUES ($1, 'virada_mes', 1, $2::date)
+           ON CONFLICT (user_id, categoria, marco, mes_referencia) DO NOTHING`,
+          [user.id, _mesIso]
+        );
+        const _rendaAtual = user.renda ? Number(user.renda) : 0;
+        const _msg = _rendaAtual > 0
+          ? `Novo mês, novo começo! 🗓️\n\nSua renda ainda é ${fmtValor(_rendaAtual)}? Se mudou, me avisa que atualizo. Se não mudou, pode ignorar 😊`
+          : `Novo mês chegou! 💰\n\nQual é a sua renda esse mês? Me ajuda a calcular seu saldo.\n_(pode ignorar se preferir)_`;
+        setTimeout(async () => {
+          try { await whatsapp.sendText({ to: message.telefone, text: _msg }); } catch (_) { /* silent */ }
+        }, 1500);
+      }
+    }
+  } catch (err) {
+    log.error("falha aviso virada do mês", err, { userId: user.id });
+  }
+
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_status_vencida" | "onboarding_fixa_status_vencida_solo" | "onboarding_fixa_status_vencida_batch" | "pagamento_recente" | "confirmar_desfazer" | "aguardando_correcao";
-    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia" | "waiting_status_vencida" | "waiting_status_vencida_batch" | "aguardando_desfazer" | "waiting_corrigir_alvo" | "waiting_correcao_acao";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_status_vencida" | "onboarding_fixa_status_vencida_solo" | "onboarding_fixa_status_vencida_batch" | "pagamento_recente" | "confirmar_desfazer" | "aguardando_correcao" | "cancelamento";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia" | "waiting_status_vencida" | "waiting_status_vencida_batch" | "aguardando_desfazer" | "waiting_corrigir_alvo" | "waiting_correcao_acao" | "waiting_response";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -670,6 +704,23 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
       await whatsapp.sendText({ to: message.telefone, text: "Ação cancelada." });
       return { success: false, userId: user.id, erro: "Ação cancelada" };
+    }
+
+    // Resposta à intenção de cancelamento (retenção)
+    if (pending.action === 'cancelamento') {
+      await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+      if (/sim|quero mesmo|cancela|confirma/i.test(textoTrim)) {
+        await whatsapp.sendText({
+          to:   message.telefone,
+          text: `Tudo bem 🙂 Para cancelar, acesse o link do seu plano ou entre em contato com o suporte.\n\nSe mudar de ideia, pode voltar quando quiser!`,
+        });
+      } else {
+        await whatsapp.sendText({
+          to:   message.telefone,
+          text: `Fico feliz que ficou! Qualquer dúvida, estou aqui 😊`,
+        });
+      }
+      return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "cancelamento_resp" } };
     }
 
     // Camada 3: resposta "já paguei" a aviso de vencimento — silent fallthrough se não match
@@ -971,6 +1022,19 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
     if (/^(detalhad[ao]s?|extrato|quais\s+foram(\s+os\s+gastos?)?|ver\s+tudo|lista\s+(de\s+)?gastos?|gastos?\s+detalhad[ao]s?|todos\s+os\s+gastos?)[\?!.]*$/.test(t)) {
       return await handleDetalhadoCommand(user, message.telefone);
+    }
+  }
+
+  // ── Retenção: intenção de cancelar (só usuário ativo) ────────────────────
+  {
+    const _txt = message.texto.trim();
+    if (user.subscription_status === 'active' &&
+        /quero\s+cancelar|vou\s+cancelar|cancelar\s+(assinatura|plano)|quero\s+sair\b/i.test(_txt)) {
+      try {
+        return await handleCancelamentoIntent(user, message.telefone);
+      } catch (err) {
+        log.error("handleCancelamentoIntent falhou (gate)", err, { userId: user.id });
+      }
     }
   }
 

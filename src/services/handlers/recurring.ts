@@ -992,3 +992,31 @@ export async function handleAguardandoPagamentoAviso(
   }
 }
 
+// ── Retenção: usuário ativo expressa intenção de cancelar ────────────────────
+export async function handleCancelamentoIntent(user: UserRow, telefone: string): Promise<ProcessResult> {
+  try {
+    const r = await pool.query<{ total: string; soma: string }>(
+      `SELECT COUNT(*) as total, COALESCE(SUM(valor),0) as soma FROM transactions WHERE user_id = $1`,
+      [user.id]
+    );
+    const total = Number(r.rows[0].total);
+    const soma  = fmtValor(Number(r.rows[0].soma));
+    await whatsapp.sendText({
+      to:   telefone,
+      text: `Que pena que está pensando em cancelar 😔\n\nVocê já registrou *${total} gastos* e acompanhou *${soma}* aqui.\n\nTem algo que não funcionou bem? Posso te ajudar 🙂`,
+    });
+    await pool.query(
+      `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+       VALUES ($1, 'cancelamento', 'waiting_response', '[]'::jsonb, NOW() + INTERVAL '15 minutes')
+       ON CONFLICT (user_id) DO UPDATE
+         SET action = 'cancelamento', step = 'waiting_response', tx_ids = '[]'::jsonb,
+             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '15 minutes'`,
+      [user.id]
+    );
+    return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "cancelamento_intent" } };
+  } catch (err) {
+    log.error("handleCancelamentoIntent falhou", err, { userId: user.id });
+    return { success: false, userId: user.id, erro: "erro ao processar intenção de cancelamento" };
+  }
+}
+
