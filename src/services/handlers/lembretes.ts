@@ -355,6 +355,24 @@ async function aplicarPagar(user: UserRow, telefone: string, l: LembreteRow): Pr
     } else {
       await send(telefone, `✅ Marquei o pagamento de *${capitalizeFirst(r.pago.titulo)}*.`);
     }
+    try {
+      await pool.query(
+        `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+         VALUES ($1, 'pagamento_recente', 'aguardando_desfazer', $2::jsonb, NOW() + INTERVAL '10 minutes')
+         ON CONFLICT (user_id) DO UPDATE
+           SET action = 'pagamento_recente', step = 'aguardando_desfazer', tx_ids = $2::jsonb,
+               selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+        [user.id, JSON.stringify({
+          lembrete_pago_id:    r.pago.id,
+          transaction_id:      null,
+          proximo_lembrete_id: r.proximo?.id ?? null,
+          titulo:              r.pago.titulo,
+          valor:               Number(r.pago.valor),
+        })]
+      );
+    } catch (err) {
+      log.error("falha ao gravar pagamento_recente (aplicarPagar)", err, { userId: user.id });
+    }
     return { success: true, userId: user.id, transacao: { id: r.pago.id }, interpretado: { comando: "lembrete_pagar" } };
   } catch (err) {
     log.error("falha aplicar pagar", err, { userId: user.id, id: l.id });

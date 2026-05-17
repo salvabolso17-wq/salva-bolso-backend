@@ -871,12 +871,12 @@ export async function handleConfirmarPagarFixa(
   if (isSim) {
     try {
       const { marcarPago } = await import("../modules/lembretes");
-      await marcarPago(user.id, data.lembrete_id);
+      const mp = await marcarPago(user.id, data.lembrete_id);
       await pool.query(
         `UPDATE lembretes SET valor = $1, atualizado_em = NOW() WHERE id = $2 AND user_id = $3`,
         [data.valor_gasto, data.lembrete_id, user.id]
       );
-      const ins = await pool.query(
+      const ins = await pool.query<{ id: number }>(
         `INSERT INTO transactions (user_id, tipo, valor, categoria, descricao)
          VALUES ($1, 'saida', $2, $3, $4)
          RETURNING *`,
@@ -888,6 +888,25 @@ export async function handleConfirmarPagarFixa(
         to:   telefone,
         text: `✅ Marquei o pagamento de *${capitalizeFirst(data.titulo)}*.`,
       });
+      try {
+        const insTxRow = ins.rows[0] as { id: number };
+        await pool.query(
+          `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+           VALUES ($1, 'pagamento_recente', 'aguardando_desfazer', $2::jsonb, NOW() + INTERVAL '10 minutes')
+           ON CONFLICT (user_id) DO UPDATE
+             SET action = 'pagamento_recente', step = 'aguardando_desfazer', tx_ids = $2::jsonb,
+                 selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+          [user.id, JSON.stringify({
+            lembrete_pago_id:    data.lembrete_id,
+            transaction_id:      insTxRow.id,
+            proximo_lembrete_id: mp?.proximo?.id ?? null,
+            titulo:              data.titulo,
+            valor:               data.valor_gasto,
+          })]
+        );
+      } catch (err) {
+        log.error("falha ao gravar pagamento_recente (handleConfirmarPagarFixa)", err, { userId: user.id });
+      }
       return {
         success:      true,
         userId:       user.id,

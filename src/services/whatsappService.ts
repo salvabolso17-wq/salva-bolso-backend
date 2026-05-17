@@ -747,6 +747,17 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
               : await handleCorrigirSelecao(user, message.telefone, matches[0].id);
           }
           if (matches.length > 1) {
+            const filteredIds = matches.map(m => m.id);
+            try {
+              await pool.query(
+                `UPDATE pending_actions
+                 SET tx_ids = $1::jsonb, expires_at = NOW() + INTERVAL '10 minutes'
+                 WHERE user_id = $2`,
+                [JSON.stringify(filteredIds), user.id]
+              );
+            } catch (err) {
+              log.error("falha ao salvar tx_ids filtrados (múltiplos matches)", err, { userId: user.id });
+            }
             const lista = matches.map((m, i) => `${i + 1}. ${m.descricao ?? m.categoria}`).join("\n");
             await whatsapp.sendText({
               to:   message.telefone,
@@ -915,6 +926,16 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         return await handleNextStepSuggestion(user, message.telefone);
       }
       // Menu not recent → fall through to isCuriosityPhrase which will show the menu
+    }
+  }
+
+  // ── Negação explícita ("Não paguei X") — intercepta antes de qualquer NLU/parser ─
+  // Caso contrário, lembretesNLU classifica como "pagar" pelo verbo paguei e marca pago.
+  if (/^\s*(n[ãa]o|nao|n)\s+(paguei|pago|t[áa]\s+pago|quitei|quitada|paga)\b/i.test(message.texto)) {
+    try {
+      return await ofertarCorrecaoNegacao(user, message.telefone, message.texto);
+    } catch (err) {
+      log.error("falha em ofertarCorrecaoNegacao (early gate)", err, { userId: user.id });
     }
   }
 
