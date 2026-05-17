@@ -6,7 +6,7 @@ export async function buildPlansBlock(): Promise<string> {
 
 Cancela quando quiser, sem multa.
 
-👉 https://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html`;
+👉 https://salvabolso.com.br/premium-checkout.html`;
 
   log.webhook("[PLANS_LOG] Returning static premium checkout message.", {});
   return msg;

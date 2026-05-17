@@ -621,7 +621,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
              "🏆 Anual R$ 99,90 (R$ 8,32/mês)",
              "💳 Mensal R$ 14,90",
              "",
-             "👉 https://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html",
+             "👉 https://salvabolso.com.br/premium-checkout.html",
            ].join("\n");
         } else {
            txtCurto = [
@@ -632,7 +632,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
              "",
              "Cancela com 1 mensagem.",
              "",
-             "👉 https://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html",
+             "👉 https://salvabolso.com.br/premium-checkout.html",
            ].join("\n");
         }
 

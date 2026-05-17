@@ -109,7 +109,7 @@ export async function checkAndSendExpirationNotice(userId: number, telefone: str
       "",
       "Cancela quando quiser, sem multa.",
       "",
-      "👉 https://salva-bolso-backend-salvabolso.h5prml.easypanel.host/premium-checkout.html",
+      "👉 https://salvabolso.com.br/premium-checkout.html",
     ];
 
     let mensagem: string;
