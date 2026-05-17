@@ -27,10 +27,10 @@ async function asaasGet(path: string): Promise<Record<string, unknown>> {
 
 router.post("/criar", async (req: Request, res: Response) => {
   try {
-    const { nome, cpf, telefone, email, plano, billingType, creditCardToken, creditCardHolderInfo } = req.body as {
+    const { nome, cpf, telefone, email, plano, billingType, creditCard, creditCardHolderInfo } = req.body as {
       nome: string; cpf: string; telefone: string; email: string;
       plano: "mensal" | "anual"; billingType: "PIX" | "BOLETO" | "CREDIT_CARD";
-      creditCardToken?: string; creditCardHolderInfo?: Record<string, unknown>;
+      creditCard?: Record<string, unknown>; creditCardHolderInfo?: Record<string, unknown>;
     };
 
     // 1. Criar cliente
@@ -52,7 +52,7 @@ router.post("/criar", async (req: Request, res: Response) => {
     };
 
     if (billingType === "CREDIT_CARD") {
-      if (creditCardToken) subscriptionBody.creditCardToken = creditCardToken;
+      if (creditCard) subscriptionBody.creditCard = creditCard;
       if (creditCardHolderInfo) subscriptionBody.creditCardHolderInfo = creditCardHolderInfo;
     }
 

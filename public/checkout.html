@@ -6,7 +6,6 @@
     <title>Assinar Salva Bolso Premium</title>
     <link rel="stylesheet" href="/style.css">
     <link rel="icon" href="/favicon.ico">
-    <script src="https://www.asaas.com/static/js/asaas.js"></script>
     <style>
         html, body { background: #0b1014 !important; color: #e8eef2 !important; }
         .container   { background: #161b22 !important; box-shadow: none !important; }
@@ -57,12 +56,12 @@
 
                 <!-- Campos cartão -->
                 <div class="card-fields" id="card-fields">
-                    <input id="c-numero" type="text" placeholder="Número do cartão" maxlength="19" autocomplete="cc-number">
+                    <input id="f-card-number" type="text" placeholder="Número do cartão" maxlength="19" autocomplete="cc-number" inputmode="numeric">
                     <div class="card-row">
-                        <input id="c-validade" type="text" placeholder="MM/AA" maxlength="5" autocomplete="cc-exp">
-                        <input id="c-cvv" type="text" placeholder="CVV" maxlength="4" autocomplete="cc-csc">
+                        <input id="f-card-expiry" type="text" placeholder="MM/AA" maxlength="5" autocomplete="cc-exp" inputmode="numeric">
+                        <input id="f-card-cvv" type="text" placeholder="CVV" maxlength="4" autocomplete="cc-csc" inputmode="numeric">
                     </div>
-                    <input id="c-nome" type="text" placeholder="Nome no cartão" autocomplete="cc-name">
+                    <input id="f-card-name" type="text" placeholder="Nome no cartão" autocomplete="cc-name">
                 </div>
 
                 <div class="error-msg" id="error-msg"></div>
@@ -114,6 +113,14 @@
             });
         });
 
+        // Máscaras cartão
+        document.getElementById('f-card-number').addEventListener('input', function() {
+            this.value = this.value.replace(/\D/g,'').slice(0,16).replace(/(\d{4})(?=\d)/g,'$1 ');
+        });
+        document.getElementById('f-card-expiry').addEventListener('input', function() {
+            this.value = this.value.replace(/\D/g,'').slice(0,4).replace(/(\d{2})(\d)/,'$1/$2');
+        });
+
         document.getElementById('copy-btn').addEventListener('click', () => {
             const code = document.getElementById('pix-code').textContent;
             navigator.clipboard.writeText(code).then(() => {
@@ -137,28 +144,32 @@
             btn.textContent = 'Processando...';
 
             try {
-                let creditCardToken = undefined;
+                let creditCard = undefined;
                 let creditCardHolderInfo = undefined;
 
                 if (billingType === 'CREDIT_CARD') {
-                    const [expMes, expAno] = (document.getElementById('c-validade').value || '').split('/');
-                    const cardData = {
-                        holderName: document.getElementById('c-nome').value.trim(),
-                        number: document.getElementById('c-numero').value.replace(/\s/g,''),
+                    const [expMes, expAno] = (document.getElementById('f-card-expiry').value || '').split('/');
+                    creditCard = {
+                        holderName:  document.getElementById('f-card-name').value.trim(),
+                        number:      document.getElementById('f-card-number').value.replace(/\D/g,''),
                         expiryMonth: expMes,
-                        expiryYear: expAno ? '20' + expAno : '',
-                        ccv: document.getElementById('c-cvv').value.trim(),
+                        expiryYear:  expAno ? '20' + expAno : '',
+                        ccv:         document.getElementById('f-card-cvv').value.trim(),
                     };
-                    const tokenResult = await AsaasSecurityBridge.tokenize(cardData);
-                    if (!tokenResult || !tokenResult.token) throw new Error('Falha ao tokenizar cartão.');
-                    creditCardToken = tokenResult.token;
-                    creditCardHolderInfo = { name: nome, email, cpfCnpj: cpf, phone: tel };
+                    creditCardHolderInfo = {
+                        name:          nome,
+                        email:         email,
+                        cpfCnpj:       cpf,
+                        phone:         tel,
+                        postalCode:    '00000000',
+                        addressNumber: '0',
+                    };
                 }
 
                 const res = await fetch('/api/checkout/criar', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nome, cpf, telefone: tel, email, plano, billingType, creditCardToken, creditCardHolderInfo }),
+                    body: JSON.stringify({ nome, cpf, telefone: tel, email, plano, billingType, creditCard, creditCardHolderInfo }),
                 });
                 const data = await res.json();
 
