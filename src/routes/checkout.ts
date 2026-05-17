@@ -16,6 +16,15 @@ async function asaasPost(path: string, body: Record<string, unknown>): Promise<R
   return data;
 }
 
+async function asaasGet(path: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`${ASAAS_API_URL}${path}`, {
+    headers: { access_token: ASAAS_API_KEY },
+  });
+  const data = await res.json() as Record<string, unknown>;
+  if (!res.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+
 router.post("/criar", async (req: Request, res: Response) => {
   try {
     const { nome, cpf, telefone, email, plano, billingType, creditCardToken, creditCardHolderInfo } = req.body as {
@@ -50,7 +59,11 @@ router.post("/criar", async (req: Request, res: Response) => {
     const sub = await asaasPost("/subscriptions", subscriptionBody);
 
     if (billingType === "PIX") {
-      return res.json({ pixQrCodeImage: sub.pixQrCodeImage, pixQrCodePayload: sub.pixQrCodePayload });
+      const paymentsData = await asaasGet(`/subscriptions/${sub.id as string}/payments`);
+      const payments = paymentsData.data as Record<string, unknown>[];
+      const paymentId = payments[0].id as string;
+      const pix = await asaasGet(`/payments/${paymentId}/pixQrCode`);
+      return res.json({ pixQrCodeImage: pix.encodedImage, pixQrCodePayload: pix.payload });
     }
     if (billingType === "BOLETO") {
       return res.json({ bankSlipUrl: sub.bankSlipUrl });
