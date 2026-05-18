@@ -1061,7 +1061,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           case "categorias":  return await handleCategoriasCommand(user, message.telefone);
           case "editar_recorrente": return await handleEditarRecorrenteAI(user, message.telefone, message.texto);
           case "apagar_recorrente": return await handleApagarRecorrenteAI(user, message.telefone, message.texto);
-          case "pagar_recorrente":  return await handlePagarRecorrenteAI(user, message.telefone, message.texto);
+          case "pagar_recorrente":  return await handlePagarRecorrenteAI(user, message.telefone, message.texto, message.quotedText);
         }
       }
     } catch (err) {
@@ -1550,7 +1550,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
           case "categorias": return await handleCategoriasCommand(user, message.telefone);
           case "editar_recorrente": return await handleEditarRecorrenteAI(user, message.telefone, message.texto);
           case "apagar_recorrente": return await handleApagarRecorrenteAI(user, message.telefone, message.texto);
-          case "pagar_recorrente":  return await handlePagarRecorrenteAI(user, message.telefone, message.texto);
+          case "pagar_recorrente":  return await handlePagarRecorrenteAI(user, message.telefone, message.texto, message.quotedText);
         }
       }
     } catch (err) {

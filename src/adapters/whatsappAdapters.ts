@@ -4,6 +4,7 @@ export interface NormalizedMessage {
   messageId: string;
   provider: string;
   pushName?: string;
+  quotedText?: string;
 }
 
 // Meta WhatsApp Cloud API
@@ -40,8 +41,18 @@ function parseEvolution(body: Record<string, unknown>): NormalizedMessage | null
     const remoteJid = key?.remoteJid ?? "";
     if (remoteJid.endsWith("@g.us")) return null;
 
-    const conv = msg?.conversation ?? (msg?.extendedTextMessage as Record<string, string>)?.text;
+    const extMsg = msg?.extendedTextMessage as Record<string, unknown> | undefined;
+    const conv = msg?.conversation ?? extMsg?.text;
     const texto = typeof conv === "string" ? conv : null;
+
+    const ctxInfo = extMsg?.contextInfo as Record<string, unknown> | undefined;
+    const quotedMsg = ctxInfo?.quotedMessage as Record<string, unknown> | undefined;
+    const quotedRaw = quotedMsg?.conversation ?? (quotedMsg?.extendedTextMessage as Record<string, string> | undefined)?.text;
+    const quotedText = typeof quotedRaw === "string" ? quotedRaw : undefined;
+    if (quotedText) {
+      // eslint-disable-next-line no-console
+      console.log("[evolution:quoted]", JSON.stringify({ quotedText, texto }));
+    }
 
     // LID mode: remoteJid is like "277...@lid", real phone is in remoteJidAlt
     let telefone: string | undefined;
@@ -57,7 +68,7 @@ function parseEvolution(body: Record<string, unknown>): NormalizedMessage | null
     const rawPushName = data?.pushName as string | undefined;
     const pushName = rawPushName && /[a-zA-ZÀ-ÿ]/.test(rawPushName) ? rawPushName.trim() : undefined;
 
-    return { telefone, texto, messageId: key?.id ?? "", provider: "evolution", pushName };
+    return { telefone, texto, messageId: key?.id ?? "", provider: "evolution", pushName, quotedText };
   } catch {
     return null;
   }

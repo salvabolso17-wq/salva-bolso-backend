@@ -620,13 +620,28 @@ export async function handleConfirmarApagarRecorrente(user: UserRow, telefone: s
 // ── Pagar via AI ─────────────────────────────────────────────────────────────
 // Marca lembrete pendente como pago. Se fixa, cria automaticamente o próximo mês
 // via marcarPago. Também registra a transação correspondente.
-export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
+function extractNameFromQuote(q: string): string | null {
+  const line = q.split('\n')[0];
+  // "⏰ Faltam 3 dias pra vencer Claro —" or "Lembrete: Claro de"
+  let m = line.match(/vencer?\s+([A-Za-zÀ-ÿ][\w\s]+?)\s+[—\-(]/i);
+  if (m) return m[1].trim();
+  // "⚠️ Claro vence AMANHÃ" / "🚨 Claro (R$"
+  m = line.match(/^[^A-Za-zÀ-ÿ]*([A-Za-zÀ-ÿ][\w\s]+?)\s+(?:vence|venceu|\()/i);
+  if (m) return m[1].trim();
+  // "Lembrete: Claro de R$"
+  m = line.match(/Lembrete:\s+(.+?)\s+de\s/i);
+  if (m) return m[1].trim();
+  return null;
+}
+
+export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, texto: string, quotedText?: string): Promise<ProcessResult> {
   try {
     // Detecta negação: "Não paguei X" → oferece corrigir, NÃO marca pago
     if (/^\s*(n[ãa]o|nao|n)\s+(paguei|pago|t[áa]\s+pago|quitei|quitada|paga)\b/i.test(texto)) {
       return await ofertarCorrecaoNegacao(user, telefone, texto);
     }
-    const nome = extractRecorrenteName(texto);
+    const nomeQuoted = quotedText ? extractNameFromQuote(quotedText) : null;
+    const nome = nomeQuoted ?? extractRecorrenteName(texto);
     if (!nome) {
       await whatsapp.sendText({ to: telefone, text: "💡 Ex: _já paguei o aluguel_" });
       return { success: false, userId: user.id, erro: "nome não extraído" };
