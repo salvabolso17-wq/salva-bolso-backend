@@ -726,6 +726,17 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     // Camada 3: resposta "já paguei" a aviso de vencimento — silent fallthrough se não match
     if (pending.action === "aguardando_pagamento_aviso" && pending.step === "waiting_paguei") {
       if (/(j[aá]\s+paguei|paguei|ta\s+pago|t[aá]\s+pago|pago|quitei|quitado)/i.test(textoTrim)) {
+        // Prioriza nome explícito no texto sobre o contexto do pending
+        const nomeExplicito = textoTrim.match(/(?:j[aá]\s+)?(?:paguei?|quitei?|liquidei?)\s+(?:a\s+|o\s+|as\s+|os\s+)?(.+?)[\?!.]*$/i)?.[1]?.trim();
+        if (nomeExplicito && nomeExplicito.length > 1) {
+          const matchLembrete = await pool.query(
+            `SELECT id FROM lembretes WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente' AND LOWER(titulo) ILIKE LOWER($2) LIMIT 1`,
+            [user.id, `%${nomeExplicito}%`]
+          );
+          if (matchLembrete.rows.length > 0) {
+            return await handlePagarRecorrenteAI(user, message.telefone, message.texto, message.quotedText);
+          }
+        }
         return await handleAguardandoPagamentoAviso(user, message.telefone, pending.tx_ids);
       }
       // Não matched: deixa o pending vivo e segue fluxo normal (parse de gasto etc.)
