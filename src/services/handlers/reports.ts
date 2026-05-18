@@ -164,7 +164,7 @@ export async function handleResumoCommand(user: UserRow, telefone: string): Prom
     blocos.push(`💸 *Total: ${fmtValor(r.total_geral)}*`);
   }
   blocos.push("");
-  blocos.push("💡 Manda _detalhado_ pra ver tudo");
+  blocos.push("💡 Manda *detalhado* pra ver tudo");
 
   try {
     await whatsapp.sendText({ to: telefone, text: blocos.join("\n") });

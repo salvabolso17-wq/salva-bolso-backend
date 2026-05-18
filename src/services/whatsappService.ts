@@ -1069,6 +1069,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
   }
 
+  // ── Interceptor: "detalhado" explícito ──────────────────────────────────
+  if (/detalhado/i.test(message.texto.trim())) {
+    return await handleExtratoCommand(user, message.telefone, message.texto.trim());
+  }
+
   // ── Curiosidade sobre funcionalidades (linguagem natural) ────────────────
   if (isCuriosityPhrase(message.texto.trim())) {
     try {
