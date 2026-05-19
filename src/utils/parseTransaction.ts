@@ -134,6 +134,8 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
       "conta de luz", "energia elétrica", "energia eletrica", "energia",
       "enel", "cemig", "copel", "cpfl", "light",
       "luz",
+      // Celular
+      "tim", "vivo", "claro", "oi", "conta de celular", "plano celular",
       // Gás
       "conta de gás", "conta de gas", "gás encanado", "gas encanado",
       "gás", "gas",
@@ -226,6 +228,9 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
       "ultrassom", "tomografia",
       "ressonância", "ressonancia",
       "check up", "checkup",
+      // Ótica
+      "ótica", "otica", "óculos de grau", "oculos de grau", "lente de contato",
+      "lentes de contato",
       // Plano de saúde
       "plano de saúde", "plano de saude",
       "convênio", "convenio", "amil", "unimed",
@@ -279,6 +284,33 @@ const CATEGORIAS: Record<string, { keywords: string[]; tipo: "entrada" | "saida"
       "óculos", "oculos", "boné", "bone",
       // Tênis separado (calçado) — não conflita com esporte
       "tênis", "tenis",
+    ],
+    tipo: "saida",
+  },
+  Beleza: {
+    keywords: [
+      "salão", "salao", "cabeleireiro", "cabeleireira",
+      "barbearia", "barbeiro",
+      "manicure", "pedicure", "unhas",
+      "depilação", "depilacao", "laser",
+      "maquiagem", "make", "batom", "base", "blush",
+      "perfume", "desodorante",
+      "shampoo", "condicionador", "tintura", "coloração", "coloracao",
+      "cosmético", "cosmetico", "creme", "hidratante",
+      "spa", "massagem", "estética", "estetica",
+      "sobrancelha", "limpeza de pele",
+    ],
+    tipo: "saida",
+  },
+  Pets: {
+    keywords: [
+      "ração", "racao", "petshop", "pet shop",
+      "veterinário", "veterinario", "vet",
+      "banho e tosa", "tosa", "banho pet",
+      "vacina pet", "remédio pet",
+      "coleira", "guia", "casinha",
+      "areia gato", "areia de gato",
+      "brinquedo pet", "peixe", "aquário", "aquario",
     ],
     tipo: "saida",
   },
