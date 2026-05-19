@@ -101,9 +101,21 @@ export async function criarLembrete(
   const r = await pool.query<LembreteRow>(
     `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status)
      VALUES ($1, $2, $3, $4, $5, $6, 'pendente')
+     ON CONFLICT DO NOTHING
      RETURNING *`,
     [userId, tituloNorm, valor, dia, fixa, proxima],
   );
+  if (!r.rows[0] && fixa) {
+    // Conflito com índice único parcial — retorna o pendente existente
+    const existing = await pool.query<LembreteRow>(
+      `SELECT * FROM lembretes WHERE user_id = $1 AND LOWER(titulo) = LOWER($2) AND fixa = TRUE AND status = 'pendente' ORDER BY criado_em DESC LIMIT 1`,
+      [userId, tituloNorm],
+    );
+    if (existing.rows[0]) {
+      log.db("criarLembrete dedup fixa (conflict) — retornando existente", { userId, lembreteId: existing.rows[0].id, titulo: tituloNorm });
+      return existing.rows[0];
+    }
+  }
   log.db("criarLembrete INSERT ok", { userId, lembreteId: r.rows[0].id, titulo: tituloNorm });
   const novo = r.rows[0];
 

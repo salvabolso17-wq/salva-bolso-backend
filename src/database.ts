@@ -212,6 +212,24 @@ export async function createTables() {
       );
     `);
 
+    // Limpeza de duplicatas de lembretes fixas pendentes (mantém o mais recente)
+    await step("DEDUP lembretes fixas pendentes", `
+      DELETE FROM lembretes WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY user_id, LOWER(titulo) ORDER BY criado_em DESC
+          ) AS rn FROM lembretes WHERE fixa = TRUE AND status = 'pendente'
+        ) t WHERE rn > 1
+      );
+    `);
+
+    // Índice único parcial: impede futuras duplicatas de lembretes fixas pendentes
+    await step("UNIQUE INDEX lembretes_user_titulo_pendente", `
+      CREATE UNIQUE INDEX IF NOT EXISTS lembretes_user_titulo_pendente_uniq
+      ON lembretes (user_id, LOWER(titulo))
+      WHERE fixa = TRUE AND status = 'pendente';
+    `);
+
     // Migração one-shot: recurring_expenses → lembretes (idempotente)
     await migrarRecorrentesParaLembretes();
 
