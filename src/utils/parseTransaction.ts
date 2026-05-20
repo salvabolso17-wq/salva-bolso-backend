@@ -1,3 +1,5 @@
+const DAY_PREFIX_RE = /^dia\s+\d{1,2}\s+/i;
+
 const PALAVRAS_MIL: Record<string, number> = {
   "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "três": 3,
   "quatro": 4, "cinco": 5, "seis": 6, "sete": 7, "oito": 8, "nove": 9,
@@ -403,9 +405,10 @@ export function parseTransaction(texto: string): ParsedTransaction | null {
   const textoNorm  = texto.trim();
   const isEntrada  = textoNorm.startsWith("+");
   const textoParse = isEntrada ? textoNorm.slice(1).trim() : textoNorm;
+  const textoParse2 = textoParse.replace(DAY_PREFIX_RE, "");
 
   // Extrai valor: suporta 1.500, 1500,50, 120.50, 20mil, R$120
-  const valorMatch = textoParse.match(
+  const valorMatch = textoParse2.match(
     /R?\$?\s*(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?\s*mil|\d+(?:[.,]\d{1,2})?)/i
   );
   if (!valorMatch) return null;
@@ -414,11 +417,11 @@ export function parseTransaction(texto: string): ParsedTransaction | null {
   if (isNaN(valor) || valor <= 0) return null;
 
   const descricao  = normalizeDescricao(cleanDescricao(
-    textoParse.replace(valorMatch[0], "").replace(/\+/g, "").trim() || "Sem descrição"
+    textoParse2.replace(valorMatch[0], "").replace(/\+/g, "").trim() || "Sem descrição"
   ));
 
   // Texto normalizado (sem acentos, minúsculo) para matching consistente
-  const textoLower = removerAcentos(textoParse.toLowerCase());
+  const textoLower = removerAcentos(textoParse2.toLowerCase());
 
   // Longest-match: a keyword mais longa que bate vence
   // (ex: "uber eats" ganha de "uber" → categoria correta)
