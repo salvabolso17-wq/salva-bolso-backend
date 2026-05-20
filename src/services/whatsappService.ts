@@ -464,6 +464,17 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     }
   }
 
+  // Elogios e afetos → resposta humana
+  const _elogioMatch = /\b(gostei|amei|amo|adoro|incrivel|incrível|que\s+legal|demais|top|perfeito|parabéns|obrigad[oa])\b/i.test(t);
+  if (_elogioMatch) {
+    try {
+      await whatsapp.sendText({ to: telefone, text: "Fico feliz em ajudar! 😊 Sempre que precisar é só mandar." });
+    } catch (err) {
+      log.error("falha elogio_response", err, { userId: user.id });
+    }
+    return { success: false, userId: user.id, erro: "elogio tratado" };
+  }
+
   return null;
 }
 
