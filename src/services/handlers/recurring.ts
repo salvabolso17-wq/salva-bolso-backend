@@ -804,8 +804,8 @@ export async function handleAguardandoCorrecao(
   }
 
   // Procura lembrete fixo recém-pago compatível
-  const lembRes = await pool.query<{ id: number; titulo: string; proxima_data: Date | string; valor: string; atualizado_em: Date }>(
-    `SELECT id, titulo, proxima_data, valor, atualizado_em FROM lembretes
+  const lembRes = await pool.query<{ id: number; titulo: string; proxima_data: Date | string; valor: string; atualizado_em: Date; dia_vencimento: number }>(
+    `SELECT id, titulo, proxima_data, valor, atualizado_em, dia_vencimento FROM lembretes
      WHERE user_id = $1 AND fixa = TRUE AND status = 'pago'
        AND LOWER(titulo) ILIKE '%' || LOWER($2) || '%'
        AND atualizado_em > NOW() - INTERVAL '2 hours'
@@ -841,6 +841,30 @@ export async function handleAguardandoCorrecao(
       `UPDATE lembretes SET status = 'pendente', atualizado_em = NOW() WHERE id = $1 AND user_id = $2`,
       [lembPago.id, user.id]
     );
+
+    // Corrige proxima_data se estiver em mês errado (passado ou futuro distante)
+    const now = new Date();
+    const dataAtual = new Date(lembPago.proxima_data);
+    const mesAtual  = now.getUTCMonth() + 1;
+    const anoAtual  = now.getUTCFullYear();
+    const mesData   = dataAtual.getUTCMonth() + 1;
+    const anoData   = dataAtual.getUTCFullYear();
+
+    const estaNoPeriodoErrado =
+      anoData < anoAtual ||
+      (anoData === anoAtual && mesData < mesAtual) ||
+      (anoData > anoAtual) ||
+      (anoData === anoAtual && mesData > mesAtual + 1);
+
+    if (estaNoPeriodoErrado) {
+      const dia = lembPago.dia_vencimento;
+      const dataCorreta = `${anoAtual}-${String(mesAtual).padStart(2,"0")}-${String(Math.min(dia, 31)).padStart(2,"0")}`;
+      await pool.query(
+        `UPDATE lembretes SET proxima_data = $1 WHERE id = $2 AND user_id = $3`,
+        [dataCorreta, lembPago.id, user.id]
+      );
+    }
+
     await pool.query(
       `DELETE FROM lembretes
        WHERE user_id = $1 AND fixa = TRUE AND status = 'pendente'
@@ -890,6 +914,36 @@ export async function handleConfirmarDesfazer(
          WHERE id = $1 AND user_id = $2`,
         [data.lembrete_pago_id, user.id]
       );
+
+      // Corrige proxima_data se estiver em mês errado (passado ou futuro distante)
+      const lembRow = await pool.query<{ proxima_data: Date | string; dia_vencimento: number }>(
+        `SELECT proxima_data, dia_vencimento FROM lembretes WHERE id = $1 AND user_id = $2`,
+        [data.lembrete_pago_id, user.id]
+      );
+      if (lembRow.rows.length > 0) {
+        const now = new Date();
+        const dataAtual = new Date(lembRow.rows[0].proxima_data);
+        const mesAtual  = now.getUTCMonth() + 1;
+        const anoAtual  = now.getUTCFullYear();
+        const mesData   = dataAtual.getUTCMonth() + 1;
+        const anoData   = dataAtual.getUTCFullYear();
+
+        const estaNoPeriodoErrado =
+          anoData < anoAtual ||
+          (anoData === anoAtual && mesData < mesAtual) ||
+          (anoData > anoAtual) ||
+          (anoData === anoAtual && mesData > mesAtual + 1);
+
+        if (estaNoPeriodoErrado) {
+          const dia = lembRow.rows[0].dia_vencimento;
+          const dataCorreta = `${anoAtual}-${String(mesAtual).padStart(2,"0")}-${String(Math.min(dia, 31)).padStart(2,"0")}`;
+          await pool.query(
+            `UPDATE lembretes SET proxima_data = $1 WHERE id = $2 AND user_id = $3`,
+            [dataCorreta, data.lembrete_pago_id, user.id]
+          );
+        }
+      }
+
       await pool.query(
         `DELETE FROM transactions WHERE id = $1 AND user_id = $2`,
         [data.transaction_id, user.id]
