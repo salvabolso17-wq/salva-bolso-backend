@@ -35,7 +35,7 @@ function ultimoDiaDoMes(ano: number, mes: number): number {
   return new Date(ano, mes, 0).getDate();
 }
 
-function proximaDataParaDia(dia: number, base?: Date): string {
+export function proximaDataParaDia(dia: number, base?: Date): string {
   const ref = base ?? nowBRT();
   const anoRef = ref.getUTCFullYear();
   const mesRef = ref.getUTCMonth() + 1;
@@ -52,7 +52,7 @@ function proximaDataParaDia(dia: number, base?: Date): string {
   return `${ano}-${String(mes).padStart(2, "0")}-${String(diaFinal).padStart(2, "0")}`;
 }
 
-function proxMesParaDia(dia: number, dataAtual: string | Date): string {
+export function proxMesParaDia(dia: number, dataAtual: string | Date): string {
   const iso = dataToISO(dataAtual);
   const [a, m] = iso.split("-").map(n => parseInt(n, 10));
   let ano = a;
@@ -341,4 +341,26 @@ export function jaVenceuEsteMes(dia_vencimento: number): boolean {
   const hoje = nowBRT();
   const diaHoje = hoje.getUTCDate();
   return dia_vencimento < diaHoje;
+}
+
+export async function criarLembretesParcelados(
+  userId: number, titulo: string, valor: number, dia: number, qtd: number,
+): Promise<number> {
+  const tituloNorm = normalizeTitulo(titulo);
+  let dataAtual = proximaDataParaDia(dia);
+  let count = 0;
+  for (let i = 0; i < qtd; i++) {
+    try {
+      await pool.query(
+        `INSERT INTO lembretes (user_id, titulo, valor, dia_vencimento, fixa, proxima_data, status)
+         VALUES ($1, $2, $3, $4, FALSE, $5, 'pendente')`,
+        [userId, tituloNorm, valor, dia, dataAtual],
+      );
+      count++;
+    } catch (err) {
+      log.error("criarLembretesParcelados falha em parcela", err, { userId, i });
+    }
+    dataAtual = proxMesParaDia(dia, dataAtual);
+  }
+  return count;
 }

@@ -19,7 +19,7 @@ import { resetInactivityNudge } from "./notificationService";
 // ── Handlers ──────────────────────────────────────────────────────────────────
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand, handleDetalhadoCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
-import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleCorrigirAcao, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit, handleZerarIniciar, handleZerarExecutar } from "./handlers/transactions";
+import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleCorrigirAcao, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit, handleZerarIniciar, handleZerarExecutar, handleParcelasQtd, handleParcelasDia } from "./handlers/transactions";
 import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo, handleConfirmarDesfazer, ofertarCorrecaoNegacao, handleAguardandoCorrecao, handleCancelamentoIntent } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
@@ -701,8 +701,8 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Pending action check ──────────────────────────────────────────────────
   const pendingRow = await pool.query<{
-    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_status_vencida" | "onboarding_fixa_status_vencida_solo" | "onboarding_fixa_status_vencida_batch" | "pagamento_recente" | "confirmar_desfazer" | "aguardando_correcao" | "cancelamento" | "zerar_dados";
-    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia" | "waiting_status_vencida" | "waiting_status_vencida_batch" | "aguardando_desfazer" | "waiting_corrigir_alvo" | "waiting_correcao_acao" | "waiting_response" | "waiting_opcao" | "waiting_confirmacao";
+    action: "apagar" | "corrigir" | "novo_mes" | "confirmar_recorrente" | "confirmar_recorrente_multi" | "registrar_parcela" | "onboarding" | "apagar_recorrente" | "dias_recorrentes_batch" | "confirmar_pagar_fixa" | "aguardando_pagamento_aviso" | "onboarding_fixa_aguardando_dia" | "onboarding_fixa_status_vencida" | "onboarding_fixa_status_vencida_solo" | "onboarding_fixa_status_vencida_batch" | "pagamento_recente" | "confirmar_desfazer" | "aguardando_correcao" | "cancelamento" | "zerar_dados" | "parcelas_lembrete";
+    step: "waiting_selection" | "waiting_selection_multi" | "waiting_new_value" | "waiting_renda" | "waiting_carryover" | "waiting_confirmation" | "waiting_parcela_valor" | "waiting_onboarding_renda" | "waiting_onboarding_fixas" | "waiting_dias_batch" | "waiting_paguei" | "waiting_dia" | "waiting_status_vencida" | "waiting_status_vencida_batch" | "aguardando_desfazer" | "waiting_corrigir_alvo" | "waiting_correcao_acao" | "waiting_response" | "waiting_opcao" | "waiting_confirmacao" | "waiting_qtd" | "waiting_dia_parcela";
     tx_ids: unknown;
     selected_tx_id: number | null;
   }>(
@@ -831,6 +831,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       }
       await whatsapp.sendText({ to: message.telefone, text: "Manda *sim* para confirmar ou *cancelar* para desistir." });
       return { success: false, userId: user.id, erro: "resposta invalida zerar" };
+    }
+
+    if (pending.action === "parcelas_lembrete" && pending.step === "waiting_qtd") {
+      return await handleParcelasQtd(user, message.telefone, textoTrim, pending.tx_ids as { descricao: string; valor: number });
+    }
+    if (pending.action === "parcelas_lembrete" && pending.step === "waiting_dia_parcela") {
+      return await handleParcelasDia(user, message.telefone, textoTrim, pending.tx_ids as { descricao: string; valor: number; qtd: number });
     }
 
     if (pending.action === "confirmar_pagar_fixa" && pending.step === "waiting_confirmation") {
@@ -1926,6 +1933,28 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     });
   } catch (err) {
     log.error("excecao ao enviar confirmacao", err, { to: message.telefone });
+  }
+
+  // ── Parcelas: cria lembretes mensais para parcelas ──────────────────────────
+  if (parsed.tipo === "saida" && /\bparcela\b/i.test(parsed.descricao)) {
+    try {
+      const desc = capitalizeFirst(parsed.descricao);
+      await pool.query(
+        `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+         VALUES ($1, 'parcelas_lembrete', 'waiting_qtd', $2::jsonb, NOW() + INTERVAL '10 minutes')
+         ON CONFLICT (user_id) DO UPDATE
+           SET action = 'parcelas_lembrete', step = 'waiting_qtd', tx_ids = $2::jsonb,
+               selected_tx_id = NULL, expires_at = NOW() + INTERVAL '10 minutes'`,
+        [user.id, JSON.stringify({ descricao: desc, valor: parsed.valor })],
+      );
+      await whatsapp.sendText({
+        to: message.telefone,
+        text: `Quantas parcelas de *${desc}* ainda faltam?\n\nEnvie o número ou "cancelar".`,
+      });
+    } catch (err) {
+      log.error("falha ao iniciar parcelas_lembrete", err, { userId: user.id });
+    }
+    return { success: true, userId: user.id, transacao: transacaoRow, interpretado: { valor: parsed.valor, descricao: parsed.descricao, categoria: parsed.categoria, tipo: parsed.tipo } };
   }
 
   if (parsed.tipo === "saida") {

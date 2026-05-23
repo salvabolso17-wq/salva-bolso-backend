@@ -527,3 +527,49 @@ export async function handleZerarExecutar(user: UserRow, telefone: string, opcao
   }
   return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "zerar", opcao } };
 }
+
+export async function handleParcelasQtd(
+  user: UserRow, telefone: string, texto: string,
+  data: { descricao: string; valor: number },
+): Promise<ProcessResult> {
+  const qtd = parseInt(texto.trim(), 10);
+  if (isNaN(qtd) || qtd < 1 || qtd > 60) {
+    try { await whatsapp.sendText({ to: telefone, text: 'Envie o número de parcelas. Ex: 11\n\nOu "cancelar".' }); }
+    catch (err) { log.error("handleParcelasQtd send fail", err, { to: telefone }); }
+    return { success: false, userId: user.id, erro: "qtd inválida" };
+  }
+  try {
+    await pool.query(
+      `UPDATE pending_actions SET step = 'waiting_dia_parcela', tx_ids = $1::jsonb, expires_at = NOW() + INTERVAL '10 minutes'
+       WHERE user_id = $2`,
+      [JSON.stringify({ ...data, qtd }), user.id],
+    );
+    await whatsapp.sendText({ to: telefone, text: `Qual dia do mês vence *${data.descricao}*?\n\nEx: 15` });
+  } catch (err) { log.error("handleParcelasQtd update fail", err, { userId: user.id }); }
+  return { success: false, userId: user.id, erro: "aguardando dia parcela" };
+}
+
+export async function handleParcelasDia(
+  user: UserRow, telefone: string, texto: string,
+  data: { descricao: string; valor: number; qtd: number },
+): Promise<ProcessResult> {
+  const dia = parseInt(texto.trim(), 10);
+  if (isNaN(dia) || dia < 1 || dia > 31) {
+    try { await whatsapp.sendText({ to: telefone, text: 'Envie o dia de vencimento. Ex: 15\n\nOu "cancelar".' }); }
+    catch (err) { log.error("handleParcelasDia send fail", err, { to: telefone }); }
+    return { success: false, userId: user.id, erro: "dia inválido" };
+  }
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+  try {
+    const { criarLembretesParcelados } = await import("../modules/lembretes");
+    const count = await criarLembretesParcelados(user.id, data.descricao, data.valor, dia, data.qtd);
+    await whatsapp.sendText({
+      to: telefone,
+      text: `✅ ${count} lembrete${count !== 1 ? "s" : ""} criado${count !== 1 ? "s" : ""}!\n*${data.descricao}* — dia ${dia} de cada mês.`,
+    });
+  } catch (err) {
+    log.error("handleParcelasDia criar falhou", err, { userId: user.id });
+    try { await whatsapp.sendText({ to: telefone, text: "Não consegui criar os lembretes. Tente novamente." }); } catch { /* noop */ }
+  }
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "parcelas_lembrete_criado" } };
+}
