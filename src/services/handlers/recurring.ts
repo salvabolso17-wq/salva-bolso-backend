@@ -566,10 +566,55 @@ export async function handleEditarRecorrenteAI(user: UserRow, telefone: string, 
 // ── Apagar via AI (step 1) ───────────────────────────────────────────────────
 export async function handleApagarRecorrenteAI(user: UserRow, telefone: string, texto: string): Promise<ProcessResult> {
   try {
+    const MESES_RE = /\b(janeiro|fevereiro|mar[çc]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/i;
+    const MESES_IDX: Record<string, number> = {
+      janeiro:0,fevereiro:1,março:2,marco:2,abril:3,maio:4,junho:5,
+      julho:6,agosto:7,setembro:8,outubro:9,novembro:10,dezembro:11
+    };
+
+    const mesMatch = texto.match(MESES_RE);
+    if (mesMatch) {
+      const mesIdx = MESES_IDX[mesMatch[1].toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"")];
+      const anoRef  = mesIdx <= new Date().getMonth() ? new Date().getFullYear() + 1 : new Date().getFullYear();
+      const nomeExtraido = extractRecorrenteName(texto.replace(MESES_RE, "").replace(/\s+de\s*$/i,"").trim())
+                        ?? texto.replace(MESES_RE,"").replace(/apagar?|conta|o\s|a\s/gi,"").trim();
+      const found = await pool.query<{ id: number; titulo: string; valor: string }>(
+        `SELECT id, titulo, valor FROM lembretes
+         WHERE user_id = $1 AND status = 'pendente'
+           AND EXTRACT(MONTH FROM proxima_data) = $2
+           AND EXTRACT(YEAR  FROM proxima_data) = $3
+           AND LOWER(titulo) ILIKE $4
+         LIMIT 1`,
+        [user.id, mesIdx + 1, anoRef, `%${nomeExtraido}%`]
+      );
+      if (found.rows.length === 0) {
+        await whatsapp.sendText({ to: telefone, text: `Não achei _${nomeExtraido}_ em ${mesMatch[1]}.` });
+        return { success: false, userId: user.id, erro: "lembrete mes nao encontrado" };
+      }
+      const row = found.rows[0];
+      await pool.query(`DELETE FROM lembretes WHERE id = $1`, [row.id]);
+      await whatsapp.sendText({ to: telefone, text: `✅ Lembrete *${capitalizeFirst(row.titulo)}* de ${mesMatch[1]} removido.` });
+      return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "apagar_lembrete_mes", titulo: row.titulo } };
+    }
+
+    // Sem nome → listar pendentes para escolha
     const nome = extractRecorrenteName(texto);
     if (!nome) {
-      await whatsapp.sendText({ to: telefone, text: "💡 Ex: _cancelei a netflix_" });
-      return { success: false, userId: user.id, erro: "nome não extraído" };
+      const lista = await pool.query<{ id: number; titulo: string; valor: string }>(
+        `SELECT id, titulo, valor FROM lembretes
+         WHERE user_id = $1 AND status = 'pendente' AND fixa = TRUE
+         ORDER BY proxima_data ASC LIMIT 8`,
+        [user.id]
+      );
+      if (lista.rows.length === 0) {
+        await whatsapp.sendText({ to: telefone, text: "Nenhuma conta fixa pendente encontrada." });
+        return { success: false, userId: user.id, erro: "sem lembretes" };
+      }
+      const linhas = ["Qual conta quer apagar?", ""];
+      lista.rows.forEach((r, i) => linhas.push(`${i + 1}. ${capitalizeFirst(r.titulo)} — ${fmtValor(Number(r.valor))}`));
+      linhas.push("", 'Envie o número ou "cancelar".');
+      await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+      return { success: false, userId: user.id, erro: "aguardando selecao apagar" };
     }
     const result = await pool.query<{ id: number; titulo: string }>(
       `SELECT id, titulo FROM lembretes
