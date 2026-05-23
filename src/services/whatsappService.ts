@@ -19,7 +19,7 @@ import { resetInactivityNudge } from "./notificationService";
 // ── Handlers ──────────────────────────────────────────────────────────────────
 import { handleSaldoCommand, handleResumoCommand, handleExtratoCommand, handleHojeCommand, handleSemanaCommand, handleRankingCommand, handleCompararCommand, handleDesafioCommand, handlePrevisaoCommand, handleTopGastosCommand, handleBuscarCommand, handleRecorrentesTotalCommand, handleCategoriasCommand, handleListLimitsCommand, handleLimiteCommand, checkLimiteCategoria, handleListarGastosMesCommand, handleDetalhadoCommand } from "./handlers/reports";
 import { handleMetaCommand, handleMetasCommand, handleGuardarCommand, handleAddToGoal, handleGoalProgress, handleCreateGoalNoValue, handleGoalPercentage, handleGoalAmountSaved, detectGoalIntent } from "./handlers/goals";
-import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleCorrigirAcao, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit } from "./handlers/transactions";
+import { handleApagarCommand, handleApagarSelecao, handleCorrigirCommand, handleCorrigirSelecao, handleCorrigirNovoValor, handleCorrigirAcao, handleNaturalCorrection, handleNaturalDelete, parseNaturalEdit, handleZerarIniciar, handleZerarExecutar } from "./handlers/transactions";
 import { handleConfirmarRecorrente, handleConfirmarRecorrenteMulti, handleRecorrentesCommand, handleProximasCommand, handleRecorrenteCommand, handleEditarRecorrenteAI, handleApagarRecorrenteAI, handleConfirmarApagarRecorrente, handlePagarRecorrenteAI, handleDiasRecorrentesBatch, handleConfirmarPagarFixa, handleAguardandoPagamentoAviso, handleOnboardingFixaStatusBatch, handleOnboardingFixaStatusVencidaSolo, handleConfirmarDesfazer, ofertarCorrecaoNegacao, handleAguardandoCorrecao, handleCancelamentoIntent } from "./handlers/recurring";
 import { handleInstallmentRegistration, handleInstallmentNeedsParcela, handleRegistrarParcelaValor, detectInstallment, detectInstallmentProgress, buildInstallmentProgressText, getInstallmentFromDb } from "./handlers/installments";
 import { detectMultiLine, handleMultiLineTransactions } from "./handlers/multiline";
@@ -791,6 +791,48 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
       return await handleConfirmarDesfazer(user, message.telefone, textoTrim, pending.tx_ids);
     }
 
+    if (pending.action === "zerar_dados" && pending.step === "waiting_opcao") {
+      if (/^cancelar$/i.test(textoTrim)) {
+        await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+        await whatsapp.sendText({ to: message.telefone, text: "Cancelado 🙂" });
+        return { success: false, userId: user.id, erro: "zerar cancelado" };
+      }
+      const opcao = parseInt(textoTrim);
+      if (![1,2,3].includes(opcao)) {
+        await whatsapp.sendText({ to: message.telefone, text: 'Manda 1, 2 ou 3. Ou "cancelar" para desistir.' });
+        return { success: false, userId: user.id, erro: "opcao invalida" };
+      }
+      const avisos: Record<number,string> = {
+        1: "os gastos do mês",
+        2: "os gastos e todas as contas fixas",
+        3: "gastos, contas fixas e sua renda cadastrada",
+      };
+      await pool.query(
+        `UPDATE pending_actions SET step = 'waiting_confirmacao', tx_ids = $2::jsonb
+         WHERE user_id = $1`,
+        [user.id, JSON.stringify({ opcao })]
+      );
+      await whatsapp.sendText({
+        to: message.telefone,
+        text: `⚠️ Confirma que quer apagar *${avisos[opcao]}*?\n\n💡 _sim_ • _cancelar_`,
+      });
+      return { success: false, userId: user.id, erro: "aguardando confirmacao zerar" };
+    }
+
+    if (pending.action === "zerar_dados" && pending.step === "waiting_confirmacao") {
+      if (/^(cancelar|n[ãa]o|nao)$/i.test(textoTrim)) {
+        await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+        await whatsapp.sendText({ to: message.telefone, text: "Cancelado 🙂" });
+        return { success: false, userId: user.id, erro: "zerar cancelado" };
+      }
+      if (/^(sim|s|pode|confirmo)$/i.test(textoTrim)) {
+        const data = pending.tx_ids as { opcao: number };
+        return await handleZerarExecutar(user, message.telefone, data.opcao);
+      }
+      await whatsapp.sendText({ to: message.telefone, text: "Manda *sim* para confirmar ou *cancelar* para desistir." });
+      return { success: false, userId: user.id, erro: "resposta invalida zerar" };
+    }
+
     if (pending.action === "confirmar_pagar_fixa" && pending.step === "waiting_confirmation") {
       return await handleConfirmarPagarFixa(user, message.telefone, textoTrim, pending.tx_ids);
     } else if (pending.action === "onboarding_fixa_aguardando_dia" && pending.step === "waiting_dia") {
@@ -1046,6 +1088,14 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     /tudo\s+que\s+(j[aá]\s+)?(anotei|registrei|lan[cç]ei)|ver\s+(meus?\s+)?(registros?|lan[cç]amentos?|hist[oó]rico|anotat?[uú]?)|meus?\s+(lan[cç]amentos?|registros?|hist[oó]rico de\s+gastos?)|hist[oó]rico\s+de\s+gastos?/i.test(message.texto.trim())
   ) {
     return await handleDetalhadoCommand(user, message.telefone);
+  }
+
+  if (/^(zerar?|resetar?|apagar?\s+tudo|come[çc]ar?\s+do\s+zero|limpar?\s+gastos?|zerar?\s+gastos?|zerar?\s+tudo|apagar?\s+gastos?\s+do\s+m[eê]s)[\?!.]*$/i.test(textoTrim)) {
+    try {
+      return await handleZerarIniciar(user, message.telefone);
+    } catch (err) {
+      log.error("handleZerarIniciar excecao", err, { userId: user.id });
+    }
   }
 
   // Comandos exatos sem número — interceptar antes do AI pra evitar classificação errada

@@ -424,3 +424,106 @@ export async function handleNaturalDelete(
     return await handleApagarCommand(user, telefone);
   }
 }
+
+export async function handleZerarIniciar(user: UserRow, telefone: string): Promise<ProcessResult> {
+  try {
+    const countTx = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM transactions
+       WHERE user_id = $1
+         AND date_trunc('month', criado_em) = date_trunc('month', (NOW() AT TIME ZONE 'America/Sao_Paulo'))`,
+      [user.id]
+    );
+    const countLemb = await pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM lembretes
+       WHERE user_id = $1 AND status IN ('pendente','pago')`,
+      [user.id]
+    );
+    const nTx   = Number(countTx.rows[0].count);
+    const nLemb = Number(countLemb.rows[0].count);
+
+    const linhas = [
+      "⚠️ O que você quer apagar?",
+      "",
+      `1 — Só os gastos do mês (${nTx} lançamentos)`,
+      `2 — Gastos + contas fixas (${nTx} lançamentos e ${nLemb} contas)`,
+      "3 — Tudo (gastos, contas e renda)",
+      "",
+      'Ou manda "cancelar" para desistir.',
+    ];
+
+    await pool.query(
+      `INSERT INTO pending_actions (user_id, action, step, tx_ids, expires_at)
+       VALUES ($1, 'zerar_dados', 'waiting_opcao', '[]'::jsonb, NOW() + INTERVAL '5 minutes')
+       ON CONFLICT (user_id) DO UPDATE
+         SET action = 'zerar_dados', step = 'waiting_opcao', tx_ids = '[]'::jsonb,
+             selected_tx_id = NULL, expires_at = NOW() + INTERVAL '5 minutes'`,
+      [user.id]
+    );
+    await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
+  } catch (err) {
+    log.error("handleZerarIniciar falhou", err, { userId: user.id });
+  }
+  return { success: false, userId: user.id, erro: "aguardando opcao zerar" };
+}
+
+export async function handleZerarExecutar(user: UserRow, telefone: string, opcao: number): Promise<ProcessResult> {
+  const now = new Date();
+  const mes = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2,"0")}`;
+  void mes;
+  let nTx = 0, nLemb = 0;
+
+  if (opcao >= 1) {
+    try {
+      const r = await pool.query(
+        `DELETE FROM transactions
+         WHERE user_id = $1
+           AND date_trunc('month', criado_em) = date_trunc('month', (NOW() AT TIME ZONE 'America/Sao_Paulo'))`,
+        [user.id]
+      );
+      nTx = r.rowCount ?? 0;
+    } catch (err) {
+      log.error("handleZerarExecutar: falhou apagar transactions", err, { userId: user.id });
+    }
+  }
+
+  if (opcao >= 2) {
+    try {
+      const r = await pool.query(
+        `DELETE FROM lembretes WHERE user_id = $1 AND status IN ('pendente','pago')`,
+        [user.id]
+      );
+      nLemb = r.rowCount ?? 0;
+    } catch (err) {
+      log.error("handleZerarExecutar: falhou apagar lembretes", err, { userId: user.id });
+    }
+  }
+
+  if (opcao >= 3) {
+    try {
+      await pool.query(
+        `UPDATE users SET renda = NULL, renda_extra = NULL WHERE id = $1`,
+        [user.id]
+      );
+    } catch (err) {
+      log.error("handleZerarExecutar: falhou zerar renda", err, { userId: user.id });
+    }
+  }
+
+  await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
+
+  const partes = [];
+  if (nTx > 0)    partes.push(`${nTx} lançamentos`);
+  if (nLemb > 0)  partes.push(`${nLemb} contas fixas`);
+  if (opcao >= 3) partes.push("renda");
+
+  const texto = partes.length > 0
+    ? `✅ Feito. ${partes.join(", ")} apagados.\nPode começar do zero 🙂`
+    : "✅ Feito. Nada havia para apagar.";
+
+  try {
+    await whatsapp.sendText({ to: telefone, text: texto });
+  } catch (err) {
+    log.error("handleZerarExecutar: falhou enviar confirmacao", err, { userId: user.id });
+  }
+  return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "zerar", opcao } };
+}
