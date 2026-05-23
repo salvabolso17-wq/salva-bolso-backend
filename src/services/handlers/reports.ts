@@ -81,14 +81,20 @@ export async function handleSaldoCommand(user: UserRow, telefone: string): Promi
     return { success: false, userId: user.id, erro: "Aguardando renda" };
   }
 
+  const pct     = totalRenda > 0 ? (r.total_geral / totalRenda) * 100 : 0;
+  const filled  = Math.min(Math.round(pct / 10), 10);
+  const barra   = "▓".repeat(filled) + "░".repeat(10 - filled);
+  const alerta  = pct >= 100 ? "🔴" : pct >= 80 ? "🔶" : pct >= 50 ? "🟡" : "🟢";
+
   const linhas = [
-    `Saldo de ${meses[now.getMonth()]}/${now.getFullYear()}`,
+    `${meses[now.getMonth()].charAt(0).toUpperCase() + meses[now.getMonth()].slice(1)}/${now.getFullYear()}`,
     "",
-    `Renda: ${fmtValor(totalRenda)}`,
-    `Gastos: ${fmtValor(r.total_geral)}`,
+    `💰 ${fmtValor(totalRenda)} renda`,
+    `💸 ${fmtValor(r.total_geral)} gastos`,
+    `${barra} ${alerta}`,
     sobrou >= 0
-      ? `💚 Sobrou: ${fmtValor(sobrou)}`
-      : `🔴 No vermelho: ${fmtValor(Math.abs(sobrou))} a mais do que entrou`,
+      ? `💚 Sobrou ${fmtValor(sobrou)}`
+      : `🔴 No vermelho: ${fmtValor(Math.abs(sobrou))} a mais`,
   ];
 
   try {
