@@ -114,8 +114,16 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   const t         = texto.trim().toLowerCase();
   const temNumero = /\d/.test(t);
 
-  // "?" / "??" / ponto de interrogação solto → guia próximo passo
+  // "?" único → sugestão de próximo passo; "??" ou mais → usuário confuso, mostra guia
   if (/^[?\s!.]+$/.test(t)) {
+    if (/\?\?/.test(t)) {
+      try {
+        await whatsapp.sendText({ to: telefone, text: buildContextualHint(t) });
+      } catch (err) {
+        log.error("falha buildContextualHint (??)", err, { userId: user.id });
+      }
+      return { success: false, userId: user.id, erro: "double_question_hint" };
+    }
     return await handleNextStepSuggestion(user, telefone);
   }
 
