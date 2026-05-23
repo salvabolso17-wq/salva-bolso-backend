@@ -84,16 +84,18 @@ export async function handleSaldoCommand(user: UserRow, telefone: string): Promi
   const mesAtual  = meses[now.getMonth()].charAt(0).toUpperCase() + meses[now.getMonth()].slice(1);
   const pctGasto  = totalRenda > 0 ? Math.round((r.total_geral / totalRenda) * 100) : 0;
   const pctSobrou = totalRenda > 0 ? Math.round((sobrou / totalRenda) * 100) : 0;
-  const alerta    = pctGasto >= 100 ? "🔴" : pctGasto >= 80 ? "🔶" : pctGasto >= 50 ? "🟡" : "💚";
+  const alerta    = sobrou < 0 ? "🔴" : pctGasto >= 80 ? "🔶" : "💚";
+
+  const linhaFinal = sobrou >= 0
+    ? `${alerta} Sobrou *${fmtValor(sobrou)}* · ${pctSobrou}% da renda`
+    : `${alerta} No vermelho: *${fmtValor(Math.abs(sobrou))}* a mais`;
 
   const linhas = [
     `${mesAtual}/${now.getFullYear()}`,
     "",
-    `💰 ${fmtValor(totalRenda)} renda`,
-    `💸 ${fmtValor(r.total_geral)} gastos`,
-    sobrou >= 0
-      ? `${alerta} Sobrou ${fmtValor(sobrou)} (${pctSobrou}% da renda)`
-      : `🔴 No vermelho: ${fmtValor(Math.abs(sobrou))} a mais`,
+    `💰 Renda: *${fmtValor(totalRenda)}*`,
+    `💸 Gastos: *${fmtValor(r.total_geral)}*`,
+    linhaFinal,
   ];
 
   try {
