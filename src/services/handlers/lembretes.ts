@@ -270,60 +270,54 @@ export async function listarHandler(user: UserRow, telefone: string): Promise<Pr
       return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "lembrete_listar_em_dia" } };
     }
 
-    // Agrupa pendentes por urgência
-    const atrasadas: LembreteRow[] = [];
-    const hoje:      LembreteRow[] = [];
-    const semana:    LembreteRow[] = [];
-    const depois:    LembreteRow[] = [];
-    for (const l of pendentes) {
-      const d = diasAteVencimento(l.proxima_data);
-      if (d < 0)       atrasadas.push(l);
-      else if (d === 0) hoje.push(l);
-      else if (d <= 7)  semana.push(l);
-      else              depois.push(l);
-    }
+    const now        = new Date();
+    const anoAtual   = now.getFullYear();
+    const mesAtual   = now.getMonth();
+    const anoProx    = mesAtual === 11 ? anoAtual + 1 : anoAtual;
+    const mesProxNum = (mesAtual + 1) % 12;
 
     const mesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
                      "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-    const now        = new Date();
-    const mesAtual   = mesNome[now.getMonth()];
-    const mesProximo = mesNome[(now.getMonth() + 1) % 12];
+    const mesAtualNome = mesNome[mesAtual];
+    const mesProxNome  = mesNome[mesProxNum];
 
-    const totalPagar = pendentes.reduce((s, l) => s + Number(l.valor), 0);
-    const totalPago  = pagosMes.reduce((s, l) => s + Number(l.valor), 0);
+    const pendentesDoMes  = pendentes.filter(l => {
+      const d = new Date(l.proxima_data);
+      return d.getFullYear() === anoAtual && d.getMonth() === mesAtual;
+    });
+    const pendentesProximo = pendentes.filter(l => {
+      const d = new Date(l.proxima_data);
+      return d.getFullYear() === anoProx && d.getMonth() === mesProxNum;
+    });
 
-    // Total fixas próximo mês: deduplicado por título
-    const fixasUnicas = new Map<string, number>();
-    for (const l of [...pagosMes, ...pendentes]) {
-      if (l.fixa && !fixasUnicas.has(l.titulo.toLowerCase())) {
-        fixasUnicas.set(l.titulo.toLowerCase(), Number(l.valor));
-      }
-    }
-    const totalProximo = [...fixasUnicas.values()].reduce((s, v) => s + v, 0);
-    const renda = Number(user.renda ?? 0);
-    const pctProximo = renda > 0 ? Math.round((totalProximo / renda) * 100) : null;
+    const totalPago    = pagosMes.reduce((s, l) => s + Number(l.valor), 0);
+    const totalDoMes   = pendentesDoMes.reduce((s, l) => s + Number(l.valor), 0);
+    const totalProximo = pendentesProximo.reduce((s, l) => s + Number(l.valor), 0);
+    const renda        = Number(user.renda ?? 0);
+    const pctProximo   = renda > 0 ? Math.round((totalProximo / renda) * 100) : null;
 
-    const linhas: string[] = [`📋 Suas contas — ${mesAtual}`, ""];
+    const linhas: string[] = [`📋 Suas contas — ${mesAtualNome}`, ""];
 
+    // Seção 1: Já pagas
     if (pagosMes.length > 0) {
       linhas.push(`✅ Já pagas: ${fmtValorBR(totalPago)}`);
       for (const l of pagosMes) linhas.push(`• ${capitalizeFirst(l.titulo)} ${fmtValorBR(Number(l.valor))}`);
       linhas.push("");
     }
 
-    if (pendentes.length > 0) {
-      linhas.push(`⏳ A pagar: ${fmtValorBR(totalPagar)}`);
-      for (const l of [...atrasadas, ...hoje, ...semana, ...depois]) {
-        linhas.push(linhaItemLembrete(l));
-      }
+    // Seção 2: Pendentes do mês atual
+    if (pendentesDoMes.length > 0) {
+      linhas.push(`⏳ A pagar este mês: ${fmtValorBR(totalDoMes)}`);
+      for (const l of pendentesDoMes) linhas.push(linhaItemLembrete(l));
       linhas.push("");
     }
 
-    if (totalProximo > 0) {
+    // Seção 3: Próximo mês
+    if (pendentesProximo.length > 0) {
       linhas.push("──────────");
-      linhas.push(`📅 ${mesProximo}`);
-      linhas.push(`Fixas: ${fmtValorBR(totalProximo)}`);
-      if (pctProximo !== null) linhas.push(`💡 ${pctProximo}% da sua renda comprometida`);
+      linhas.push(`📅 Próximas de ${mesProxNome}`);
+      for (const l of pendentesProximo) linhas.push(`• ${capitalizeFirst(l.titulo)} ${fmtValorBR(Number(l.valor))}`);
+      linhas.push(`Total: ${fmtValorBR(totalProximo)}${pctProximo !== null ? ` · ${pctProximo}% da renda` : ""}`);
     }
 
     await send(telefone, linhas.join("\n"));
