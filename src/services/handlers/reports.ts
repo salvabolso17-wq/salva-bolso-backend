@@ -81,19 +81,18 @@ export async function handleSaldoCommand(user: UserRow, telefone: string): Promi
     return { success: false, userId: user.id, erro: "Aguardando renda" };
   }
 
-  const pct     = totalRenda > 0 ? (r.total_geral / totalRenda) * 100 : 0;
-  const filled  = Math.min(Math.round(pct / 10), 10);
-  const barra   = "▓".repeat(filled) + "░".repeat(10 - filled);
-  const alerta  = pct >= 100 ? "🔴" : pct >= 80 ? "🔶" : pct >= 50 ? "🟡" : "🟢";
+  const mesAtual  = meses[now.getMonth()].charAt(0).toUpperCase() + meses[now.getMonth()].slice(1);
+  const pctGasto  = totalRenda > 0 ? Math.round((r.total_geral / totalRenda) * 100) : 0;
+  const pctSobrou = totalRenda > 0 ? Math.round((sobrou / totalRenda) * 100) : 0;
+  const alerta    = pctGasto >= 100 ? "🔴" : pctGasto >= 80 ? "🔶" : pctGasto >= 50 ? "🟡" : "💚";
 
   const linhas = [
-    `${meses[now.getMonth()].charAt(0).toUpperCase() + meses[now.getMonth()].slice(1)}/${now.getFullYear()}`,
+    `${mesAtual}/${now.getFullYear()}`,
     "",
     `💰 ${fmtValor(totalRenda)} renda`,
     `💸 ${fmtValor(r.total_geral)} gastos`,
-    `${barra} ${alerta}`,
     sobrou >= 0
-      ? `💚 Sobrou ${fmtValor(sobrou)}`
+      ? `${alerta} Sobrou ${fmtValor(sobrou)} (${pctSobrou}% da renda)`
       : `🔴 No vermelho: ${fmtValor(Math.abs(sobrou))} a mais`,
   ];
 
