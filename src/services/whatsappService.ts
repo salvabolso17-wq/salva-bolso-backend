@@ -763,7 +763,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
     // Detector de "desfazer" pós-pagamento — silent fallthrough se não match
     if (pending.action === "pagamento_recente" && pending.step === "aguardando_desfazer") {
-      if (/^(n[ãa]o|nao|errei|espera|calma|opa|pera[ií]+|desfaz|desfazer|n[ãa]o\s+era|n[ãa]o\s+foi|ainda\s+n[ãa]o|t[ôo]\s+errado|t[áa]\s+errado|cancela\s+isso|volta)\b/i.test(textoTrim)) {
+      const _negouPagamento =
+        /^(n[ãa]o|nao|errei|espera|calma|opa|pera[ií]+|desfaz|desfazer|n[ãa]o\s+era|n[ãa]o\s+foi|ainda\s+n[ãa]o|t[ôo]\s+errado|t[áa]\s+errado|cancela\s+isso|volta)\b/i.test(textoTrim)
+        || /n[ãa]o\s+(paguei|pago|quitei|era|foi)/i.test(textoTrim)
+        || /^corrigir/i.test(textoTrim)
+        || /\b(engano|erro|errei|equivoc)\b/i.test(textoTrim);
+
+      if (_negouPagamento) {
         const data = pending.tx_ids as { titulo: string; valor: number };
         await pool.query(
           `UPDATE pending_actions
