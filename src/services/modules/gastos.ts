@@ -104,7 +104,17 @@ export async function resumoMesAtual(userId: number): Promise<ResumoMes> {
     [userId]
   );
   const rendaRaw = userRes.rows[0]?.renda;
-  const rendaNum = rendaRaw != null ? Number(rendaRaw) : 0;
+  let rendaNum = rendaRaw != null ? Number(rendaRaw) : 0;
+  if (rendaNum === 0) {
+    const entRes = await pool.query<{ total: string }>(
+      `SELECT COALESCE(SUM(valor), 0) AS total FROM transactions
+       WHERE user_id = $1 AND tipo = 'entrada'
+         AND date_trunc('month', criado_em AT TIME ZONE 'America/Sao_Paulo') =
+             date_trunc('month', NOW() AT TIME ZONE 'America/Sao_Paulo')`,
+      [userId],
+    );
+    rendaNum = Number(entRes.rows[0].total);
+  }
   const renda: number | null = rendaNum > 0 ? rendaNum : null;
 
   return {

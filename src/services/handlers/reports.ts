@@ -52,16 +52,11 @@ export async function handleSaldoCommand(user: UserRow, telefone: string): Promi
 
   // Renda ausente → mostra gastos parciais e captura renda contextualmente
   if (totalRenda === 0) {
-    const linhasParcial = [`Gastos de ${meses[now.getMonth()]}/${now.getFullYear()}`, ""];
-    if (r.porCategoriaDiaADia.length === 0 && r.fixas.length === 0) {
-      linhasParcial.push("Nenhum gasto registrado este mês.");
-    } else {
-      for (const cat of r.porCategoriaDiaADia) {
-        linhasParcial.push(`${cat.categoria}: ${fmtValor(cat.total)}`);
-      }
-      linhasParcial.push("", `Total: ${fmtValor(r.total_geral)}`);
-    }
-    linhasParcial.push("", "Quanto você recebe por mês?", "", "Ex:", "• 3000", "• 4500 salário + 500 freelance");
+    const linhasParcial = [
+      "Para ver o saldo completo, informe sua renda:",
+      "",
+      "Ex: *3000* ou *4500 salário + 500 freelance*",
+    ];
 
     await pool.query(
       `INSERT INTO pending_actions (user_id, action, step, tx_ids)
