@@ -42,17 +42,10 @@ const DESAFIOS: Record<string, string[]> = {
 export async function handleSaldoCommand(user: UserRow, telefone: string): Promise<ProcessResult> {
   log.webhook("comando saldo", { userId: user.id });
 
-  const now       = new Date();
-  const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const fimMes    = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-
-  const metrics = await fetchPeriodMetrics(user.id, inicioMes, fimMes);
-
-  // Renda total = renda fixa cadastrada + renda extra cadastrada + entradas do mês
-  const rendaFixa  = Number(user.renda      ?? 0);
-  const rendaExtra = Number(user.renda_extra ?? 0);
-  const totalRenda = rendaFixa + rendaExtra + metrics.total_entradas;
-  const sobrou     = totalRenda - metrics.total_saidas;
+  const now        = new Date();
+  const r          = await resumoMesAtual(user.id);
+  const totalRenda = r.renda ?? 0;
+  const sobrou     = totalRenda - r.total_geral;
 
   const meses = ["janeiro","fevereiro","março","abril","maio","junho",
                  "julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -60,13 +53,13 @@ export async function handleSaldoCommand(user: UserRow, telefone: string): Promi
   // Renda ausente → mostra gastos parciais e captura renda contextualmente
   if (totalRenda === 0) {
     const linhasParcial = [`Gastos de ${meses[now.getMonth()]}/${now.getFullYear()}`, ""];
-    if (metrics.gastos_por_categoria.length === 0) {
+    if (r.porCategoriaDiaADia.length === 0 && r.fixas.length === 0) {
       linhasParcial.push("Nenhum gasto registrado este mês.");
     } else {
-      for (const cat of metrics.gastos_por_categoria) {
+      for (const cat of r.porCategoriaDiaADia) {
         linhasParcial.push(`${cat.categoria}: ${fmtValor(cat.total)}`);
       }
-      linhasParcial.push("", `Total: ${fmtValor(metrics.total_saidas)}`);
+      linhasParcial.push("", `Total: ${fmtValor(r.total_geral)}`);
     }
     linhasParcial.push("", "Quanto você recebe por mês?", "", "Ex:", "• 3000", "• 4500 salário + 500 freelance");
 
@@ -92,7 +85,7 @@ export async function handleSaldoCommand(user: UserRow, telefone: string): Promi
     `Saldo de ${meses[now.getMonth()]}/${now.getFullYear()}`,
     "",
     `Renda: ${fmtValor(totalRenda)}`,
-    `Gastos: ${fmtValor(metrics.total_saidas)}`,
+    `Gastos: ${fmtValor(r.total_geral)}`,
     sobrou >= 0
       ? `💚 Sobrou: ${fmtValor(sobrou)}`
       : `🔴 No vermelho: ${fmtValor(Math.abs(sobrou))} a mais do que entrou`,
@@ -100,7 +93,7 @@ export async function handleSaldoCommand(user: UserRow, telefone: string): Promi
 
   try {
     await whatsapp.sendText({ to: telefone, text: linhas.join("\n") });
-    log.whatsapp("saldo enviado", { to: telefone, totalRenda, gastos: metrics.total_saidas, sobrou });
+    log.whatsapp("saldo enviado", { to: telefone, totalRenda, gastos: r.total_geral, sobrou });
   } catch (err) {
     log.error("falha ao enviar saldo", err, { to: telefone });
   }
@@ -110,7 +103,7 @@ export async function handleSaldoCommand(user: UserRow, telefone: string): Promi
     success:      true,
     userId:       user.id,
     transacao:    {},
-    interpretado: { comando: "saldo", totalRenda, gastos: metrics.total_saidas, sobrou },
+    interpretado: { comando: "saldo", totalRenda, gastos: r.total_geral, sobrou },
   };
 }
 
