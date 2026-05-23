@@ -283,24 +283,48 @@ export async function listarHandler(user: UserRow, telefone: string): Promise<Pr
       else              depois.push(l);
     }
 
-    const linhas: string[] = ["📋 Suas contas", ""];
-    const pushGrupo = (titulo: string, items: LembreteRow[]) => {
-      if (items.length === 0) return;
-      linhas.push(titulo);
-      for (const l of items) linhas.push(linhaItemLembrete(l));
-      linhas.push("");
-    };
-    pushGrupo("🚨 Atrasadas",   atrasadas);
-    pushGrupo("⏰ Vence hoje",   hoje);
-    pushGrupo("📅 Essa semana", semana);
-    pushGrupo("🗓️ Próximas",     depois);
+    const mesNome = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                     "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+    const now        = new Date();
+    const mesAtual   = mesNome[now.getMonth()];
+    const mesProximo = mesNome[(now.getMonth() + 1) % 12];
 
     const totalPagar = pendentes.reduce((s, l) => s + Number(l.valor), 0);
     const totalPago  = pagosMes.reduce((s, l) => s + Number(l.valor), 0);
 
-    linhas.push("──────────");
-    linhas.push(`💰 A pagar: ${fmtValorBR(totalPagar)}`);
-    if (totalPago > 0) linhas.push(`✅ Já pago esse mês: ${fmtValorBR(totalPago)}`);
+    // Total fixas próximo mês: deduplicado por título
+    const fixasUnicas = new Map<string, number>();
+    for (const l of [...pagosMes, ...pendentes]) {
+      if (l.fixa && !fixasUnicas.has(l.titulo.toLowerCase())) {
+        fixasUnicas.set(l.titulo.toLowerCase(), Number(l.valor));
+      }
+    }
+    const totalProximo = [...fixasUnicas.values()].reduce((s, v) => s + v, 0);
+    const renda = Number(user.renda ?? 0);
+    const pctProximo = renda > 0 ? Math.round((totalProximo / renda) * 100) : null;
+
+    const linhas: string[] = [`📋 Suas contas — ${mesAtual}`, ""];
+
+    if (pagosMes.length > 0) {
+      linhas.push(`✅ Já pagas: ${fmtValorBR(totalPago)}`);
+      for (const l of pagosMes) linhas.push(`• ${capitalizeFirst(l.titulo)} ${fmtValorBR(Number(l.valor))}`);
+      linhas.push("");
+    }
+
+    if (pendentes.length > 0) {
+      linhas.push(`⏳ A pagar: ${fmtValorBR(totalPagar)}`);
+      for (const l of [...atrasadas, ...hoje, ...semana, ...depois]) {
+        linhas.push(linhaItemLembrete(l));
+      }
+      linhas.push("");
+    }
+
+    if (totalProximo > 0) {
+      linhas.push("──────────");
+      linhas.push(`📅 ${mesProximo}`);
+      linhas.push(`Fixas: ${fmtValorBR(totalProximo)}`);
+      if (pctProximo !== null) linhas.push(`💡 ${pctProximo}% da sua renda comprometida`);
+    }
 
     await send(telefone, linhas.join("\n"));
     return { success: true, userId: user.id, transacao: {}, interpretado: { comando: "lembrete_listar" } };
