@@ -637,7 +637,7 @@ function extractNameFromQuote(q: string): string | null {
 export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, texto: string, quotedText?: string): Promise<ProcessResult> {
   try {
     // Detecta negação: "Não paguei X" → oferece corrigir, NÃO marca pago
-    if (/^\s*(n[ãa]o|nao|n)\s+(paguei|pago|t[áa]\s+pago|quitei|quitada|paga)\b/i.test(texto)) {
+    if (/(n[ãa]o|nao)\s+(paguei|pago|t[áa]\s+pago|quitei|quitada|paga)\b/i.test(texto)) {
       return await ofertarCorrecaoNegacao(user, telefone, texto);
     }
     const nomeQuoted = quotedText ? extractNameFromQuote(quotedText) : null;
