@@ -112,25 +112,8 @@ export async function criarLembrete(
       [userId, tituloNorm],
     );
     if (existing.rows[0]) {
-      const ex = existing.rows[0];
-      const now = new Date();
-      const exData = new Date(ex.proxima_data);
-      const mesesValidos = [now.getUTCMonth(), (now.getUTCMonth() + 1) % 12];
-      const mesEx = exData.getUTCMonth();
-
-      if (!mesesValidos.includes(mesEx) || exData.getUTCFullYear() > now.getUTCFullYear()) {
-        const mesCorreto = now.getUTCMonth() + 1;
-        const anoCorreto = now.getUTCFullYear();
-        const dataCorreta = `${anoCorreto}-${String(mesCorreto).padStart(2,"0")}-${String(Math.min(dia, 28)).padStart(2,"0")}`;
-        await pool.query(
-          `UPDATE lembretes SET proxima_data = $1, valor = $2, atualizado_em = NOW() WHERE id = $3`,
-          [dataCorreta, valor, ex.id]
-        );
-        ex.proxima_data = dataCorreta;
-        ex.valor = String(valor);
-      }
-      log.db("criarLembrete dedup fixa (conflict) — retornando existente", { userId, lembreteId: ex.id, titulo: tituloNorm });
-      return ex;
+      log.db("criarLembrete dedup fixa (conflict) — retornando existente", { userId, lembreteId: existing.rows[0].id, titulo: tituloNorm });
+      return existing.rows[0];
     }
   }
   log.db("criarLembrete INSERT ok", { userId, lembreteId: r.rows[0].id, titulo: tituloNorm });
