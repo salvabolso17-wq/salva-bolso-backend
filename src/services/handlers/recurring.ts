@@ -672,6 +672,20 @@ export async function handlePagarRecorrenteAI(user: UserRow, telefone: string, t
       return { success: false, userId: user.id, erro: "já registrado este mês" };
     }
 
+    const lembreteJaPago = await pool.query(
+      `SELECT id FROM lembretes
+       WHERE user_id = $1 AND fixa = TRUE
+         AND LOWER(titulo) ILIKE LOWER($2)
+         AND status = 'pago'
+         AND proxima_data >= date_trunc('month', NOW())
+         AND proxima_data < date_trunc('month', NOW()) + INTERVAL '1 month'`,
+      [user.id, `%${row.titulo}%`]
+    );
+    if (lembreteJaPago.rows.length > 0) {
+      await whatsapp.sendText({ to: telefone, text: `*${capitalizeFirst(row.titulo)}* já está marcada como paga esse mês. 👍` });
+      return { success: false, userId: user.id, erro: "lembrete já pago este mês" };
+    }
+
     // Marca pendente → pago e cria o próximo mês (lógica em modules/lembretes.ts)
     const { marcarPago } = await import("../modules/lembretes");
     const mp = await marcarPago(user.id, row.id);
