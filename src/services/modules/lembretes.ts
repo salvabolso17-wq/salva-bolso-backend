@@ -114,24 +114,24 @@ export async function criarLembrete(
     if (existing.rows[0]) {
       const ex = existing.rows[0];
       try {
-        const now    = new Date();
-        const exData = new Date(ex.proxima_data);
+        const now     = new Date();
+        const exData  = new Date(ex.proxima_data);
         const mesAtualNum = now.getUTCMonth() + 1;
         const anoAtualNum = now.getUTCFullYear();
-        const mesEx  = exData.getUTCMonth() + 1;
-        const anoEx  = exData.getUTCFullYear();
-        const fora   = anoEx > anoAtualNum || (anoEx === anoAtualNum && mesEx > mesAtualNum + 1);
+        const mesEx   = exData.getUTCMonth() + 1;
+        const anoEx   = exData.getUTCFullYear();
+        const fora    = anoEx > anoAtualNum || (anoEx === anoAtualNum && mesEx > mesAtualNum + 1);
         if (fora) {
           const dataCorreta = `${anoAtualNum}-${String(mesAtualNum).padStart(2,"0")}-${String(Math.min(dia, 28)).padStart(2,"0")}`;
-          await pool.query(
-            `UPDATE lembretes SET proxima_data = $1, valor = $2, atualizado_em = NOW() WHERE id = $3`,
+          const updated = await pool.query<LembreteRow>(
+            `UPDATE lembretes SET proxima_data = $1, valor = $2, atualizado_em = NOW()
+             WHERE id = $3 RETURNING *`,
             [dataCorreta, valor, ex.id]
           );
-          ex.proxima_data = dataCorreta as unknown as Date;
-          ex.valor        = String(valor) as unknown as number;
+          if (updated.rows[0]) return updated.rows[0];
         }
       } catch (err) {
-        log.error("criarLembrete dedup fix-data falhou — retornando existente sem alteração", err, { userId });
+        log.error("criarLembrete dedup fix-data falhou", err, { userId });
       }
       log.db("criarLembrete dedup fixa (conflict) — retornando existente", { userId, lembreteId: ex.id, titulo: tituloNorm });
       return ex;
