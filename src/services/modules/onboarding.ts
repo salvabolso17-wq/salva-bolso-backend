@@ -91,6 +91,17 @@ export async function handleOnboardingFixas(user: UserRow, telefone: string, tex
   const textoTrim = texto.trim();
   const skipFixas = /^(n[aã]o|pula|pular|depois|n[aã]o\s+quero|ignore|ignora|skip|nada)[\?!.]*$/i.test(textoTrim);
 
+  const isAfirmativo = /^(sim|s|tenho|tenho\s+sim|tenho\s+alguns?|tenho\s+v[aá]rias?)[\?!.]*$/i.test(textoTrim);
+  if (isAfirmativo) {
+    try {
+      await whatsapp.sendText({
+        to:   telefone,
+        text: "Ótimo! Me manda uma por vez 😊\n\n💡 _Ex: aluguel 1200_\n_ou internet 100_\n\nQuando terminar, manda 'pular'.",
+      });
+    } catch (err) { log.error("handleOnboardingFixas afirmativo send fail", err, { to: telefone }); }
+    return { success: false, userId: user.id, erro: "onboarding fixas aguardando entrada" };
+  }
+
   await pool.query(`DELETE FROM pending_actions WHERE user_id = $1`, [user.id]);
 
   if (skipFixas) {
