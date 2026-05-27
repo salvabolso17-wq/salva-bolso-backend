@@ -1,8 +1,7 @@
 import * as os from "os";
 import { log } from "../utils/logger";
 
-const RETRY_ATTEMPTS = 15;
-const RETRY_DELAY_MS = 10000;
+const RETRY_DELAY_MS = 10_000;
 
 // Retorna o IP do container na rede interna do projeto (10.0.x.x preferido)
 function getSelfIP(): string | null {
@@ -60,17 +59,15 @@ export async function selfRegisterWebhook(): Promise<void> {
   const webhookUrl = `http://${ip}:${port}/webhooks/whatsapp?provider=evolution`;
   log.webhook("self-register: iniciando", { ip, port, webhookUrl });
 
-  for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
+  let attempt = 0;
+  while (true) {
+    attempt++;
     const ok = await callWebhookSet(webhookUrl);
     if (ok) {
       log.webhook("self-register: webhook registrado", { webhookUrl, attempt });
       return;
     }
-    if (attempt < RETRY_ATTEMPTS) {
-      log.webhook("self-register: aguardando Evolution ficar disponivel", { attempt, retryMs: RETRY_DELAY_MS });
-      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-    }
+    log.webhook("self-register: aguardando Evolution ficar disponivel", { attempt, retryMs: RETRY_DELAY_MS });
+    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
   }
-
-  log.error("self-register: todas as tentativas falharam", undefined, { webhookUrl, attempts: RETRY_ATTEMPTS });
 }
