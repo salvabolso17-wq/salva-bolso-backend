@@ -44,24 +44,21 @@ function currentMonthStart(): Date {
 // Roda 1x/dia às 19h BRT. Após o marco 14, salva ultimo_nudge_dias=14 e fica em silêncio
 // até o usuário registrar algo (reset feito por resetInactivityNudge no insert).
 const mensagensRetorno: Record<number, string> = {
-  1:  "Oi 👋\n\nFaz 1 dia sem gasto. Já anotou algo hoje?\nÉ só me contar 🙂",
   3:  "3 dias sem dar notícia 👋\n\nManda o que gastou que eu organizo:\n🛒 _50 mercado_ • 🚗 _35 uber_",
   7:  "⚠️ 1 semana sem registrar.\nEsse é o jeito mais rápido de perder o controle de novo.\nManda o último gasto que você lembra que eu te recoloco no eixo.",
   14: "Vou parar de te chamar por aqui.\n\nQuando quiser voltar, é só mandar um gasto. Tô aqui 🤝",
 };
 
 const mensagensPrimeiroUso: Record<number, string> = {
-  1:  "Oi 👋\n\nVocê se cadastrou ontem mas ainda não testou.\n\nÉ super rápido — manda um gasto:\n🛒 _50 mercado_ • 🚗 _35 uber_",
   3:  "Seu teste grátis tá pela metade ⏰\n\nManda um gasto pra ver acontecendo antes que acabe:\n🛒 _50 mercado_ • 🚗 _35 uber_",
   7:  "⚠️ 1 semana sem usar.\nOlha, se não funcionar pra você é só não responder. Mas pelo menos testa 1 vez.\n\"gastei X no Y\" — é só isso.",
   14: "Vou parar de te chamar.\n\nSe mudar de ideia, manda um gasto. Tô aqui 🤝",
 };
 
-function calcMarco(dias: number): 1 | 3 | 7 | 14 | null {
+function calcMarco(dias: number): 3 | 7 | 14 | null {
   if (dias >= 14) return 14;
   if (dias >= 7)  return 7;
   if (dias >= 3)  return 3;
-  if (dias >= 1)  return 1;
   return null;
 }
 
@@ -113,6 +110,20 @@ export async function sendInactivityNotifications(): Promise<{ elegiveis: number
       }
       if (user.ultimo_nudge_dias === marco) {
         console.log(`[NUDGE] user=${user.id} dias=${dias} marco=${marco} fluxo=${fluxo} status=skip-mesmo-marco`);
+        continue;
+      }
+
+      // Cooldown cruzado: não manda nudge se outro proativo foi enviado nos últimos 2 dias
+      const cooldown = await pool.query(
+        `SELECT 1 FROM sent_insights
+         WHERE user_id = $1
+           AND categoria IN ('trial_reminder', 'notif_fim_mes', 'notif_fechamento', 'notif_novo_mes', 'notif_lembrete_dia1')
+           AND criado_em >= NOW() - INTERVAL '2 days'
+         LIMIT 1`,
+        [user.id]
+      );
+      if (cooldown.rows.length > 0) {
+        console.log(`[NUDGE] user=${user.id} dias=${dias} marco=${marco} status=skip-cooldown`);
         continue;
       }
 
