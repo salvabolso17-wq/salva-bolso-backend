@@ -1,8 +1,8 @@
 import * as os from "os";
 import { log } from "../utils/logger";
 
-const RETRY_ATTEMPTS = 5;
-const RETRY_DELAY_MS = 4000;
+const RETRY_ATTEMPTS = 15;
+const RETRY_DELAY_MS = 10000;
 
 // Retorna o IP do container na rede interna do projeto (10.0.x.x preferido)
 function getSelfIP(): string | null {
