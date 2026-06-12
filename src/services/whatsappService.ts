@@ -118,7 +118,7 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   if (/^[?\s!.]+$/.test(t)) {
     if (/\?\?/.test(t)) {
       try {
-        await whatsapp.sendText({ to: telefone, text: buildContextualHint(t) });
+        await whatsapp.sendText({ to: telefone, text: buildContextualHint(t, getSession(user.id)) });
       } catch (err) {
         log.error("falha buildContextualHint (??)", err, { userId: user.id });
       }
@@ -1044,7 +1044,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
         : Infinity;
       if (menuAge > 3 * 60 * 1000) {
         try {
-          await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText() });
+          await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText(getSession(user.id)) });
           recordAction(user.id, "showed_menu");
           log.whatsapp("conv engine: menu para usuario confuso", { to: message.telefone, userId: user.id });
         } catch (err) {
@@ -1181,7 +1181,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // ── Curiosidade sobre funcionalidades (linguagem natural) ────────────────
   if (isCuriosityPhrase(message.texto.trim())) {
     try {
-      await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText() });
+      await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText(getSession(user.id)) });
       recordAction(user.id, "showed_menu");
       log.whatsapp("features menu enviado", { to: message.telefone, userId: user.id });
     } catch (err) {
@@ -1528,7 +1528,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   if (isAmbiguousIntent(message.texto)) {
     await whatsapp.sendText({
       to:   message.telefone,
-      text: buildContextualHint(message.texto),
+      text: buildContextualHint(message.texto, getSession(user.id)),
     });
     return { success: false, userId: user.id, erro: "Mensagem ambígua" };
   }
