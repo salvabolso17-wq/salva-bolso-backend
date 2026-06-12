@@ -57,11 +57,16 @@ export async function generateFallbackReply(texto: string): Promise<string> {
   }
 }
 
-export async function classifyIntentWithAI(texto: string, lastCommand = ""): Promise<BotCommand | null> {
+export async function classifyIntentWithAI(texto: string, lastCommand = "", recentActions: string[] = []): Promise<BotCommand | null> {
   try {
+    const contexto = recentActions.length > 0
+      ? `Ações recentes do usuário: ${recentActions.slice(0, 3).join(", ")}\n`
+      : "";
     const userContent = lastCommand
-      ? `Último comando: ${lastCommand}\nMensagem: ${texto}`
-      : texto;
+      ? `${contexto}Último comando: ${lastCommand}\nMensagem: ${texto}`
+      : contexto
+        ? `${contexto}Mensagem: ${texto}`
+        : texto;
 
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",

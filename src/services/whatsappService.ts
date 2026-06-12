@@ -1145,7 +1145,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // ── AI-first: Claude classifica mensagens sem número ─────────────────────
   if (!/\d/.test(message.texto)) {
     try {
-      const _aiCmd = await classifyIntentWithAI(message.texto, getSession(user.id)?.lastCommand ?? "");
+      const _aiCmd = await classifyIntentWithAI(message.texto, getSession(user.id)?.lastCommand ?? "", getSession(user.id)?.recentActions ?? []);
       if (_aiCmd) {
         switch (_aiCmd) {
           case "saldo":       return await handleSaldoCommand(user, message.telefone);
@@ -1641,7 +1641,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   if (!parsed) {
     try {
-      const aiCommand = await classifyIntentWithAI(message.texto, getSession(user.id)?.lastCommand ?? "");
+      const aiCommand = await classifyIntentWithAI(message.texto, getSession(user.id)?.lastCommand ?? "", getSession(user.id)?.recentActions ?? []);
       if (aiCommand) {
         switch (aiCommand) {
           case "saldo":      return await handleSaldoCommand(user, message.telefone);
