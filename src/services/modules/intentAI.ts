@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { log } from "../../utils/logger";
+import { isCuriosityPhrase } from "./menuBuilder";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -54,6 +55,24 @@ export async function generateFallbackReply(texto: string): Promise<string> {
   } catch (err) {
     log.error("generateFallbackReply falhou", err);
     return "Não entendi. Pode mandar um gasto (ex: 50 mercado) ou pedir o resumo do mês.";
+  }
+}
+
+export async function isCuriosityPhraseAI(texto: string): Promise<boolean> {
+  try {
+    const response = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 5,
+      system: "Você decide se uma mensagem é uma pergunta de curiosidade sobre o que o assistente financeiro Salva Bolso pode fazer — sem ser um comando direto (saldo, resumo, metas, etc) nem registro de gasto. Responda apenas: sim ou nao.",
+      messages: [{ role: "user", content: texto }],
+    });
+    const text = response.content[0]?.type === "text"
+      ? response.content[0].text.trim().toLowerCase()
+      : "";
+    return text.startsWith("sim");
+  } catch (err) {
+    log.error("isCuriosityPhraseAI falhou", err);
+    return isCuriosityPhrase(texto);
   }
 }
 

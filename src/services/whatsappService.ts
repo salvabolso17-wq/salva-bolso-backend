@@ -9,11 +9,11 @@ import type { UserRow, ProcessResult } from "./types";
 
 // ── Modules ───────────────────────────────────────────────────────────────────
 import { isSubscriptionActive, isBlockedFreemium, checkAndSendExpirationNotice } from "./modules/premiumGuard";
-import { isCuriosityPhrase, buildFeaturesMenuText, isKnownCommand, isAmbiguousIntent, buildContextualHint, handleAjudaCommand, handleSpendingConcern, handleNextStepSuggestion } from "./modules/menuBuilder";
+import { buildFeaturesMenuText, isKnownCommand, isAmbiguousIntent, buildContextualHint, handleAjudaCommand, handleSpendingConcern, handleNextStepSuggestion } from "./modules/menuBuilder";
 import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente, matchesKnownService } from "./modules/recurringDetection";
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip, checkAndSendDiscoveryMessage, checkAndAlertLimite } from "./modules/insightsEngine";
 import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas, handleOnboardingFixaDia, handleOnboardingFixaStatusVencida } from "./modules/onboarding";
-import { classifyIntentWithAI, generateFallbackReply } from "./modules/intentAI";
+import { classifyIntentWithAI, generateFallbackReply, isCuriosityPhraseAI } from "./modules/intentAI";
 import { resetInactivityNudge } from "./notificationService";
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -1179,7 +1179,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   }
 
   // ── Curiosidade sobre funcionalidades (linguagem natural) ────────────────
-  if (isCuriosityPhrase(message.texto.trim())) {
+  if (await isCuriosityPhraseAI(message.texto.trim())) {
     try {
       await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText(getSession(user.id)) });
       recordAction(user.id, "showed_menu");
