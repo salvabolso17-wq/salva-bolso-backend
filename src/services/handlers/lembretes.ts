@@ -613,6 +613,17 @@ export async function tryHandleLembretes(user: UserRow, telefone: string, texto:
       return null;
     }
 
+    if (/\b(paguei|quitei)\b/i.test(t) && /\d/.test(t)) {
+      const rows = await pool.query<{ titulo: string }>(
+        "SELECT titulo FROM lembretes WHERE user_id = $1 AND ativo = true",
+        [user.id]
+      );
+      const temMatch = rows.rows.some(l =>
+        t.includes(l.titulo.toLowerCase())
+      );
+      if (!temMatch) return null;
+    }
+
     const intencao = await interpretarLembreteComContexto(user.id, texto);
     log.webhook("lembrete: NLU resultado", { userId: user.id, acao: intencao.acao, titulo: intencao.dados.titulo, conf: intencao.dados.confianca, lembreteId: intencao.lembreteId });
     if (intencao.acao === null) return null;
