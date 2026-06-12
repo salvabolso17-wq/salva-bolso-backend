@@ -121,7 +121,7 @@ export async function handleNextStepSuggestion(user: UserRow, telefone: string):
   );
   const txCountDb = Number(countRow.rows[0].count);
 
-  const session = getSession(user.id) ?? initSession(user.id);
+  const session = getSession(user.id) ?? await initSession(user.id);
   const text    = getContextualNextStep(session, txCountDb);
 
   try {

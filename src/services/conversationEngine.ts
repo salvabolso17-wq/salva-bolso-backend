@@ -1,5 +1,6 @@
 // Conversation Engine — Intent + Context layers (additive, non-destructive)
 // Sits on top of the existing whatsappService pipeline without replacing it.
+import pool from "../db/client";
 
 // ── Intent types ──────────────────────────────────────────────────────────────
 
@@ -75,9 +76,27 @@ function pruneExpired(): void {
   }
 }
 
-export function initSession(userId: number): SessionCtx {
+export async function initSession(userId: number): Promise<SessionCtx> {
   const existing = SESSIONS.get(userId);
   if (existing && !isExpired(existing)) return existing;
+
+  try {
+    const r = await pool.query<{ data: SessionCtx }>(
+      `SELECT data FROM user_sessions WHERE user_id = $1 AND expira_em > NOW()`,
+      [userId]
+    );
+    if (r.rows[0]) {
+      const s = r.rows[0].data as SessionCtx;
+      s.updatedAt    = new Date(s.updatedAt);
+      s.sessionStart = new Date(s.sessionStart);
+      if (s.seenMenuAt)    s.seenMenuAt    = new Date(s.seenMenuAt);
+      if (s.lastInsightAt) s.lastInsightAt = new Date(s.lastInsightAt);
+      SESSIONS.set(userId, s);
+      return s;
+    }
+  } catch (err) {
+    console.error("[conversationEngine] initSession: restore DB falhou", err);
+  }
 
   const session: SessionCtx = {
     userId,
@@ -95,6 +114,15 @@ export function initSession(userId: number): SessionCtx {
     updatedAt: new Date(),
   };
   SESSIONS.set(userId, session);
+
+  pool.query(
+    `INSERT INTO user_sessions (user_id, data, expira_em)
+     VALUES ($1, $2::jsonb, NOW() + INTERVAL '30 minutes')
+     ON CONFLICT (user_id) DO UPDATE
+       SET data = $2::jsonb, expira_em = NOW() + INTERVAL '30 minutes',
+           atualizado_em = NOW()`,
+    [userId, JSON.stringify(session)]
+  ).catch(err => console.error("[conversationEngine] initSession: upsert falhou", err));
 
   if (SESSIONS.size % 50 === 0) pruneExpired();
 
@@ -120,13 +148,11 @@ export function recordAction(userId: number, action: string): void {
   session.lastAction = action;
   session.updatedAt  = new Date();
 
-  // Keep last 10 unique actions (most recent first, no duplicates)
   session.recentActions = [
     action,
     ...session.recentActions.filter(a => a !== action),
   ].slice(0, 10);
 
-  // Update phase
   switch (action) {
     case "showed_menu":
       session.seenMenuAt = new Date();
@@ -147,6 +173,15 @@ export function recordAction(userId: number, action: string): void {
       session.phase = "querying";
       break;
   }
+
+  pool.query(
+    `INSERT INTO user_sessions (user_id, data, expira_em)
+     VALUES ($1, $2::jsonb, NOW() + INTERVAL '30 minutes')
+     ON CONFLICT (user_id) DO UPDATE
+       SET data = $2::jsonb, expira_em = NOW() + INTERVAL '30 minutes',
+           atualizado_em = NOW()`,
+    [userId, JSON.stringify(session)]
+  ).catch(err => console.error("[conversationEngine] recordAction: upsert falhou", err));
 }
 
 // ── Insight cooldown ──────────────────────────────────────────────────────────

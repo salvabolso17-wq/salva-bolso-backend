@@ -212,6 +212,15 @@ export async function createTables() {
       );
     `);
 
+    await step("CREATE user_sessions", `
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        data          JSONB NOT NULL DEFAULT '{}',
+        expira_em     TIMESTAMP NOT NULL,
+        atualizado_em TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     // Limpeza de duplicatas de lembretes fixas pendentes (mantém o mais recente)
     await step("DEDUP lembretes fixas pendentes", `
       DELETE FROM lembretes WHERE id IN (

@@ -1025,7 +1025,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
 
   // ── Conversation Engine — Intent + Context gates ─────────────────────────
   {
-    const _session = initSession(user.id);
+    const _session = await initSession(user.id);
     const _intent  = classifyIntent(message.texto.trim());
     const _isNew   = !!user.criado_em
       && Date.now() - new Date(user.criado_em).getTime() < 10 * 60 * 1000;
