@@ -129,7 +129,9 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
 
   // "o que é isso?" → explica o bot
   if (!temNumero && /^(que\s+[eéè]\s+isso|o\s+que\s+[eéè]\s+isso)[\?!.]*$/.test(t)) {
-    return await handleAjudaCommand(user, telefone);
+    const reply = await generateCuriosityReply(texto);
+    try { await whatsapp.sendText({ to: telefone, text: reply }); } catch (err) { log.error("falha generateCuriosityReply", err, { userId: user.id }); }
+    return { success: false, userId: user.id, erro: "curiosity_reply" };
   }
 
   // Correção ou deleção por linguagem natural (sem guard !temNumero — captura frases com valor)
@@ -169,7 +171,9 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
     !temNumero &&
     /^(preciso\s+de\s+(ajuda|help|suporte)|me\s+(ajuda|ajude|ensina|ensine)|como\s+(funciona|uso|usar|fa[çc]o)|o\s+que\s+(posso|d[aá]|consigo)\s+(fazer|ver|usar)|n[aã]o\s+sei(\s+o\s+que\s+fazer)?(\s+por\s+onde\s+come[çc]ar)?|o\s+que\s+tem\s+(aqui|nesse\s+bot)|quero\s+(aprender|entender|saber\s+mais))[\?!.]*$/.test(t)
   ) {
-    return await handleAjudaCommand(user, telefone);
+    const reply = await generateCuriosityReply(texto);
+    try { await whatsapp.sendText({ to: telefone, text: reply }); } catch (err) { log.error("falha generateCuriosityReply", err, { userId: user.id }); }
+    return { success: false, userId: user.id, erro: "curiosity_reply" };
   }
 
   // Preocupação com gastos → mostra dado real do mês
