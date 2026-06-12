@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { log } from "../../utils/logger";
-import { isCuriosityPhrase } from "./menuBuilder";
+import { isCuriosityPhrase, buildFeaturesMenuText } from "./menuBuilder";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -73,6 +73,24 @@ export async function isCuriosityPhraseAI(texto: string): Promise<boolean> {
   } catch (err) {
     log.error("isCuriosityPhraseAI falhou", err);
     return isCuriosityPhrase(texto);
+  }
+}
+
+export async function generateCuriosityReply(texto: string): Promise<string> {
+  try {
+    const response = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 120,
+      system: "Você é o Salva Bolso, assistente financeiro no WhatsApp. O usuário está curioso sobre o que você pode fazer. Responda de forma natural, informal e animada em 2 a 3 linhas. Destaque 2 ou 3 funcionalidades mais úteis baseadas na pergunta dele. Não liste tudo. Não use bullets. Termine convidando para começar.",
+      messages: [{ role: "user", content: texto }],
+    });
+    const text = response.content[0]?.type === "text"
+      ? response.content[0].text.trim()
+      : "";
+    return text || buildFeaturesMenuText();
+  } catch (err) {
+    log.error("generateCuriosityReply falhou", err);
+    return buildFeaturesMenuText();
   }
 }
 

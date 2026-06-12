@@ -13,7 +13,7 @@ import { buildFeaturesMenuText, isKnownCommand, isAmbiguousIntent, buildContextu
 import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente, matchesKnownService } from "./modules/recurringDetection";
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip, checkAndSendDiscoveryMessage, checkAndAlertLimite } from "./modules/insightsEngine";
 import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas, handleOnboardingFixaDia, handleOnboardingFixaStatusVencida } from "./modules/onboarding";
-import { classifyIntentWithAI, generateFallbackReply, isCuriosityPhraseAI } from "./modules/intentAI";
+import { classifyIntentWithAI, generateFallbackReply, isCuriosityPhraseAI, generateCuriosityReply } from "./modules/intentAI";
 import { resetInactivityNudge } from "./notificationService";
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -1181,7 +1181,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
   // ── Curiosidade sobre funcionalidades (linguagem natural) ────────────────
   if (await isCuriosityPhraseAI(message.texto.trim())) {
     try {
-      await whatsapp.sendText({ to: message.telefone, text: buildFeaturesMenuText(getSession(user.id)) });
+      await whatsapp.sendText({ to: message.telefone, text: await generateCuriosityReply(message.texto.trim()) });
       recordAction(user.id, "showed_menu");
       log.whatsapp("features menu enviado", { to: message.telefone, userId: user.id });
     } catch (err) {
