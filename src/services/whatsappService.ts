@@ -1233,6 +1233,13 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     setLastCommand(user.id, "saldo");
     return await handleSaldoCommand(user, message.telefone);
   }
+  if (/^saldo\s+banc[aá]rio[\s\d,.R$]+$/i.test(message.texto.trim())) {
+    try {
+      return await handleSaldoCommand(user, message.telefone);
+    } catch (err) {
+      log.error("falha saldo bancario redirect", err, { userId: user.id });
+    }
+  }
   if (/^(resumo|meus?\s+gastos?|gastos?\s+do\s+m[eê]s)[\?!.]*$/i.test(message.texto.trim())) {
     setLastCommand(user.id, "resumo");
     return await handleResumoCommand(user, message.telefone);
