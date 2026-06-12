@@ -1108,7 +1108,7 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     return await handleDetalhadoCommand(user, message.telefone);
   }
 
-  if (/^(zerar?|resetar?|apagar?\s+tudo|come[çc]ar?\s+do\s+zero|limpar?\s+gastos?|zerar?\s+gastos?|zerar?\s+tudo|apagar?\s+gastos?\s+do\s+m[eê]s)[\?!.]*$/i.test(message.texto.trim())) {
+  if (/^(zerar?|resetar?|apagar?\s+tudo|come[çc]ar?\s+do\s+zero|limpar?\s+gastos?|zerar?\s+gastos?|zerar?\s+tudo|apagar?\s+gastos?\s+do\s+m[eê]s|excluir?\s+todos?(\s+os?)?\s+lan[cç]amentos?|excluir?\s+tudo|excluir?\s+gastos?)[\?!.]*$/i.test(message.texto.trim())) {
     try {
       return await handleZerarIniciar(user, message.telefone);
     } catch (err) {
