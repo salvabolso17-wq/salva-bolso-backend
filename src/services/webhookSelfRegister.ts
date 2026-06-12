@@ -1,7 +1,8 @@
 import * as os from "os";
 import { log } from "../utils/logger";
 
-const RETRY_DELAY_MS = 10_000;
+const MAX_ATTEMPTS  = 8;
+const INITIAL_DELAY = 2_000;
 
 // Retorna o IP do container na rede interna do projeto (10.0.x.x preferido)
 function getSelfIP(): string | null {
@@ -37,7 +38,7 @@ async function callWebhookSet(webhookUrl: string): Promise<boolean> {
           events:   ["MESSAGES_UPSERT"],
         },
       }),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(10_000),
     });
     return resp.ok;
   } catch {
@@ -59,15 +60,20 @@ export async function selfRegisterWebhook(): Promise<void> {
   const webhookUrl = `http://${ip}:${port}/webhooks/whatsapp?provider=evolution`;
   log.webhook("self-register: iniciando", { ip, port, webhookUrl });
 
-  let attempt = 0;
-  while (true) {
-    attempt++;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const ok = await callWebhookSet(webhookUrl);
     if (ok) {
       log.webhook("self-register: webhook registrado", { webhookUrl, attempt });
       return;
     }
-    log.webhook("self-register: aguardando Evolution ficar disponivel", { attempt, retryMs: RETRY_DELAY_MS });
-    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+
+    if (attempt === MAX_ATTEMPTS) {
+      log.error("self-register: CRITICO — Evolution nao respondeu apos 8 tentativas, encerrando sem travar", undefined, { webhookUrl, attempt });
+      return;
+    }
+
+    const delayMs = INITIAL_DELAY * Math.pow(2, attempt - 1);
+    log.webhook("self-register: aguardando Evolution ficar disponivel", { attempt, proximaTentativa: attempt + 1, delayMs });
+    await new Promise(r => setTimeout(r, delayMs));
   }
 }
