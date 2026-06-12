@@ -360,6 +360,17 @@ async function tryHandleIntent(user: UserRow, telefone: string, texto: string): 
   const _sessCtx = getSession(user.id);
   const _lastCmd = _sessCtx?.lastCommand ?? "";
 
+  if (
+    /^(sim|s|ok|detalhado|quero\s+ver|ver)[\?!.]*$/i.test(t) &&
+    _lastCmd === "resumo"
+  ) {
+    try {
+      return await handleDetalhadoCommand(user, telefone);
+    } catch (err) {
+      log.error("falha followup resumo→detalhado", err, { userId: user.id });
+    }
+  }
+
   // "quais eu tenho?" / "o que eu tenho?" / "quantos tenho?" → contexto do último comando
   if (
     !temNumero &&
