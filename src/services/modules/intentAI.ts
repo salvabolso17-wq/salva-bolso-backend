@@ -39,6 +39,24 @@ Comandos:
 
 Responda APENAS com o nome do comando. Nada mais.`;
 
+const FALLBACK_SYSTEM = `Você é o Salva Bolso, assistente financeiro no WhatsApp. O usuário mandou uma mensagem que você não reconheceu. Responda em 1 ou 2 linhas, em português informal, orientando gentilmente. Não invente comandos. Exemplos do que funciona: registrar gastos (50 mercado), ver saldo, resumo, metas, recorrentes.`;
+
+export async function generateFallbackReply(texto: string): Promise<string> {
+  try {
+    const response = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 80,
+      system: FALLBACK_SYSTEM,
+      messages: [{ role: "user", content: texto }],
+    });
+    const reply = response.content[0]?.type === "text" ? response.content[0].text.trim() : "";
+    return reply || "Não entendi. Pode mandar um gasto (ex: 50 mercado) ou pedir o resumo do mês.";
+  } catch (err) {
+    log.error("generateFallbackReply falhou", err);
+    return "Não entendi. Pode mandar um gasto (ex: 50 mercado) ou pedir o resumo do mês.";
+  }
+}
+
 export async function classifyIntentWithAI(texto: string, lastCommand = ""): Promise<BotCommand | null> {
   try {
     const userContent = lastCommand

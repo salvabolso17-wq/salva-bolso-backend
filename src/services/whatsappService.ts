@@ -13,7 +13,7 @@ import { isCuriosityPhrase, buildFeaturesMenuText, isKnownCommand, isAmbiguousIn
 import { checkAndSuggestRecorrente, checkRecorrenteDuplicado, detectFrequencyIntent, upsertRecorrente, matchesKnownService } from "./modules/recurringDetection";
 import { checkAndSendInsights, checkAndSendSmartInsights, sendContextualMicroInsight, checkAndSendOnboardingTip, checkAndSendDiscoveryMessage, checkAndAlertLimite } from "./modules/insightsEngine";
 import { handleNovoMesRenda, handleNovoMesCarryover, handleOnboardingRenda, handleOnboardingFixas, handleOnboardingFixaDia, handleOnboardingFixaStatusVencida } from "./modules/onboarding";
-import { classifyIntentWithAI } from "./modules/intentAI";
+import { classifyIntentWithAI, generateFallbackReply } from "./modules/intentAI";
 import { resetInactivityNudge } from "./notificationService";
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -1669,11 +1669,11 @@ export async function processWhatsAppMessage(message: NormalizedMessage): Promis
     }
 
     try {
-      await whatsapp.sendText({ to: message.telefone, text: buildContextualHint(message.texto) });
+      await whatsapp.sendText({ to: message.telefone, text: await generateFallbackReply(message.texto) });
     } catch (err) {
       log.error("falha ao enviar mensagem de erro", err, { to: message.telefone });
     }
-    return { success: false, userId: user.id, erro: "Mensagem não reconhecida" };
+    return { success: false, userId: user.id, erro: "fallback_ai" };
   }
 
   log.parser("ok", {
